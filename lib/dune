@@ -1,0 +1,3 @@
+(library
+ (name state)
+ (libraries art logs spoke.core))
