@@ -1,5 +1,7 @@
 type ctx
 
+val make : unit -> ctx
+
 type error =
   [ `Not_enough_space
   | `End_of_input

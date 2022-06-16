@@ -1,5 +1,9 @@
 type client and server and relay
 
+type ('a, 'b) peer =
+  | Server : (server, client) peer
+  | Client : (client, server) peer
+
 type ('f, 't) src and ('f, 't) dst
 
 type ('f, 't) packet
@@ -35,7 +39,7 @@ module Server : sig
 
   val hello : g:Random.State.t -> secret:Spoke.secret -> t
   val process_packet : t -> ('a, server) src -> ('a, server) packet ->
-    [ `Continue | `Done of Spoke.shared_keys | `Close ]
+    [> `Continue | `Done of Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
@@ -46,7 +50,7 @@ module Client : sig
   val accept : t -> unit
   val refuse : t -> unit
   val process_packet : t -> ('a, client) src -> ('a, client) packet ->
-    [ `Continue | `Done of Spoke.shared_keys | `Close ]
+    [> `Continue | `Done of Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
@@ -65,6 +69,6 @@ module Relay : sig
   val delete : identity:string -> t -> unit
   val process_packet : t -> identity:string ->
    ('a, 'b) dst -> ('a, 'b) packet ->
-   [ `Continue | `Agreement of string * string ]
+   [> `Continue | `Agreement of string * string ]
   val next_packet : t -> (string * int * raw) option
 end

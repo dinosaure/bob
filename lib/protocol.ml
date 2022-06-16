@@ -5,6 +5,16 @@ type ctx =
   ; oc_buffer : bytes
   ; mutable oc_pos : int }
 
+(* XXX(dinosaure): the longest packet should be the [New_server _].
+   [04x][02x][04x][public:34 bytes][identity:<=47 bytes][\000] <= 92 bytes *)
+
+let make () =
+  { ic_buffer= Bytes.create 100
+  ; ic_pos= 0
+  ; ic_max= 0
+  ; oc_buffer= Bytes.create 100
+  ; oc_pos= 0 }
+
 type error =
   [ `Not_enough_space
   | `End_of_input

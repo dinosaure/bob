@@ -284,7 +284,7 @@ module Server = struct
   let process_packet
     : type a. t ->
       (a, server) src -> (a, server) packet ->
-      [ `Continue | `Done of Spoke.shared_keys | `Close ]
+      [> `Continue | `Done of Spoke.shared_keys | `Close ]
     = fun t source packet -> match source, packet with
     (* XXX(dinosaure): impossible cases
        - the relay sent a [spoke] error
@@ -387,7 +387,7 @@ module Client = struct
   let process_packet
     : type a.
       t -> (a, client) src -> (a, client) packet ->
-      [ `Continue | `Done of Spoke.shared_keys | `Close ]
+      [> `Continue | `Done of Spoke.shared_keys | `Close ]
     = fun t source packet -> match source, packet with
     | Relay, Spoke_failure _ -> .
 
@@ -621,7 +621,7 @@ module Relay = struct
       t -> identity:string -> (a, b) src ->
                               (a, b, c) transmit ->
                               (a, c) dst -> (a, c) packet ->
-      [ `Continue | `Agreement of string * string ]
+      [> `Continue | `Agreement of string * string ]
     = fun t ~identity src link dst packet ->
     match src, link, dst, packet with
     | Peer (_, uid), _, Relay, Relay_failure (_, err) ->
@@ -743,7 +743,7 @@ module Relay = struct
   let process_packet
     : type a b.
       t -> identity:string -> (a, b) dst -> (a, b) packet ->
-      [ `Continue | `Agreement of string * string ]
+      [> `Continue | `Agreement of string * string ]
     = fun t ~identity dst packet ->
     let src = match Art.find_opt t.uids (Art.unsafe_key identity) with
       | Some (`Client uid) -> Exists (Client, Peer (Client, uid))
