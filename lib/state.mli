@@ -53,6 +53,9 @@ end
 module Relay : sig
   type t
 
+  val make : unit -> t
+  val pp : t Fmt.t
+
   type dst_rel =
     | Relay_packet : ('a, 'b) dst * ('a, 'b) packet -> dst_rel
     | Invalid_packet of int * raw
@@ -63,5 +66,5 @@ module Relay : sig
   val process_packet : t -> identity:string ->
    ('a, 'b) dst -> ('a, 'b) packet ->
    [ `Continue | `Agreement of string * string ]
-  val next_packet : t -> (string * raw) option
+  val next_packet : t -> (string * int * raw) option
 end

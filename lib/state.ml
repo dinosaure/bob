@@ -44,10 +44,26 @@
    [New_server _] starts the handshake on the client side. A "blind"
    communication between the new server and clients can begin. Any errors
    while the handshake is reported to the **specific** client or the
-   **specific server**. These peers are removed as possible candidates on
-   both sides.
+   **specific** server. In such case, these peers are removed as possible
+   candidates on both sides.
 
-   4) the handshake
+   3) A new client => broadcast its existence to all servers
+
+   When the relay receives a new client, it will **respond** to it with all
+   available servers:
+   [client] --> [Hello_as_a_client] --> [relay]
+   [client] <--   [New_server s0]   <-- [relay]
+   [client] <--   [New_server s1]   <-- [relay]
+     ....
+   [client] <--   [New_server sN]   <-- [relay]
+
+   The reception of one [New_server _] asks the [client] to start an handshake
+   to the specific [server]. A "blind" communication between servers and the
+   new client can begin. Any errors while the handshake is reported to the
+   **specific** client or the the **specific** server. In such case, these
+   peers are remove as possible candidates on both sides.
+
+   4) The handshake
 
    The client will send [X] and its identity (sent by the relay at the
    beginning) to available servers. It will get so some errors or some valid
@@ -75,6 +91,13 @@
 
    Otherwise ([Refused] case), only candidates are deleted and connection
    are kept until a new agreement (or a timeout).
+
+   5) Timeout
+
+   The relay keeps connections until a certain time. It can decide to delete
+   a candidate because it took too much times to find a candidate. In such
+   case (the worst case), the relay emits a [Closed] packet to the peer and
+   it notices candidates of this peer that the latter is no longer available.
 *)
 
 let src = Logs.Src.create "state"
@@ -433,14 +456,34 @@ module Relay = struct
     ; gen        : unit -> int
     ; queue      : relay send Queue.t }
 
+  let pp ppf t =
+    Fmt.pf ppf "@[<hov>{ active-servers:%d;@ active-clients:%d;@ \
+                         packets:%d;@ }@]"
+      (Hashtbl.length t.clients)
+      (Hashtbl.length t.servers)
+      (Queue.length t.queue)
+
+  let make () =
+    let gen =
+      let v = ref 1 in
+      fun () ->
+        let ret = !v in
+        incr v ; if !v > 0xff then v := 1 ; ret in
+    { clients= Hashtbl.create 0x100
+    ; servers= Hashtbl.create 0x100
+    ; uids= Art.make ()
+    ; identities= Hashtbl.create 0x100
+    ; gen
+    ; queue= Queue.create () }
+
   let rec next_packet t = match Queue.pop t.queue with
     | Respond (Peer (_, uid), packet) ->
       ( match Hashtbl.find_opt t.identities uid with
-      | Some identities -> Some (identities, packet_to_raw packet)
+      | Some identitie -> Some (identitie, uid, packet_to_raw packet)
       | None -> next_packet t )
     | Transmit (_, Peer (_, uid), packet) ->
       ( match Hashtbl.find_opt t.identities uid with
-      | Some identities -> Some (identities, packet_to_raw packet)
+      | Some identitie -> Some (identitie, uid, packet_to_raw packet)
       | None -> next_packet t )
 
     | Send_to  (Relay,        Closed _)
@@ -492,10 +535,10 @@ module Relay = struct
       Relay_packet (Peer (Server, uid), Refused)
     | uid, `Spoke_failure err ->
       ( match Art.find_opt t.uids (Art.unsafe_key identity) with
-      | Some (`Server _) -> Relay_packet (Peer (Client, uid),
-                                          Spoke_failure (Server, err))
-      | Some (`Client _) -> Relay_packet (Peer (Server, uid),
-                                          Spoke_failure (Client, err))
+      | Some (`Server _) ->
+        Relay_packet (Peer (Client, uid), Spoke_failure (Server, err))
+      | Some (`Client _) ->
+        Relay_packet (Peer (Server, uid), Spoke_failure (Client, err))
       | _ -> Invalid_packet (uid, packet) )
     | uid, packet -> Invalid_packet (uid, packet)
 
@@ -597,11 +640,15 @@ module Relay = struct
     | Peer _, From_client, Peer _, _ -> .
     | Peer _, From_server, Peer _, _ -> .
 
-    | Peer (Client, _0), From_client, Relay, Hello_as_a_client ->
-      let uid = t.gen () in
-      Art.insert t.uids (Art.unsafe_key identity) (`Client uid) ;
-      Hashtbl.replace t.identities uid identity ;
-      Hashtbl.add t.clients uid (identity, all_servers t) ;
+    | Peer (Client, uid), From_client, Relay, Hello_as_a_client ->
+      let uid = match uid with
+        | 0 ->
+          let uid = t.gen () in
+          Art.insert t.uids (Art.unsafe_key identity) (`Client uid) ;
+          Hashtbl.replace t.identities uid identity ;
+          Hashtbl.add t.clients uid (identity, all_servers t) ;
+          uid
+        | uid -> uid in
       respond (to_client ~uid) (Client_identity identity) t.queue ;
       (* broadcast available servers to **the** client *)
       Hashtbl.filter_map_inplace
@@ -612,11 +659,15 @@ module Relay = struct
       Some (identity, public, clients)
       end t.servers ;
       `Continue
-    | Peer (Server, _0), From_server, Relay, Hello_as_a_server { public } ->
-      let uid = t.gen () in
-      Art.insert t.uids (Art.unsafe_key identity) (`Server uid) ;
-      Hashtbl.replace t.identities uid identity ;
-      Hashtbl.add t.servers uid (identity, public, all_clients t) ;
+    | Peer (Server, uid), From_server, Relay, Hello_as_a_server { public } ->
+      let uid = match uid with
+        | 0 ->
+          let uid = t.gen () in
+          Art.insert t.uids (Art.unsafe_key identity) (`Server uid) ;
+          Hashtbl.replace t.identities uid identity ;
+          Hashtbl.add t.servers uid (identity, public, all_clients t) ;
+          uid
+        | uid -> uid in
       respond (to_server ~uid) (Server_identity identity) t.queue ;
       (* broadcast **the** server to available clients *)
       Hashtbl.filter_map_inplace
@@ -706,7 +757,10 @@ module Relay = struct
     | Exists (_, Relay), _, _ -> .
     | _, Relay, Spoke_failure _ -> .
 
-    | _, Relay, Relay_failure _ -> assert false
+    | Exists (Client, src), Relay, Relay_failure (Client, _) ->
+      process_packet t ~identity src From_client Relay packet
+    | Exists (Server, src), Relay, Relay_failure (Server, _) ->
+      process_packet t ~identity src From_server Relay packet
 
     | Exists (Client, src), (Peer (Server, _) as dst), packet ->
       process_packet t ~identity src Blind dst packet
@@ -717,6 +771,12 @@ module Relay = struct
       process_packet t ~identity src From_client dst Hello_as_a_client
     | None, Relay, (Hello_as_a_server _ as packet) ->
       let src : _ src = Peer (Server, 0) in
+      process_packet t ~identity src From_server dst packet 
+    (* A registered client, wants to say (again) hello. *)
+    | Exists (Client, src), Relay, Hello_as_a_client ->
+      process_packet t ~identity src From_client dst packet 
+    (* A registered server, wants to say (again) hello. *)
+    | Exists (Server, src), Relay, Hello_as_a_server _ ->
       process_packet t ~identity src From_server dst packet 
 
     | Exists (_, Peer _), Relay, Closed (Peer _) -> .
@@ -729,15 +789,22 @@ module Relay = struct
     | None, Relay, Closed _ -> `Continue
 
     (* A client wants to communicate to a client. *)  
-    | Exists (_, Peer (Client, _)), Peer (Client, _), _ -> assert false
+    | Exists (_, Peer (Client, _)), Peer (Client, _), _ -> `Continue
     (* A server wants to communicate to a server. *)
-    | Exists (_, Peer (Server, _)), Peer (Server, _), _ -> assert false
+    | Exists (_, Peer (Server, _)), Peer (Server, _), _ -> `Continue
     (* An unregistered peer wants to communicate to a client. *)
-    | None, Peer (Client, _), _ -> assert false
+    | None, Peer (Client, _), _ -> `Continue
     (* An unregistered peer wants to communicate to a server. *)
-    | None, Peer (Server, _), _ -> assert false
-    (* A registered client, wants to say (again) hello. *)
-    | Exists _, Relay, Hello_as_a_client -> assert false
-    (* A registered server, wants to say (again) hello. *)
-    | Exists _, Relay, Hello_as_a_server _ -> assert false
+    | None, Peer (Server, _), _ -> `Continue
+    (* A source identified as a client wants to send an error
+       to the relay as a server. *)
+    | Exists (Client, _), Relay, Relay_failure (Server, _) -> `Continue
+    (* A source identified as a server wants to send an error
+       to the relay as a client. *)
+    | Exists (Server, _), Relay, Relay_failure (Client, _) -> `Continue
+    (* An unregistered peer wants to send an error to the relay. *)
+    | None, Relay, Relay_failure _ -> `Continue
+
+    | Exists (Client, _), Relay, Hello_as_a_server _ -> `Continue
+    | Exists (Server, _), Relay, Hello_as_a_client -> `Continue
 end
