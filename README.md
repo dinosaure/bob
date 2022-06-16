@@ -1,4 +1,4 @@
-<h1 align="center">B·o·b</h1>
+<h1 align="center">B·o·B</h1>
 <h4 align="center">A peer-to-peer file-transfer in OCaml</h4>
 <hr>
 
