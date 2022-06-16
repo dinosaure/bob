@@ -26,6 +26,7 @@ module Make (Peer : PEER) = struct
   let to_whom_I_speak = match Peer.peer with
     | `Server -> `Client
     | `Client -> `Server
+
   let receive t data =
     let rec go data = function
       | Protocol.Done (uid, packet) ->
@@ -98,4 +99,68 @@ module Client = struct
     let ic = Protocol.recv ctx in
     let oc = Protocol.Done () in
     { state; ctx; ic; oc; closed= false; }
+end
+
+module Relay = struct
+  type t =
+    { state : State.Relay.t
+    ; ctxs  : (string, Protocol.ctx) Hashtbl.t
+    ; ics   : (string, (int * State.raw) Protocol.t) Hashtbl.t
+    ; ocs   : (string, unit Protocol.t) Hashtbl.t }
+
+  let receive_from t ~identity data =
+    match Hashtbl.find_opt t.ics identity,
+          Hashtbl.find_opt t.ctxs identity with
+    | None,    None   -> `Close
+    | None,    Some _ -> Hashtbl.remove t.ctxs identity ; `Close
+    | Some _,  None   -> Hashtbl.remove t.ics  identity ; `Close
+    | Some ic, Some ctx ->
+      let rec go data = function
+        | Protocol.Done (uid, packet) ->
+          ( match State.Relay.dst_and_packet ~identity t.state uid packet with
+          | Relay_packet (dst, packet) ->
+            Hashtbl.replace t.ics identity (Protocol.recv ctx) ;
+            State.Relay.process_packet t.state ~identity dst packet
+          | _ -> `Continue )
+        | Protocol.Fail _ ->
+          Hashtbl.remove t.ics  identity ;
+          Hashtbl.remove t.ctxs identity ;
+          `Close
+        | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
+          ( match data with
+          | `End -> go data (k `End)
+          | `Data (  _,   _, 0) ->
+            Hashtbl.replace t.ics identity ic ; `Read
+          | `Data (str, off, len) ->
+            let max = min dst_len len in
+            Bytes.blit_string str off dst dst_off max ;
+            go (`Data (str, off + max, len - max)) (k (`Len max)) ) 
+        | Wr _ -> assert false in
+      go data ic
+
+  let send_to t =
+    let rec go ~identity = function
+      | Protocol.Done () ->
+        ( match State.Relay.next_packet t.state with
+        | Some (identity, uid, packet) ->
+          ( match Hashtbl.find_opt t.ctxs identity with
+          | None -> `Close identity
+          | Some ctx ->
+            go ~identity (Protocol.send_packet ctx (uid, packet)) )
+        | None ->
+          Hashtbl.replace t.ocs identity (Done ()) ; `Continue )
+      | Protocol.Fail _ ->
+        Hashtbl.remove t.ocs  identity ;
+        Hashtbl.remove t.ctxs identity ;
+        `Close identity
+      | Wr { str; off; len; k; } ->
+        Hashtbl.replace t.ocs identity (k len) ;
+        `Write (identity, String.sub str off len)
+      | Rd _ -> assert false in
+    match State.Relay.next_packet t.state with
+    | Some (identity, uid, packet) ->
+      ( match Hashtbl.find_opt t.ctxs identity with
+      | None -> `Close identity
+      | Some ctx -> go ~identity (Protocol.send_packet ctx (uid, packet)) )
+    | None -> `Continue
 end

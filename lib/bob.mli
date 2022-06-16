@@ -31,3 +31,16 @@ module Client : sig
     |  `Write of string
     |  `Error of Protocol.error ]
 end
+
+module Relay : sig
+  type t
+
+  val receive_from : t -> identity:string ->
+    [ `End | `Data of (string * int * int) ] ->
+    [> `Continue | `Close | `Agreement of string * string | `Read ]
+
+  val send_to : t ->
+    [> `Continue 
+    |  `Close of string
+    |  `Write of string * string ]
+end
