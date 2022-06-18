@@ -104,33 +104,49 @@ end
 module Relay = struct
   type t =
     { state : State.Relay.t
-    ; ctxs  : (string, Protocol.ctx) Hashtbl.t
-    ; ics   : (string, (int * State.raw) Protocol.t) Hashtbl.t
-    ; ocs   : (string, unit Protocol.t) Hashtbl.t }
+    ; ctxs  : Protocol.ctx Art.t
+    ; ics   : (int * State.raw) Protocol.t Art.t
+    ; ocs   : unit Protocol.t Art.t }
+
+  let make () =
+    { state= State.Relay.make ()
+    ; ctxs= Art.make ()
+    ; ics=  Art.make ()
+    ; ocs=  Art.make () }
+
+  let replace art key value =
+    ( match Art.find_opt art key with
+    | Some _ ->
+      Art.remove art key ;
+      Art.insert art key value
+    | None -> Art.insert art key value )
 
   let receive_from t ~identity data =
-    match Hashtbl.find_opt t.ics identity,
-          Hashtbl.find_opt t.ctxs identity with
+    let identity = Art.unsafe_key identity in
+    match Art.find_opt t.ics identity,
+          Art.find_opt t.ctxs identity with
     | None,    None   -> `Close
-    | None,    Some _ -> Hashtbl.remove t.ctxs identity ; `Close
-    | Some _,  None   -> Hashtbl.remove t.ics  identity ; `Close
+    | None,    Some _ -> Art.remove t.ctxs identity ; `Close
+    | Some _,  None   -> Art.remove t.ics  identity ; `Close
     | Some ic, Some ctx ->
       let rec go data = function
         | Protocol.Done (uid, packet) ->
-          ( match State.Relay.dst_and_packet ~identity t.state uid packet with
+          ( match State.Relay.dst_and_packet
+                    ~identity:(identity :> string) t.state uid packet with
           | Relay_packet (dst, packet) ->
-            Hashtbl.replace t.ics identity (Protocol.recv ctx) ;
-            State.Relay.process_packet t.state ~identity dst packet
+            replace t.ics identity (Protocol.recv ctx) ;
+            State.Relay.process_packet t.state
+              ~identity:(identity :> string) dst packet
           | _ -> `Continue )
         | Protocol.Fail _ ->
-          Hashtbl.remove t.ics  identity ;
-          Hashtbl.remove t.ctxs identity ;
+          Art.remove t.ics  identity ;
+          Art.remove t.ctxs identity ;
           `Close
         | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
           ( match data with
           | `End -> go data (k `End)
           | `Data (  _,   _, 0) ->
-            Hashtbl.replace t.ics identity ic ; `Read
+            replace t.ics identity ic ; `Read
           | `Data (str, off, len) ->
             let max = min dst_len len in
             Bytes.blit_string str off dst dst_off max ;
@@ -143,24 +159,26 @@ module Relay = struct
       | Protocol.Done () ->
         ( match State.Relay.next_packet t.state with
         | Some (identity, uid, packet) ->
-          ( match Hashtbl.find_opt t.ctxs identity with
+          ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
           | None -> `Close identity
           | Some ctx ->
             go ~identity (Protocol.send_packet ctx (uid, packet)) )
         | None ->
-          Hashtbl.replace t.ocs identity (Done ()) ; `Continue )
+          replace t.ocs (Art.unsafe_key identity) (Done ()) ; `Continue )
       | Protocol.Fail _ ->
-        Hashtbl.remove t.ocs  identity ;
-        Hashtbl.remove t.ctxs identity ;
-        `Close identity
+        let identity = Art.unsafe_key identity in
+        Art.remove t.ocs  identity ;
+        Art.remove t.ctxs identity ;
+        `Close (identity :> string)
       | Wr { str; off; len; k; } ->
-        Hashtbl.replace t.ocs identity (k len) ;
+        replace t.ocs (Art.unsafe_key identity) (k len) ;
         `Write (identity, String.sub str off len)
       | Rd _ -> assert false in
     match State.Relay.next_packet t.state with
     | Some (identity, uid, packet) ->
-      ( match Hashtbl.find_opt t.ctxs identity with
+      ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
       | None -> `Close identity
-      | Some ctx -> go ~identity (Protocol.send_packet ctx (uid, packet)) )
+      | Some ctx ->
+        go ~identity (Protocol.send_packet ctx (uid, packet)) )
     | None -> `Continue
 end

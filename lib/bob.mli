@@ -35,6 +35,8 @@ end
 module Relay : sig
   type t
 
+  val make : unit -> t
+
   val receive_from : t -> identity:string ->
     [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Close | `Agreement of string * string | `Read ]
