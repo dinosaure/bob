@@ -2,6 +2,8 @@ type ctx
 
 val make : unit -> ctx
 
+val income_is_empty : ctx -> bool
+
 type error =
   [ `Not_enough_space
   | `End_of_input

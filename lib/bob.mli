@@ -8,7 +8,7 @@ module Server : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done  of Spoke.shared_keys
+    |  `Done  of string * Spoke.shared_keys
     |  `Error of Protocol.error ]
 
   val send : t ->
@@ -24,7 +24,7 @@ module Client : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done  of Spoke.shared_keys
+    |  `Done  of string * Spoke.shared_keys
     |  `Error of Protocol.error ]
 
   val send : t ->
@@ -43,6 +43,8 @@ module Relay : sig
 
   val make : unit -> t
   val new_peer : t -> identity:string -> unit
+  val rem_peer : t -> identity:string -> unit
+  val exists : t -> identity:string -> bool
 
   val receive_from : t -> identity:string ->
     [ `End | `Data of (string * int * int) ] ->

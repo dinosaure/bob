@@ -170,22 +170,59 @@ let sigwr fd =
     Hashtbl.remove pwr fd ;
     Ivar.fill ivar len
 
+module Time = struct
+  type t = float
+  type sleep = { time : t; ivar : unit Ivar.t; }
+
+  module Queue = Binary_heap.Make (struct
+    type t = sleep
+    let compare { time= t1; _ } { time= t2; _ } = Float.compare t1 t2
+  end)
+
+  let sleep_queue =
+    let dummy = { time= Unix.gettimeofday (); ivar= Ivar.create (); } in
+    Queue.create ~dummy 0
+
+  let new_sleeps = ref []
+
+  let sleep v =
+    let ivar = Ivar.create () in
+    let time = Float.add (Unix.gettimeofday ()) v in
+    let sleeper = { time; ivar; } in
+    new_sleeps := sleeper :: !new_sleeps ; wait ivar
+
+  let rec sleepers acc =
+    match Queue.minimum sleep_queue with
+    | exception Binary_heap.Empty -> List.rev acc
+    | { time; ivar; } when time = 0. || time < Unix.gettimeofday () ->
+      Queue.remove sleep_queue ;
+      sleepers (ivar :: acc)
+    | _ -> List.rev acc
+
+  let register_sleepers () =
+    List.iter (Queue.add sleep_queue) !new_sleeps ;
+    new_sleeps := []
+end
+
+let sleep = Time.sleep
+
 let run fiber =
   let result = ref None in
   fiber (fun x -> result := Some x) ;
   let rec loop () =
-    Log.debug (fun m -> m "Start to resolve once the given fiber.") ;
+    Time.register_sleepers () ;
     let rds = Hashtbl.fold (fun socket _ivar rds -> socket :: rds) prd [] in
     let wrs = Hashtbl.fold (fun socket _ivar wrs -> socket :: wrs) pwr [] in
-    let ready_rds, ready_wrs, _ = Unix.select rds wrs [] 0.1 in
-    Log.debug (fun m -> m "[%4d] readers, [%4d] writers."
-      (List.length ready_rds) (List.length ready_wrs)) ;
+    let fbs = to_list root in
+    let slp = Time.sleepers [] in
 
-    let fibers = to_list root in
-    Log.debug (fun m -> m "[%4d] fibers." (List.length fibers)) ;
-    List.iter (fun (Fiber (k, ivar)) -> k ivar (fun () -> ())) fibers ;
+    let ready_rds, ready_wrs, _ = Unix.select rds wrs [] 0.1 in
+
+    List.iter (fun (Fiber (k, ivar)) -> k ivar (fun () -> ())) fbs ;
+    List.iter (fun ivar -> Ivar.fill ivar ()) slp ;
     List.iter sigrd ready_rds ;
     List.iter sigwr ready_wrs ;
+
     if !result = None
     then loop () in
   loop () ; match !result with

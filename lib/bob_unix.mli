@@ -5,11 +5,11 @@ type error =
 val pp_error : error Fmt.t
 
 val server : Unix.file_descr -> g:Random.State.t -> secret:Spoke.secret ->
-  (Spoke.shared_keys, error) result Fiber.t
+  (string * Spoke.shared_keys, error) result Fiber.t
 
 val client : Unix.file_descr -> choose:[ `Accept | `Refuse ] Fiber.Ivar.t ->
   g:Random.State.t -> password:string ->
-  ([ `Accepted_with of Spoke.shared_keys
+  ([ `Accepted_with of string * Spoke.shared_keys
    | `Refused ], error) result Fiber.t
 
 val serve_when_ready :

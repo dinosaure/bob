@@ -1,9 +1,11 @@
 (executable
  (name cat)
+ (public_name bob.cat)
  (modules cat)
  (libraries bob.fiber))
 
 (executable
  (name bob)
+ (public_name bob)
  (modules bob)
  (libraries fmt.tty logs.fmt bob.unix))

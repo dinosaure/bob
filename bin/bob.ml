@@ -64,7 +64,10 @@ let run_client password =
     Logs.debug (fun m -> m "The client is connected to the relay.") ;
     let choose = Fiber.Ivar.full `Accept in
     Bob_unix.client socket ~choose ~g ~password >>= function
-    | Ok _shared_keys -> Fiber.return ()
+    | Ok (`Accepted_with (identity, _shared_keys)) ->
+      Fmt.pr "Handshake done with %s.\n%!" identity ;
+      Fiber.return ()
+    | Ok `Refused -> Fiber.return ()
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
       Fiber.return ()
@@ -82,7 +85,9 @@ let run_server password =
     Fiber.return ()
   | Ok () ->
     Bob_unix.server socket ~g ~secret >>= function
-    | Ok _shared_keys -> Fiber.return ()
+    | Ok (identity, _shared_keys) ->
+      Fmt.pr "Handshake done with %s.\n%!" identity ;
+      Fiber.return ()
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
       Fiber.return ()

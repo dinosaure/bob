@@ -17,9 +17,9 @@ type raw =
   | `Client_validator of string
   | `Y_and_server_validator of string * string
   | `X_and_client_identity of string * string
-  | `Agreement
+  | `Agreement of string
   | `Closed of int
-  | `Accepted
+  | `Accepted of string
   | `Refused
   | `Relay_failure of [ `Invalid_client of int
                       | `Invalid_server of int
@@ -41,7 +41,7 @@ module Server : sig
 
   val hello : g:Random.State.t -> secret:Spoke.secret -> t
   val process_packet : t -> ('a, server) src -> ('a, server) packet ->
-    [> `Continue | `Done of Spoke.shared_keys | `Close ]
+    [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
@@ -52,7 +52,7 @@ module Client : sig
   val accept : t -> unit
   val refuse : t -> unit
   val process_packet : t -> ('a, client) src -> ('a, client) packet ->
-    [> `Continue | `Done of Spoke.shared_keys | `Close ]
+    [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
@@ -68,6 +68,7 @@ module Relay : sig
 
   val dst_and_packet : identity:string -> t -> int -> raw -> dst_rel
 
+  val exists : identity:string -> t -> bool
   val delete : identity:string -> t -> unit
   val process_packet : t -> identity:string ->
    ('a, 'b) dst -> ('a, 'b) packet ->
