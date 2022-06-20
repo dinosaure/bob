@@ -178,6 +178,40 @@ type raw =
                       | `No_handshake_with of int ]
   | `Spoke_failure of Spoke.error ]
 
+let to_hex str =
+  let res = Bytes.create (String.length str * 2) in
+  let int_to_hex n =
+    if n < 10 then Char.chr (n + Char.code '0')
+    else Char.chr (n - 10 + Char.code 'a') in
+  for i = 0 to String.length str - 1 do
+    let n = Char.code str.[i] in
+    Bytes.set res (2 * i) (int_to_hex ((n land 0xf0) lsr 4)) ;
+    Bytes.set res (2 * i + 1) (int_to_hex (n land 0x0f)) ;
+  done ; Bytes.unsafe_to_string res
+
+let pp_raw ppf = function
+  | `Hello_as_a_server public ->
+    Fmt.pf ppf "@{<1>(Hello_as_a_server@ %s)@]"
+      (to_hex (Spoke.public_to_string public))
+  | `Hello_as_a_client ->
+    Fmt.pf ppf "Hello_as_a_client"
+  | `Server_identity str ->
+    Fmt.pf ppf "@[<1>(Server_identity@ %s)@]" str
+  | `Client_identity str ->
+    Fmt.pf ppf "@[<1>(Client_identity@ %s)@]" str
+  | `New_server (uid, public, identity) ->
+    Fmt.pf ppf "@[<1>(New_server@ %04d@ %s@ %s)@]"
+      uid (to_hex (Spoke.public_to_string public)) identity
+  | `Client_validator _ -> Fmt.pf ppf "Client_validator"
+  | `Y_and_server_validator _ -> Fmt.pf ppf "Y_and_server_validator"
+  | `X_and_client_identity _ -> Fmt.pf ppf "X_and_client_identity"
+  | `Agreement -> Fmt.pf ppf "Agreement"
+  | `Closed uid -> Fmt.pf ppf "@[<1>(Closed@ %04x)@]" uid
+  | `Accepted -> Fmt.pf ppf "Accepted"
+  | `Refused -> Fmt.pf ppf "Refused"
+  | `Relay_failure _ -> Fmt.pf ppf "Relay_failure"
+  | `Spoke_failure _ -> Fmt.pf ppf "Spoke_failure"
+
 let packet_to_raw
   : type f t. (f, t) packet -> raw
   = function
@@ -305,7 +339,7 @@ module Server = struct
     | Peer (Client, uid), X_and_client_identity { _X; identity; } ->
       ( match Spoke.server_compute ~g:t.g ~secret:t.secret
           ~identity:(identity, t.identity) _X with
-      | Ok (state, (server_validator, _Y)) ->
+      | Ok (state, (_Y, server_validator)) ->
         Hashtbl.add t.clients uid state ;
         let packet = Y_and_server_validator { _Y; server_validator; } in
         send_to (to_client ~uid) packet t.queue ;
@@ -368,13 +402,15 @@ module Client = struct
       Some (000, packet_to_raw packet)
     | exception Queue.Empty -> None
 
-  let make ~g ~password ~identity =
+  let hello ~g ~password ~identity =
+    let queue = Queue.create () in
+    send_to to_relay Hello_as_a_client queue ;
     { password
     ; identity
     ; shared_keys= None
     ; g
     ; servers= Hashtbl.create 0x10
-    ; queue= Queue.create () }
+    ; queue }
 
   let accept t = match t.shared_keys with
     | Some (uid, _) -> send_to (to_server ~uid) Accepted t.queue
@@ -403,6 +439,7 @@ module Client = struct
       t.identity <- identity ;
       `Continue
     | Relay, New_server { uid; public; identity; } ->
+      Log.debug (fun m -> m "A new server (%04x, %s) is available." uid identity) ;
       ( match Spoke.hello ~g:t.g ~public t.password with
       | Ok (state, _X) ->
         Hashtbl.add t.servers uid (state, identity) ;
@@ -479,11 +516,12 @@ module Relay = struct
   let rec next_packet t = match Queue.pop t.queue with
     | Respond (Peer (_, uid), packet) ->
       ( match Hashtbl.find_opt t.identities uid with
-      | Some identitie -> Some (identitie, uid, packet_to_raw packet)
+      | Some identity -> Some (identity, 00, packet_to_raw packet)
       | None -> next_packet t )
-    | Transmit (_, Peer (_, uid), packet) ->
-      ( match Hashtbl.find_opt t.identities uid with
-      | Some identitie -> Some (identitie, uid, packet_to_raw packet)
+    | Transmit (Peer (_, from_uid), Peer (_, to_uid), packet) ->
+      Log.debug (fun m -> m "Transmit a packet from %04x to %04x." from_uid to_uid) ;
+      ( match Hashtbl.find_opt t.identities to_uid with
+      | Some identity -> Some (identity, from_uid, packet_to_raw packet)
       | None -> next_packet t )
 
     | Send_to  (Relay,        Closed _)
@@ -500,6 +538,7 @@ module Relay = struct
     | Transmit (Relay,  Relay, Relay_failure _) -> .
     | Transmit (Relay,  Relay, Spoke_failure _) -> .
     | Transmit (Peer _, Relay, _)               -> .
+    | Transmit (Relay, Peer _, _)               -> .
 
     | exception Queue.Empty -> None
 

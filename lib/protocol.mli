@@ -11,6 +11,8 @@ type error =
   | `Invalid_uid
   | Spoke.error ]
 
+val pp_error : error Fmt.t
+
 type 'a t =
   | Rd of { buf : bytes; off : int; len : int; k : 'a krd }
   | Wr of { str : string; off : int; len : int; k : 'a kwr }

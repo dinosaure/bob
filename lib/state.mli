@@ -26,6 +26,8 @@ type raw =
                       | `No_handshake_with of int ]
   | `Spoke_failure of Spoke.error ]
 
+val pp_raw : raw Fmt.t
+
 type src_rel =
   | Server_packet : ('a, server) src * ('a, server) packet -> src_rel
   | Client_packet : ('a, client) src * ('a, client) packet -> src_rel
@@ -46,7 +48,7 @@ end
 module Client : sig
   type t
 
-  val make : g:Random.State.t -> password:string -> identity:string -> t
+  val hello : g:Random.State.t -> password:string -> identity:string -> t
   val accept : t -> unit
   val refuse : t -> unit
   val process_packet : t -> ('a, client) src -> ('a, client) packet ->

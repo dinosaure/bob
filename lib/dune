@@ -1,3 +1,17 @@
 (library
  (name bob)
- (libraries art logs spoke.core))
+ (public_name bob)
+ (modules state protocol bob)
+ (libraries hxd.core hxd.string art logs spoke.core))
+
+(library
+ (name fiber)
+ (public_name bob.fiber)
+ (modules fiber)
+ (libraries logs unix))
+
+(library
+ (name bob_unix)
+ (public_name bob.unix)
+ (modules bob_unix)
+ (libraries hxd.core hxd.string bob bob.fiber))

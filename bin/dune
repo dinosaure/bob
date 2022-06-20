@@ -1,0 +1,9 @@
+(executable
+ (name cat)
+ (modules cat)
+ (libraries bob.fiber))
+
+(executable
+ (name bob)
+ (modules bob)
+ (libraries fmt.tty logs.fmt bob.unix))

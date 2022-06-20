@@ -1,4 +1,5 @@
 module Protocol = Protocol
+module State = State
 
 module Server : sig
   type t
@@ -30,12 +31,18 @@ module Client : sig
     [> `Continue
     |  `Write of string
     |  `Error of Protocol.error ]
+
+  val finish : t -> [ `Accept | `Refuse ] ->
+    ([> `Done
+     |  `Write of string * (unit -> 'a)
+     |  `Error of Protocol.error ] as 'a)
 end
 
 module Relay : sig
   type t
 
   val make : unit -> t
+  val new_peer : t -> identity:string -> unit
 
   val receive_from : t -> identity:string ->
     [ `End | `Data of (string * int * int) ] ->

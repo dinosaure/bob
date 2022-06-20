@@ -1,3 +1,6 @@
+let src = Logs.Src.create "bob.core"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module State = State
 module Protocol = Protocol
 
@@ -30,6 +33,7 @@ module Make (Peer : PEER) = struct
   let receive t data =
     let rec go data = function
       | Protocol.Done (uid, packet) ->
+        Log.debug (fun m -> m "Receive a new packet from %04x: %a" uid State.pp_raw packet) ;
         t.ic <- Protocol.recv t.ctx ;
         let src_rel = State.src_and_packet ~peer:to_whom_I_speak uid packet in
 
@@ -69,7 +73,10 @@ module Server = struct
     let peer = `Server
     let src_and_packet = function
       | State.Server_packet (src, packet) -> Some (Income (src, packet))
-      | _ -> None
+      | State.Client_packet (_src, _packet) ->
+        Log.warn (fun m -> m "Got an unexpected client packet.") ; None
+      | State.Invalid_packet (uid, packet) ->
+        Log.warn (fun m -> m "Got an invalid packet (%04x): %a" uid State.pp_raw packet) ; None
 
     include State.Server end)
 
@@ -89,16 +96,34 @@ module Client = struct
     let peer = `Client
     let src_and_packet = function
       | State.Client_packet (src, packet) -> Some (Income (src, packet))
-      | _ -> None
+      | State.Server_packet (_src, _packet) ->
+        Log.warn (fun m -> m "Got an unexpected server packet.") ; None
+      | State.Invalid_packet (uid, packet) ->
+        Log.warn (fun m -> m "Got an invalid packet (%04x): %a" uid State.pp_raw packet) ; None
 
     include State.Client end)
 
   let make ~g ~password ~identity =
-    let state = State.Client.make ~g ~password ~identity in
+    let state = State.Client.hello ~g ~password ~identity in
     let ctx = Protocol.make () in
     let ic = Protocol.recv ctx in
     let oc = Protocol.Done () in
     { state; ctx; ic; oc; closed= false; }
+
+  let finish t =
+    let rec go = function
+      | Protocol.Done () ->
+        ( match State.Client.next_packet t.state with
+        | Some (uid, packet) -> go (Protocol.send_packet t.ctx (uid, packet))
+        | None -> `Done )
+      | Protocol.Fail err -> `Error err
+      | Wr { str; off; len; k; } ->
+        let k () = t.oc <- k len ; go t.oc in
+        `Write (String.sub str off len, k)
+      | Rd _ -> assert false in
+    function
+    | `Accept -> State.Client.accept t.state ; go t.oc
+    | `Refuse -> State.Client.refuse t.state ; go t.oc
 end
 
 module Relay = struct
@@ -121,6 +146,12 @@ module Relay = struct
       Art.insert art key value
     | None -> Art.insert art key value )
 
+  let new_peer t ~identity =
+    let ctx = Protocol.make () in
+    let identity = Art.unsafe_key identity in
+    Art.insert t.ctxs identity ctx ;
+    Art.insert t.ics identity (Protocol.recv ctx)
+
   let receive_from t ~identity data =
     let identity = Art.unsafe_key identity in
     match Art.find_opt t.ics identity,
@@ -131,6 +162,7 @@ module Relay = struct
     | Some ic, Some ctx ->
       let rec go data = function
         | Protocol.Done (uid, packet) ->
+          Log.debug (fun m -> m "Got a new packet %04x:%a" uid State.pp_raw packet) ;
           ( match State.Relay.dst_and_packet
                     ~identity:(identity :> string) t.state uid packet with
           | Relay_packet (dst, packet) ->
@@ -138,11 +170,13 @@ module Relay = struct
             State.Relay.process_packet t.state
               ~identity:(identity :> string) dst packet
           | _ -> `Continue )
-        | Protocol.Fail _ ->
+        | Protocol.Fail err ->
+          Log.err (fun m -> m "Got an error from %s: %a" (identity :> string) Protocol.pp_error err) ;
           Art.remove t.ics  identity ;
           Art.remove t.ctxs identity ;
           `Close
         | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
+          Log.debug (fun m -> m "The protocol expects more bytes.") ;
           ( match data with
           | `End -> go data (k `End)
           | `Data (  _,   _, 0) ->
@@ -159,13 +193,15 @@ module Relay = struct
       | Protocol.Done () ->
         ( match State.Relay.next_packet t.state with
         | Some (identity, uid, packet) ->
+          Log.debug (fun m -> m "Send new packet %04x:%a" uid State.pp_raw packet) ;
           ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
           | None -> `Close identity
           | Some ctx ->
             go ~identity (Protocol.send_packet ctx (uid, packet)) )
         | None ->
           replace t.ocs (Art.unsafe_key identity) (Done ()) ; `Continue )
-      | Protocol.Fail _ ->
+      | Protocol.Fail err ->
+        Log.err (fun m -> m "Got an error from %s: %a" identity Protocol.pp_error err) ;
         let identity = Art.unsafe_key identity in
         Art.remove t.ocs  identity ;
         Art.remove t.ctxs identity ;
@@ -176,6 +212,8 @@ module Relay = struct
       | Rd _ -> assert false in
     match State.Relay.next_packet t.state with
     | Some (identity, uid, packet) ->
+      Log.debug (fun m -> m "Send a new packet to [%04x|%s]: %a"
+        uid identity State.pp_raw packet) ;
       ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
       | None -> `Close identity
       | Some ctx ->

@@ -1,3 +1,6 @@
+let src = Logs.Src.create "bob.protocol"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 type ctx =
   { ic_buffer : bytes
   ; mutable ic_pos : int
@@ -9,11 +12,20 @@ type ctx =
    [04x][02x][04x][public:34 bytes][identity:<=47 bytes][\000] <= 92 bytes *)
 
 let make () =
-  { ic_buffer= Bytes.create 100
+  { ic_buffer= Bytes.create 102
   ; ic_pos= 0
   ; ic_max= 0
-  ; oc_buffer= Bytes.create 100
+  ; oc_buffer= Bytes.create 102
   ; oc_pos= 0 }
+
+let pp ppf { ic_buffer; ic_pos; ic_max; oc_buffer; oc_pos; } =
+  Fmt.pf ppf "{ @[<hov>ic_buffer= %S;@ \
+                       ic_pos= %d;@ \
+                       ic_max= %d;@ \
+                       oc_buffer= %S;@ \
+                       oc_pos= %d;@] }"
+    (Bytes.unsafe_to_string ic_buffer) ic_pos ic_max
+    (Bytes.unsafe_to_string oc_buffer) oc_pos
 
 type error =
   [ `Not_enough_space
@@ -23,6 +35,15 @@ type error =
   | `Invalid_new_server
   | `Invalid_uid
   | Spoke.error ]
+
+let pp_error ppf = function
+  | `Not_enough_space -> Fmt.string ppf "Not enough space"
+  | `End_of_input -> Fmt.string ppf "End of input"
+  | `Invalid_packet packet -> Fmt.pf ppf "Invalid packet (%02x)" packet
+  | `Invalid_header -> Fmt.pf ppf "Invalid header"
+  | `Invalid_new_server -> Fmt.string ppf "Invalid new server"
+  | `Invalid_uid -> Fmt.string ppf "Invalid UID"
+  | #Spoke.error as err -> Spoke.pp_error ppf err
 
 type 'a t =
   | Rd of { buf : bytes; off : int; len : int; k : 'a krd }
@@ -96,6 +117,8 @@ let pp_packet ppf = function
     Fmt.pf ppf "%04x%s%s\000" uid (Spoke.public_to_string public) server_identity
   | `Client_validator str -> Fmt.string ppf str
   | `Y_and_server_validator (_Y, server_validator) ->
+    assert (String.length _Y = 32) ;
+    assert (String.length server_validator = 64) ;
     Fmt.pf ppf "%s%s" _Y server_validator
   | `X_and_client_identity (_X, client_identity) ->
     Fmt.pf ppf "%s%s\000" _X client_identity
@@ -114,6 +137,9 @@ let pp_packet ppf = function
 
 let send_packet ctx (uid, packet) =
   safe begin fun ctx ->
+  Log.debug (fun m -> m "Write into the internal buffer the new packet (uid:%04x): %a"
+    uid State.pp_raw packet) ;
+  Log.debug (fun m -> m "%a" pp ctx) ;
   write_fmt ctx "%04x" uid ;
   write_fmt ctx "%02x" (uid_of_packet packet) ;
   write_fmt ctx "%a" pp_packet packet ;
@@ -152,7 +178,7 @@ let of_hex ~off ~len buf =
       let c1 = hex_of_chr (Bytes.get buf (off + 2 * i + 1)) in
       res := (!res * 256) + ((c0 lsl 4) lor c1)
     done ; Ok !res
-  with Invalid_argument _ -> Error (`Msg "Invalid hex")
+  with Invalid_argument _ -> Error (`Msg (Fmt.str "Invalid hex: %S" (Bytes.sub_string buf off len)))
 
 let of_hex_exn ~off ~len buf =
   match of_hex ~off ~len buf with
@@ -171,7 +197,7 @@ let exists ~chr ctx =
 
 let prompt_fixed ~len:required k ctx =
   let rec go off =
-    if off = Bytes.length ctx.ic_buffer
+    if off > Bytes.length ctx.ic_buffer
     then Fail `Not_enough_space
     else if off - ctx.ic_pos < 6 + required
     then let k = function `Len len -> go (off + len) | `End -> Fail `End_of_input in
@@ -185,7 +211,7 @@ let prompt_fixed ~len:required k ctx =
 
 let prompt_until ~min:required ~chr k ctx =
   let rec go off =
-    if off = Bytes.length ctx.ic_buffer
+    if off > Bytes.length ctx.ic_buffer
     then Fail `Not_enough_space
     else if off - ctx.ic_pos < 6 + required
          || not (exists ~chr { ctx with ic_max = off })
@@ -199,23 +225,25 @@ let prompt_until ~min:required ~chr k ctx =
   go ctx.ic_max
 
 let prompt k ctx = 
-  if ctx.oc_pos > 0
+  if ctx.ic_pos > 0
   then begin
+    Log.debug (fun m -> m "Compress %a" pp ctx) ;
     let rest = ctx.ic_max - ctx.ic_pos in
     Bytes.blit ctx.ic_buffer ctx.ic_pos ctx.ic_buffer 0 rest ;
     ctx.ic_max <- rest ;
     ctx.ic_pos <- 0 end ;
   let rec go off =
-    if off = Bytes.length ctx.ic_buffer
-    then Fail `Not_enough_space
+    if off > Bytes.length ctx.ic_buffer
+    then ( Log.err (fun m -> m "%a" pp ctx)
+         ; Fail `Not_enough_space )
     else if off - ctx.ic_pos < 6 (* [%04x%02x] *)
     then let k = function `Len len -> go (off + len) | `End -> Fail `End_of_input in
          Rd { buf= ctx.ic_buffer
             ; off= off
             ; len= Bytes.length ctx.ic_buffer - off
             ; k }
-    else match of_hex ~off:off ~len:4 ctx.ic_buffer,
-               of_hex ~off:(off + 4) ~len:2 ctx.ic_buffer with
+    else match of_hex ~off:ctx.ic_pos ~len:4 ctx.ic_buffer,
+               of_hex ~off:(ctx.ic_pos + 4) ~len:2 ctx.ic_buffer with
     | Ok _, Ok packet ->
       ( match len_of_packet packet with
       | `Fixed 000 -> ctx.ic_max <- off ; safe k ctx
@@ -223,6 +251,9 @@ let prompt k ctx =
       | `Until (min, chr) -> ctx.ic_max <- off ; prompt_until ~min ~chr k ctx
       | exception _ -> Fail (`Invalid_packet packet) )
     | Error _, _ | _, Error _ ->
+      Log.err (fun m -> m "Invalid header with: @[<hov>%a@]"
+        (Hxd_string.pp Hxd.default) (Bytes.sub_string ctx.ic_buffer off 6)) ;
+      Log.err (fun m -> m "%a" pp ctx) ;
       Fail `Invalid_header in
   go ctx.ic_max
 
@@ -235,31 +266,34 @@ let packet_of_bytes ~pkt ~off buf = match pkt with
   | 01 -> Ok (0, `Hello_as_a_client)
   | 02 ->
     let len = Bytes.index_from buf off '\000' in
+    let len = len - off in
     let str = Bytes.sub_string buf off len in
     Ok (len + 1, `Server_identity str)
   | 03 ->
     let len = Bytes.index_from buf off '\000' in
+    let len = len - off in
     let str = Bytes.sub_string buf off len in
     Ok (len + 1, `Client_identity str)
   | 04 ->
-    let len = Bytes.index_from buf off '\000' in
+    let len = Bytes.index_from buf (off + 4 + 34) '\000' in
+    let len = len - (off + 4 + 34) in
     ( match of_hex ~off ~len:4 buf,
             Spoke.public_of_string (Bytes.sub_string buf (off + 4) 34) with
     | Ok uid, Ok public ->
-      let len = len - 34 - 4 in
       let str = Bytes.sub_string buf (off + 4 + 34) len in
       Ok (4 + 34 + len + 1, `New_server (uid, public, str))
     | Error _, _ -> Error `Invalid_new_server
     | _, Error err -> Error err )
-  | 05 -> Ok (32, `Client_validator (Bytes.sub_string buf off 32))
+  | 05 -> Ok (64, `Client_validator (Bytes.sub_string buf off 64))
   | 06 ->
     let _Y = Bytes.sub_string buf off 32 in
-    let server_validator = Bytes.sub_string buf (off + 32) 32 in
-    Ok (64, `Y_and_server_validator (_Y, server_validator))
+    let server_validator = Bytes.sub_string buf (off + 32) 64 in
+    Ok (96, `Y_and_server_validator (_Y, server_validator))
   | 07 ->
-    let len = Bytes.index_from buf off '\000' in
+    let len = Bytes.index_from buf (off + 32) '\000' in
+    let len = len - (off + 32) in
     let _X = Bytes.sub_string buf off 32 in
-    let client_identity = Bytes.sub_string buf (off + 32) (len - 32) in
+    let client_identity = Bytes.sub_string buf (off + 32) len in
     Ok (32 + len + 1, `X_and_client_identity (_X, client_identity))
   | 08 -> Ok (0, `Agreement)
   | 09 ->
@@ -290,6 +324,8 @@ let recv ctx =
     let uid = of_hex_exn ~off:ctx.ic_pos ~len:4 ctx.ic_buffer in
     let pkt = of_hex_exn ~off:(ctx.ic_pos + 4) ~len:2 ctx.ic_buffer in
     match packet_of_bytes ~pkt ~off:(ctx.ic_pos + 6) ctx.ic_buffer with
-    | Ok (shift, raw) -> ctx.ic_pos <- ctx.ic_pos + 6 + shift ; Done (uid, raw)
+    | Ok (shift, raw) ->
+      Log.debug (fun m -> m "Shift the internal buffer to %d byte(s)." (6 + shift)) ;
+      ctx.ic_pos <- ctx.ic_pos + 6 + shift ; Done (uid, raw)
     | Error err -> Fail err in
   prompt k ctx
