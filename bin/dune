@@ -9,3 +9,8 @@
  (public_name bob)
  (modules bob)
  (libraries fmt.tty logs.fmt bob.unix))
+
+(rule
+ (target bob.com)
+ (mode promote)
+ (action (copy %{bin:bob} %{target})))

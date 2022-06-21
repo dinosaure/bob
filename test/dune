@@ -1,2 +1,11 @@
 (cram
  (deps %{bin:bob} ../bin/cat.exe))
+
+(executable
+ (name protocol)
+ (modules protocol)
+ (libraries logs.fmt fmt.tty bob alcotest))
+
+(rule
+ (alias runtest)
+ (action (run ./protocol.exe --color=always)))

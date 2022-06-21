@@ -8,10 +8,23 @@ type ctx =
   ; oc_buffer : bytes
   ; mutable oc_pos : int }
 
+let _pp ppf ctx =
+  Fmt.pf ppf "{ @[<hov>ic_buffer=@[<hov>%a@];@ \
+                       ic_pos=%d;@ \
+                       ic_max=%d;@ \
+                       oc_buffer=@[<hov>%a@];@ \
+                       oc_pos=%d;@] }"
+    (Hxd_string.pp Hxd.default) (Bytes.to_string ctx.ic_buffer)
+    ctx.ic_pos ctx.ic_max
+    (Hxd_string.pp Hxd.default) (Bytes.to_string ctx.oc_buffer)
+    ctx.oc_pos
+
 let income_is_empty { ic_pos; ic_max; _ } = ic_max - ic_pos = 0
 
 (* XXX(dinosaure): the longest packet should be the [New_server _].
-   [04x][02x][04x][public:34 bytes][identity:<=47 bytes][\000] <= 92 bytes *)
+   [04x][02x][04x][public:34 bytes][identity:<=47 bytes][\000] <= 92 bytes.
+   Nevermind, it's [Y_and_server_validator]:
+   [04x][02x][Y:32 bytes][validator:64 bytes] <= 102 *)
 
 let make () =
   { ic_buffer= Bytes.create 102
@@ -141,8 +154,8 @@ let len_of_packet = function
   | 02 -> `Until (0, '\000')
   | 03 -> `Until (0, '\000')
   | 04 -> `Until (4 + 34, '\000')
-  | 05 -> `Fixed 32
-  | 06 -> `Fixed 64
+  | 05 -> `Fixed 64
+  | 06 -> `Fixed 96
   | 07 -> `Until (32, '\000')
   | 08 -> `Until (0, '\000')
   | 09 -> `Fixed 4
@@ -174,8 +187,8 @@ let of_hex_exn ~off ~len buf =
   match of_hex ~off ~len buf with
   | Ok v -> v | Error (`Msg err) -> failwith err
 
-let exists ~chr ctx =
-  let pos = ref ctx.ic_pos in
+let exists ~chr ~off ctx =
+  let pos = ref (off + ctx.ic_pos) in
   let nil = match chr with
     | '\xff' -> '\x00'
     | chr    -> Char.unsafe_chr (Char.code chr + 1) in
@@ -204,7 +217,7 @@ let prompt_until ~min:required ~chr k ctx =
     if off > Bytes.length ctx.ic_buffer
     then Fail `Not_enough_space
     else if off - ctx.ic_pos < 6 + required
-         || not (exists ~chr { ctx with ic_max = off })
+         || not (exists ~chr ~off:required { ctx with ic_max = off })
     then let k = function `Len len -> go (off + len) | `End -> Fail `End_of_input in
          Rd { buf= ctx.ic_buffer
             ; off= off
@@ -219,6 +232,7 @@ let prompt k ctx =
   then begin
     let rest = ctx.ic_max - ctx.ic_pos in
     Bytes.blit ctx.ic_buffer ctx.ic_pos ctx.ic_buffer 0 rest ;
+    Bytes.fill ctx.ic_buffer rest (Bytes.length ctx.ic_buffer - rest) '\000' ;
     ctx.ic_max <- rest ;
     ctx.ic_pos <- 0 end ;
   let rec go off =
@@ -234,9 +248,12 @@ let prompt k ctx =
                of_hex ~off:(ctx.ic_pos + 4) ~len:2 ctx.ic_buffer with
     | Ok _, Ok packet ->
       ( match len_of_packet packet with
-      | `Fixed 000 -> ctx.ic_max <- off ; safe k ctx
-      | `Fixed len -> ctx.ic_max <- off ; prompt_fixed ~len k ctx
-      | `Until (min, chr) -> ctx.ic_max <- off ; prompt_until ~min ~chr k ctx
+      | `Fixed 000 ->
+        ctx.ic_max <- off ; safe k ctx
+      | `Fixed len ->
+        ctx.ic_max <- off ; prompt_fixed ~len k ctx
+      | `Until (min, chr) ->
+        ctx.ic_max <- off ; prompt_until ~min:(min + 6) ~chr k ctx
       | exception _ -> Fail (`Invalid_packet packet) )
     | Error _, _ | _, Error _ ->
       Fail `Invalid_header in

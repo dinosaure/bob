@@ -204,6 +204,7 @@ module Relay = struct
           | `Data (str, off, len) ->
             let max = min dst_len len in
             Bytes.blit_string str off dst dst_off max ;
+            Log.debug (fun m -> m "Fill %d byte(s)." max) ;
             go (`Data (str, off + max, len - max)) (k (`Len max)) ) 
         | Wr _ -> assert false in
       go data ic

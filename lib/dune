@@ -2,7 +2,7 @@
  (name bob)
  (public_name bob)
  (modules state protocol bob)
- (libraries art logs spoke.core))
+ (libraries hxd.core hxd.string art logs spoke.core))
 
 (library
  (name fiber)

@@ -59,20 +59,20 @@ let run_client password =
   connect socket relay_sockaddr |> function
   | Error err ->
     Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err ;
-    Fiber.return ()
+    Fiber.return 1
   | Ok () ->
     Logs.debug (fun m -> m "The client is connected to the relay.") ;
     let choose = Fiber.Ivar.full `Accept in
     Bob_unix.client socket ~choose ~g ~password >>= function
     | Ok (`Accepted_with (identity, _shared_keys)) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
-      Fiber.return ()
-    | Ok `Refused -> Fiber.return ()
+      Fiber.return 0
+    | Ok `Refused -> Fiber.return 0
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
-      Fiber.return ()
+      Fiber.return 1
 
-let run_client password = Fiber.run (run_client password)
+let run_client password = exit (Fiber.run (run_client password))
 
 let run_server password =
   let g = Random.State.make_self_init () in
@@ -82,17 +82,17 @@ let run_server password =
   connect socket relay_sockaddr |> function
   | Error err ->
     Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err ;
-    Fiber.return ()
+    Fiber.return 1
   | Ok () ->
     Bob_unix.server socket ~g ~secret >>= function
     | Ok (identity, _shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
-      Fiber.return ()
+      Fiber.return 0
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
-      Fiber.return ()
+      Fiber.return 1
 
-let run_server password = Fiber.run (run_server password)
+let run_server password = exit (Fiber.run (run_server password))
 
 let run_relay () =
   let socket = Unix.socket ~cloexec:true relay_domain Unix.SOCK_STREAM 0 in
