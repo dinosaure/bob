@@ -107,12 +107,12 @@ let client socket ~choose ~g ~password =
   let t = Bob.Client.make ~g ~password ~identity in
   run ~receive:Bob.Client.receive ~send:Bob.Client.send socket t >>= function
   | Error err -> Fiber.return (Error err)
-  | Ok shared_keys ->
-    Fiber.wait choose >>= fun response -> finish socket t response >>= fun res ->
+  | Ok (identity, shared_keys) ->
+    choose identity >>= fun response -> finish socket t response >>= fun res ->
     Fiber.close socket >>= fun () ->
     match res, response with
     | Error err, _ -> Fiber.return (Error err)
-    | Ok (), `Accept -> Fiber.return (Ok (`Accepted_with shared_keys))
+    | Ok (), `Accept -> Fiber.return (Ok (`Accepted_with (identity, shared_keys)))
     | Ok (), `Refuse -> Fiber.return (Ok `Refused)
 
 let pp_sockaddr ppf = function
@@ -136,7 +136,7 @@ let serve_when_ready ?stop ~handler socket =
       Fiber.pause () >>= loop in
   loop ()
 
-let relay socket ~stop =
+let relay ?(timeout= 5.) socket ~stop =
   let t = Bob.Relay.make () in
   let fds = Hashtbl.create 0x100 in
   let rec write () =
@@ -188,7 +188,7 @@ let relay socket ~stop =
     let ivar = Fiber.Ivar.full `Continue in
     Hashtbl.add fds identity (fd, ivar) ;
     Bob.Relay.new_peer t ~identity ;
-    Fiber.async begin fun () -> Fiber.sleep 10. >>= fun () ->
+    Fiber.async begin fun () -> Fiber.sleep timeout >>= fun () ->
     if Bob.Relay.exists t ~identity
     then ( Log.warn (fun m -> m "%s timeout" identity)
          ; Bob.Relay.rem_peer t ~identity ) ;

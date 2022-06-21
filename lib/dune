@@ -8,7 +8,7 @@
  (name fiber)
  (public_name bob.fiber)
  (modules fiber)
- (libraries bheap logs unix))
+ (libraries bigstringaf ke bheap logs unix))
 
 (library
  (name bob_unix)

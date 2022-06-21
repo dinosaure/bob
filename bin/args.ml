@@ -1,0 +1,101 @@
+open Cmdliner
+
+let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
+let ( <.> ) f g = fun x -> f (g x)
+
+let common_options = "COMMON OPTIONS"
+
+let verbosity =
+  let env = Cmd.Env.info "BOB_LOGS" in
+  Logs_cli.level ~docs:common_options ~env ()
+
+let renderer =
+  let env = Cmd.Env.info "BOB_FMT" in
+  Fmt_cli.style_renderer ~docs:common_options ~env ()
+
+let app_style   = `Cyan
+let err_style   = `Red
+let warn_style  = `Yellow
+let info_style  = `Blue
+let debug_style = `Green
+
+let pp_header ~pp_h ppf (l, h) = match l with
+  | Logs.Error   -> pp_h ppf err_style   (match h with None -> "ERROR" | Some h -> h)
+  | Logs.Warning -> pp_h ppf warn_style  (match h with None -> "WARN"  | Some h -> h)
+  | Logs.Info    -> pp_h ppf info_style  (match h with None -> "INFO"  | Some h -> h)
+  | Logs.Debug   -> pp_h ppf debug_style (match h with None -> "DEBUG" | Some h -> h)
+  | Logs.App     ->
+    match h with
+    | Some h -> Fmt.pf ppf "[%a] " Fmt.(styled app_style (fmt "%10s")) h
+    | None -> ()
+
+let pp_header =
+  let pp_h ppf style h = Fmt.pf ppf "[%a]" Fmt.(styled style (fmt "%10s")) h in
+  pp_header ~pp_h
+
+let reporter ppf =
+  let report src level ~over k msgf =
+    let k _ =
+      over () ;
+      k () in
+    let with_metadata header _tags k ppf fmt =
+      Fmt.kpf k ppf
+        ("%a[%a]: " ^^ fmt ^^ "\n%!")
+        pp_header (level, header)
+        Fmt.(styled `Magenta (fmt "%10s"))
+        (Logs.Src.name src) in
+    msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
+  { Logs.report }
+
+let setup_logs style_renderer level =
+  Fmt_tty.setup_std_outputs ?style_renderer () ;
+  Logs.set_level level ;
+  Logs.set_reporter (reporter Fmt.stderr) ;
+  Option.is_none level
+
+let setup_logs = Term.(const setup_logs $ renderer $ verbosity)
+
+let inet_addr =
+  let parser str = match Unix.inet_addr_of_string str with
+    | inet_addr -> Ok inet_addr
+    | exception _ -> Error (msgf "Invalid address: %S" str) in
+  let pp = Fmt.using Unix.string_of_inet_addr Fmt.string in
+  Arg.conv (parser, pp)
+
+let addr_inet ~default =
+  let parser str = match Ipaddr.with_port_of_string ~default str with
+    | Ok (ipaddr, port) -> Ok (Unix.ADDR_INET (Ipaddr_unix.to_inet_addr ipaddr, port))
+    | Error _ as err -> err in
+  let pp ppf = function
+    | Unix.ADDR_INET (inet_addr, port) -> Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port
+    | Unix.ADDR_UNIX str -> Fmt.pf ppf "<%s>" str in
+  Arg.conv (parser, pp)
+
+let string_to_int_array str =
+  let res = Array.make (String.length str / 2) 0 in
+  for i = 0 to (String.length str / 2) - 1
+  do res.(i) <- (Char.code str.[i * 2] lsl 8) lor (Char.code str.[i * 2  + 1]) done ; res
+
+let int_array_to_string arr =
+  let buf = Bytes.create (Array.length arr * 2) in
+  for i = 0 to Array.length arr - 1 do
+    Bytes.set buf (2 * i) (Char.unsafe_chr (arr.(i) lsr 8)) ;
+    Bytes.set buf (2 * i + 1) (Char.unsafe_chr arr.(i)) ;
+  done ; Bytes.unsafe_to_string buf
+
+let seed =
+  let parser str = match Base64.decode str with
+    | Ok seed -> Ok (string_to_int_array seed)
+    | Error _ as err -> err in
+  let pp = Fmt.using (Base64.encode_exn <.> int_array_to_string) Fmt.string in
+  Arg.conv (parser, pp)
+
+let seed =
+  let doc = "The seed used to initialize the random number generator." in
+  Arg.(value & opt (some seed) None & info ["s"; "seed"] ~doc)
+
+let setup_random = function
+  | None -> Random.State.make_self_init ()
+  | Some seed -> Random.State.make seed
+
+let setup_random = Term.(const setup_random $ seed)

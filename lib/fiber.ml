@@ -128,6 +128,15 @@ let read fd : [ `Data of string | `End ] t =
     Hashtbl.add prd fd (`Read ivar) ;
     Ivar.read ivar
 
+let getline fd : string option t =
+  match Hashtbl.find_opt prd fd with
+  | Some (`Getline (_, ivar)) -> Ivar.read ivar
+  | _ ->
+    let ivar : string option Ivar.t = Ivar.create () in
+    let queue = Ke.Rke.create ~capacity:0x100 Bigarray.char in
+    Hashtbl.add prd fd (`Getline (queue, ivar)) ;
+    Ivar.read ivar
+
 let accept fd : (Unix.file_descr * Unix.sockaddr) t =
   match Hashtbl.find_opt prd fd with
   | Some (`Accept ivar) -> Ivar.read ivar
@@ -146,6 +155,26 @@ let write fd ~off ~len str : int t =
 
 let close fd = Unix.close fd ; return ()
 
+let line_of_queue queue =
+  let blit src src_off dst dst_off len =
+    Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len in
+  let exists ~p queue =
+    let pos = ref 0 and res = ref (-1) in
+    Ke.Rke.iter begin fun chr ->
+    if p chr && !res = -1 then res := !pos ;
+    incr pos end queue ;
+    if !res = -1 then None else Some !res in
+  match exists ~p:((=) '\n') queue with
+  | None -> None
+  | Some 0 -> Ke.Rke.N.shift_exn queue 1 ; Some ""
+  | Some pos ->
+    let tmp = Bytes.create pos in
+    Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp ;
+    Ke.Rke.N.shift_exn queue (pos + 1) ;
+    match Bytes.get tmp (pos - 1) with
+    | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
+    | _ -> Some (Bytes.unsafe_to_string tmp)
+
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
@@ -161,6 +190,17 @@ let sigrd fd =
     let peer, sockaddr = Unix.accept ~cloexec:true fd in
     Hashtbl.remove prd fd ;
     Ivar.fill ivar (peer, sockaddr)
+  | Some (`Getline (queue, ivar)) ->
+    let buf = Bytes.create 0x100 in
+    let len = Unix.read fd buf 0 0x100 in
+    let blit src src_off dst dst_off len =
+      Bigstringaf.blit_from_bytes src ~src_off dst ~dst_off ~len in
+    Ke.Rke.N.push queue ~blit ~length:Bytes.length ~off:0 ~len buf ;
+    match len, line_of_queue queue with
+    | 0, None -> Hashtbl.remove prd fd ; Ivar.fill ivar None
+    | _, None -> ()
+    | _, Some line ->
+      Hashtbl.remove prd fd ; Ivar.fill ivar (Some line)
 
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with

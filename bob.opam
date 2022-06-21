@@ -20,6 +20,13 @@ depends: [
   "hxd"         {>= "0.3.2"}
   "logs"        {>= "0.7.0"}
   "bheap"       {>= "2.0.0"}
+  "base64"      {>= "3.5.0"}
+  "bigstringaf"
+  "cmdliner"
+  "fpath"
+  "ipaddr"
+  "ke"          {>= "0.6"}
+  "alcotest"    {with-test}
   "spoke"
 ]
 

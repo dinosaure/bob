@@ -40,11 +40,12 @@ val detach : (unit -> 'a t) -> 'a Ivar.t
 
 (* {2: Unix operations.} *)
 
-val read   : Unix.file_descr -> [ `Data of string | `End ] t
-val write  : Unix.file_descr -> off:int -> len:int -> string -> int t
-val close  : Unix.file_descr -> unit t
-val accept : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t
-val sleep  : float -> unit t
+val read    : Unix.file_descr -> [ `Data of string | `End ] t
+val write   : Unix.file_descr -> off:int -> len:int -> string -> int t
+val close   : Unix.file_descr -> unit t
+val accept  : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t
+val sleep   : float -> unit t
+val getline : Unix.file_descr -> string option t
 
 (* {2: The entry-point to execute a {!t}. *)
 
