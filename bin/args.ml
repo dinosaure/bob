@@ -34,14 +34,15 @@ let pp_header =
   pp_header ~pp_h
 
 let reporter ppf =
+  let pid = Unix.getpid () in
   let report src level ~over k msgf =
     let k _ =
       over () ;
       k () in
     let with_metadata header _tags k ppf fmt =
       Fmt.kpf k ppf
-        ("%a[%a]: " ^^ fmt ^^ "\n%!")
-        pp_header (level, header)
+        ("[%6d]%a[%a]: " ^^ fmt ^^ "\n%!")
+        pid pp_header (level, header)
         Fmt.(styled `Magenta (fmt "%10s"))
         (Logs.Src.name src) in
     msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in

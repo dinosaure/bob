@@ -8,7 +8,7 @@ type ctx =
   ; oc_buffer : bytes
   ; mutable oc_pos : int }
 
-let _pp ppf ctx =
+let pp ppf ctx =
   Fmt.pf ppf "{ @[<hov>ic_buffer=@[<hov>%a@];@ \
                        ic_pos=%d;@ \
                        ic_max=%d;@ \
@@ -25,6 +25,14 @@ let income_is_empty { ic_pos; ic_max; _ } = ic_max - ic_pos = 0
    [04x][02x][04x][public:34 bytes][identity:<=47 bytes][\000] <= 92 bytes.
    Nevermind, it's [Y_and_server_validator]:
    [04x][02x][Y:32 bytes][validator:64 bytes] <= 102 *)
+
+let save ctx = function
+  | `End | `Data (_, _, 0) -> ()
+  | `Data (str, off, len) ->
+    let free = Bytes.length ctx.ic_buffer - ctx.ic_max in
+    if len <= free
+    then ( Bytes.blit_string str off ctx.ic_buffer ctx.ic_max len ; ctx.ic_max <- ctx.ic_max + len )
+    else Log.err (fun m -> m "We lost @[<hov>%a@]" (Hxd_string.pp Hxd.default) (String.sub str off len))
 
 let make () =
   { ic_buffer= Bytes.create 102

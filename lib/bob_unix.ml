@@ -34,8 +34,9 @@ type income =
 
 let pp_data ppf = function
   | `End -> Fmt.pf ppf "<end>"
-  | `Data (str, off, len) -> Fmt.pf ppf "@[<hov>%a@]" (Hxd_string.pp Hxd.default)
-    (String.sub str off len)
+  | `Data (str, off, len) ->
+    Fmt.pf ppf "@[<hov>%a@]" (Hxd_string.pp Hxd.default)
+      (String.sub str off len)
 
 let run ~receive ~send socket t =
   let handshake_is_done : [ `Done ] Fiber.Ivar.t = Fiber.Ivar.create () in
@@ -112,7 +113,8 @@ let client socket ~choose ~g ~password =
     Fiber.close socket >>= fun () ->
     match res, response with
     | Error err, _ -> Fiber.return (Error err)
-    | Ok (), `Accept -> Fiber.return (Ok (`Accepted_with (identity, shared_keys)))
+    | Ok (), `Accept ->
+      Fiber.return (Ok (`Accepted_with (identity, shared_keys)))
     | Ok (), `Refuse -> Fiber.return (Ok `Refused)
 
 let pp_sockaddr ppf = function
@@ -131,7 +133,8 @@ let serve_when_ready ?stop ~handler socket =
     >>= function
     | `Stop -> Fiber.return ()
     | `Accept (fd, sockaddr) ->
-      Log.debug (fun m -> m "Got a new connection from %a." pp_sockaddr sockaddr) ;
+      Log.debug (fun m -> m "Got a new connection from %a."
+        pp_sockaddr sockaddr) ;
       let _ = Fiber.async begin fun () -> handler fd sockaddr end in
       Fiber.pause () >>= loop in
   loop ()
@@ -161,7 +164,8 @@ let relay ?(timeout= 5.) socket ~stop =
           identity (Hxd_string.pp Hxd.default) str) ;
         full_write fd str ~off:0 ~len:(String.length str) >>= write
       | None ->
-        Log.warn (fun m -> m "%s does not exists as an active peer." identity) ;
+        Log.warn (fun m -> m "%s does not exists as an active peer."
+          identity) ;
         write () ) in
   let rec read () =
     Fiber.npick [ begin fun () -> Fiber.wait stop >>| fun () -> `Stop end
@@ -196,5 +200,6 @@ let relay ?(timeout= 5.) socket ~stop =
     Fiber.return () in
   fork_and_join
     begin fun () -> serve_when_ready ~stop ~handler socket end
-    begin fun () -> fork_and_join read write >>= fun ((), ()) -> Fiber.return () end
+    begin fun () -> fork_and_join read write >>= fun ((), ()) ->
+          Fiber.return () end
   >>= fun ((), ()) -> Fiber.return ()

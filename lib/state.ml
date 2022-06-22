@@ -311,7 +311,7 @@ module Server = struct
       Some (uid, packet_to_raw packet)
     | Send_to (Relay, packet) ->
       Some (000, packet_to_raw packet)
-    | exception Queue.Empty -> None
+    | exception _ -> None
 
   let hello ~g ~secret =
     let t = { secret
@@ -408,7 +408,7 @@ module Client = struct
       Some (uid, packet_to_raw packet)
     | Send_to (Relay, packet) ->
       Some (000, packet_to_raw packet)
-    | exception Queue.Empty -> None
+    | exception _ -> None
 
   let hello ~g ~password ~identity =
     let queue = Queue.create () in
@@ -447,7 +447,8 @@ module Client = struct
       t.identity <- identity ;
       `Continue
     | Relay, New_server { uid; public; identity; } ->
-      Log.debug (fun m -> m "A new server (%04x, %s) is available." uid identity) ;
+      Log.debug (fun m -> m "A new server (%04x, %s) is available."
+        uid identity) ;
       ( match Spoke.hello ~g:t.g ~public t.password with
       | Ok (state, _X) ->
         Hashtbl.add t.servers uid (state, identity) ;
@@ -534,7 +535,8 @@ module Relay = struct
       | Some identity -> Some (identity, 00, packet_to_raw packet)
       | None -> next_packet t )
     | Transmit (Peer (_, from_uid), Peer (_, to_uid), packet) ->
-      Log.debug (fun m -> m "Transmit a packet from %04x to %04x." from_uid to_uid) ;
+      Log.debug (fun m -> m "Transmit a packet from %04x to %04x."
+        from_uid to_uid) ;
       ( match Hashtbl.find_opt t.identities to_uid with
       | Some identity -> Some (identity, from_uid, packet_to_raw packet)
       | None -> next_packet t )
@@ -555,7 +557,7 @@ module Relay = struct
     | Transmit (Peer _, Relay, _)               -> .
     | Transmit (Relay, Peer _, _)               -> .
 
-    | exception Queue.Empty -> None
+    | exception _ -> None
 
   type dst_rel =
     | Relay_packet : ('a, 'b) dst * ('a, 'b) packet -> dst_rel
@@ -748,11 +750,13 @@ module Relay = struct
       remove_candidates ~src ~dst t ;
       transmit ~src ~dst packet t.queue ;
       `Continue
-    | Peer (Client, from_uid), Blind, Peer (Server, to_uid), Accepted client_identity' ->
+    | Peer (Client, from_uid), Blind, Peer (Server, to_uid),
+      Accepted client_identity' ->
       ( match Hashtbl.find_opt t.clients from_uid,
               Hashtbl.find_opt t.servers to_uid with
       | Some (client_identity, servers),
-        Some (server_identity, _, clients) when client_identity = client_identity' ->
+        Some (server_identity, _, clients)
+          when client_identity = client_identity' ->
         let inter = Set.elements (Set.inter servers clients) in
         Log.debug (fun m -> m "[%04x] agreed with [%04x] to exchange"
           from_uid to_uid) ;

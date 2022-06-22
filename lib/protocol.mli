@@ -1,6 +1,7 @@
 type ctx
 
 val make : unit -> ctx
+val pp : ctx Fmt.t
 
 val income_is_empty : ctx -> bool
 
@@ -26,3 +27,4 @@ and 'a kwr = int -> 'a t
 val send_string : ctx -> string -> unit t
 val send_packet : ctx -> int * State.raw -> unit t
 val recv : ctx -> (int * State.raw) t
+val save : ctx -> [ `End | `Data of string * int * int ] -> unit

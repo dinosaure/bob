@@ -18,6 +18,10 @@ module type PEER = sig
   val next_packet : t -> (int * State.raw) option
 end
 
+let data_is_empty = function
+  | `End | `Data (_, _, 0) -> true
+  | `Data _ -> false
+
 module Make (Peer : PEER) = struct
   type t =
     { state : Peer.t
@@ -40,14 +44,17 @@ module Make (Peer : PEER) = struct
           ( match Peer.process_packet t.state src packet with
           | `Close -> t.closed <- true ; `Close
           | `Done sk -> `Done sk
-          | `Continue when not (Protocol.income_is_empty t.ctx) ->
-            t.ic <- Protocol.recv t.ctx ;
-            (* XXX(dinosaure): process until [ctx] is empty - and
-               we need to [`Read]. *)
-            go data t.ic
           | `Continue ->
-            t.ic <- Protocol.recv t.ctx ;
-            `Continue )
+            (* NOTE(dinosaure): [Protocol.recv t.ctx] has a side-effet on
+               [ctx]. We want to check that, before to process anything, we
+               have something into [ctx] and [data]. In that case and only
+               then, we process [ctx] and try to parse a packet into it.
+
+               In other words, **don't** factor [t.ic <- Protocol.recv t.ctx]!
+             *)
+            if Protocol.income_is_empty t.ctx && data_is_empty data
+            then ( t.ic <- Protocol.recv t.ctx ; `Continue )
+            else ( t.ic <- Protocol.recv t.ctx ; go data t.ic ) )
         | None -> `Continue )
       | Protocol.Fail err -> `Error err
       | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
@@ -84,7 +91,8 @@ module Server = struct
       | State.Client_packet (_src, _packet) ->
         Log.warn (fun m -> m "Got an unexpected client packet.") ; None
       | State.Invalid_packet (uid, packet) ->
-        Log.warn (fun m -> m "Got an invalid packet (%04x): %a" uid State.pp_raw packet) ; None
+        Log.warn (fun m -> m "Got an invalid packet (%04x): %a"
+          uid State.pp_raw packet) ; None
 
     include State.Server end)
 
@@ -107,7 +115,8 @@ module Client = struct
       | State.Server_packet (_src, _packet) ->
         Log.warn (fun m -> m "Got an unexpected server packet.") ; None
       | State.Invalid_packet (uid, packet) ->
-        Log.warn (fun m -> m "Got an invalid packet (%04x): %a" uid State.pp_raw packet) ; None
+        Log.warn (fun m -> m "Got an invalid packet (%04x): %a"
+          uid State.pp_raw packet) ; None
 
     include State.Client end)
 
@@ -175,24 +184,29 @@ module Relay = struct
     | Some ic, Some ctx ->
       let rec go data = function
         | Protocol.Done (uid, packet) ->
-          ( match State.Relay.dst_and_packet
-                    ~identity:(identity :> string) t.state uid packet with
-          | Relay_packet (dst, packet) ->
-            let result = State.Relay.process_packet t.state
-              ~identity:(identity :> string) dst packet in
-            ( match result with
-            | `Agreement (a, b) ->
-              Art.remove t.ics (Art.unsafe_key a) ;
-              Art.remove t.ics (Art.unsafe_key b) ; result
-            | result ->
-              if Protocol.income_is_empty ctx
-              then ( replace t.ics identity (Protocol.recv ctx) ; result )
-              else ( let ic = Protocol.recv ctx in
-                     replace t.ics identity ic ;
-                     go data ic ) )
-          | _ -> `Continue )
+          Log.debug (fun m -> m "Receive a packet from %04x: %a"
+            uid State.pp_raw packet) ;
+          let ret = match State.Relay.dst_and_packet
+              ~identity:(identity :> string) t.state uid packet with
+            | Relay_packet (dst, packet) ->
+              ( match State.Relay.process_packet t.state
+                  ~identity:(identity :> string) dst packet with
+              | `Agreement (a, b) as agreement ->
+                Art.remove t.ics (Art.unsafe_key a) ;
+                Art.remove t.ics (Art.unsafe_key b) ; agreement
+              | continue -> continue )
+            | _ -> `Continue in
+          ( match ret with
+          | `Agreement _ as agreement -> Protocol.save ctx data ; agreement
+          | continue ->
+            if Protocol.income_is_empty ctx && data_is_empty data
+            then ( replace t.ics identity (Protocol.recv ctx) ; continue )
+            else ( let ic = Protocol.recv ctx in
+                   replace t.ics identity ic ;
+                   go data ic ) )
         | Protocol.Fail err ->
-          Log.err (fun m -> m "Got an error from %s: %a" (identity :> string) Protocol.pp_error err) ;
+          Log.err (fun m -> m "Got an error from %s: %a"
+            (identity :> string) Protocol.pp_error err) ;
           Art.remove t.ics  identity ;
           Art.remove t.ctxs identity ;
           `Close
@@ -209,28 +223,7 @@ module Relay = struct
         | Wr _ -> assert false in
       go data ic
 
-  let send_to t =
-    let rec go ~identity = function
-      | Protocol.Done () ->
-        ( match State.Relay.next_packet t.state with
-        | Some (identity, uid, packet) ->
-          ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
-          | None ->
-            Log.warn (fun m -> m "%s does not exists as an active peer." identity) ; `Close identity
-          | Some ctx -> go ~identity (Protocol.send_packet ctx (uid, packet)) )
-        | None ->
-          Log.debug (fun m -> m "No more packets to send.") ;
-          replace t.ocs (Art.unsafe_key identity) (Done ()) ; `Continue )
-      | Protocol.Fail err ->
-        Log.err (fun m -> m "Got an error from %s: %a" identity Protocol.pp_error err) ;
-        let identity = Art.unsafe_key identity in
-        Art.remove t.ocs  identity ;
-        Art.remove t.ctxs identity ;
-        `Close (identity :> string)
-      | Wr { str; off; len; k; } ->
-        replace t.ocs (Art.unsafe_key identity) (k len) ;
-        `Write (identity, String.sub str off len)
-      | Rd _ -> assert false in
+  let rec send_to t =
     match State.Relay.next_packet t.state with
     | Some (identity, uid, packet) ->
       ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
@@ -238,6 +231,21 @@ module Relay = struct
         Log.warn (fun m -> m "%s is not an active connection." identity) ;
         `Close identity
       | Some ctx ->
-        go ~identity (Protocol.send_packet ctx (uid, packet)) )
+        go t ~identity (Protocol.send_packet ctx (uid, packet)) )
     | None -> `Continue
+  and go t ~identity = function
+    | Protocol.Done () ->
+      replace t.ocs (Art.unsafe_key identity) (Done ()) ;
+      send_to t
+    | Protocol.Fail err ->
+      Log.err (fun m -> m "Got an error from %s: %a"
+        identity Protocol.pp_error err) ;
+      let identity = Art.unsafe_key identity in
+      Art.remove t.ocs  identity ;
+      Art.remove t.ctxs identity ;
+      `Close (identity :> string)
+    | Wr { str; off; len; k; } ->
+      replace t.ocs (Art.unsafe_key identity) (k len) ;
+      `Write (identity, String.sub str off len)
+    | Rd _ -> assert false
 end
