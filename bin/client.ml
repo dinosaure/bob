@@ -24,10 +24,9 @@ let run_client g sockaddr password yes =
     Logs.debug (fun m -> m "The client is connected to the relay.") ;
     let choose = choose yes in
     Bob_unix.client socket ~choose ~g ~password >>= function
-    | Ok (`Accepted_with (identity, _shared_keys)) ->
+    | Ok (identity, _shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
       Fiber.return 0
-    | Ok `Refused -> Fiber.return 0
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
       Fiber.return 1

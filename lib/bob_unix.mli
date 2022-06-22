@@ -26,8 +26,7 @@ val server :
 val client :
   Unix.file_descr -> choose:(string -> [ `Accept | `Refuse ] Fiber.t) ->
   g:Random.State.t -> password:string ->
-  ([ `Accepted_with of string * Spoke.shared_keys
-   | `Refused ], error) result Fiber.t
+  (string * Spoke.shared_keys, error) result Fiber.t
 (** [client socket ~choose ~g ~password] tries to find {i via} a relay
     (represented by the given [socket]), a peer which shares the same password
     as you. When the client found it, the user must fill [choose] to accept

@@ -8,8 +8,9 @@ module Server : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done  of string * Spoke.shared_keys
-    |  `Error of Protocol.error ]
+    |  `Done      of string * Spoke.shared_keys
+    |  `Agreement of string
+    |  `Error     of Protocol.error ]
 
   val send : t ->
     [> `Continue
@@ -24,18 +25,16 @@ module Client : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done  of string * Spoke.shared_keys
-    |  `Error of Protocol.error ]
+    |  `Done      of string * Spoke.shared_keys
+    |  `Agreement of string
+    |  `Error     of Protocol.error ]
 
   val send : t ->
     [> `Continue
     |  `Write of string
     |  `Error of Protocol.error ]
 
-  val finish : t -> [ `Accept | `Refuse ] ->
-    ([> `Done
-     |  `Write of string * (unit -> 'a)
-     |  `Error of Protocol.error ] as 'a)
+  val agreement : t -> [ `Accept | `Refuse ] -> unit
 end
 
 module Relay : sig

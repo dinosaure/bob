@@ -48,10 +48,10 @@ let save ctx = function
    they should not exchange something else: [data] should be empty. *)
 
 let make () =
-  { ic_buffer= Bytes.create 102
+  { ic_buffer= Bytes.create (102 * 4)
   ; ic_pos= 0
   ; ic_max= 0
-  ; oc_buffer= Bytes.create 102
+  ; oc_buffer= Bytes.create (102 * 4)
   ; oc_pos= 0 }
 
 type error =
@@ -131,6 +131,7 @@ let uid_of_packet = function
   | `Refused                  -> 11
   | `Relay_failure _          -> 12
   | `Spoke_failure _          -> 13
+  | `Done                     -> 14
 
 let pp_packet ppf = function
   | `Hello_as_a_server public -> Fmt.string ppf (Spoke.public_to_string public)
@@ -150,9 +151,11 @@ let pp_packet ppf = function
   | `Closed uid -> Fmt.pf ppf "%04x" uid
   | `Accepted identity -> Fmt.pf ppf "%s\000" identity
   | `Refused -> ()
+  | `Done -> ()
   | `Relay_failure (`Invalid_client uid)    -> Fmt.pf ppf "C%04x" uid
   | `Relay_failure (`Invalid_server uid)    -> Fmt.pf ppf "S%04x" uid
   | `Relay_failure (`No_handshake_with uid) -> Fmt.pf ppf "H%04x" uid
+  | `Relay_failure `No_agreement            -> Fmt.pf ppf "N0000"
   | `Spoke_failure `Point_is_not_on_prime_order_subgroup -> Fmt.string ppf "\000"
   | `Spoke_failure `Invalid_client_validator             -> Fmt.string ppf "\001"
   | `Spoke_failure `Invalid_server_validator             -> Fmt.string ppf "\002"
@@ -181,6 +184,7 @@ let len_of_packet = function
   | 11 -> `Fixed 0
   | 12 -> `Fixed 5
   | 13 -> `Fixed 1
+  | 14 -> `Fixed 0
   | _  -> invalid_arg "Invalid packet"
 
 let hex_of_chr = function
@@ -345,6 +349,7 @@ let packet_of_bytes ~pkt ~off buf = match pkt with
     | '\003' -> Ok (1, `Spoke_failure `Invalid_public_packet)
     | '\004' -> Ok (1, `Spoke_failure `Invalid_secret_packet)
     | _ -> Error (`Invalid_packet pkt) )
+  | 14 -> Ok (0, `Done)
   | _ -> Error (`Invalid_packet pkt)
 
 let recv ctx =

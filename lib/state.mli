@@ -26,8 +26,10 @@ type raw =
   | `Refused
   | `Relay_failure of [ `Invalid_client of int
                       | `Invalid_server of int
-                      | `No_handshake_with of int ]
-  | `Spoke_failure of Spoke.error ]
+                      | `No_handshake_with of int
+                      | `No_agreement ]
+  | `Spoke_failure of Spoke.error
+  | `Done ]
 
 val pp_raw : raw Fmt.t
 val packet_to_raw : ('f, 't) packet -> raw
@@ -56,7 +58,7 @@ module Client : sig
   val accept : t -> unit
   val refuse : t -> unit
   val process_packet : t -> ('a, client) src -> ('a, client) packet ->
-    [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
+    [> `Continue | `Agreement of string | `Done of string * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 

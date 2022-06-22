@@ -154,6 +154,7 @@ let write fd ~off ~len str : (int, Unix.error) result t =
     Ivar.read ivar
 
 let close fd =
+  Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd)) ;
   begin try Unix.close fd
         with Unix.Unix_error (errno, f, arg) ->
           Log.err (fun m -> m "%s(%s): %s"
@@ -194,8 +195,7 @@ let sigrd fd =
     Hashtbl.remove prd fd ;
     ( match Unix.read fd buf 0 0x100 with
     | 0 -> Ivar.fill ivar `End
-    | len ->
-      Ivar.fill ivar (`Data (Bytes.sub_string buf 0 len))
+    | len -> Ivar.fill ivar (`Data (Bytes.sub_string buf 0 len))
     | exception _ -> Ivar.fill ivar `End )
   | Some (`Accept ivar) ->
     let peer, sockaddr = Unix.accept ~cloexec:true fd in

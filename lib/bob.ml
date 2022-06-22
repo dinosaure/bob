@@ -14,7 +14,7 @@ module type PEER = sig
   val peer : [ `Client | `Server ]
   val src_and_packet : State.src_rel -> peer income option
   val process_packet : t -> ('a, peer) State.src -> ('a, peer) State.packet ->
-    [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
+    [> `Continue | `Agreement of string | `Done of string * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * State.raw) option
 end
 
@@ -37,13 +37,19 @@ module Make (Peer : PEER) = struct
   let receive t data =
     let rec go data = function
       | Protocol.Done (uid, packet) ->
+        Log.debug (fun m -> m "Process a new packet from %04x: %a"
+          uid State.pp_raw packet) ;
         let src_rel = State.src_and_packet ~peer:to_whom_I_speak uid packet in
 
         ( match Peer.src_and_packet src_rel with
         | Some (Income (src, packet)) ->
           ( match Peer.process_packet t.state src packet with
-          | `Close -> t.closed <- true ; `Close
           | `Done sk -> `Done sk
+          | `Close -> t.closed <- true ; `Close
+          | `Agreement _ as agreement ->
+            Protocol.save t.ctx data ;
+            t.ic <- Protocol.recv t.ctx ;
+            agreement
           | `Continue ->
             (* NOTE(dinosaure): [Protocol.recv t.ctx] has a side-effet on
                [ctx]. We want to check that, before to process anything, we
@@ -55,7 +61,8 @@ module Make (Peer : PEER) = struct
             if Protocol.income_is_empty t.ctx && data_is_empty data
             then ( t.ic <- Protocol.recv t.ctx ; `Continue )
             else ( t.ic <- Protocol.recv t.ctx ; go data t.ic ) )
-        | None -> `Continue )
+        | None -> Log.warn (fun m -> m "Discard a packet from %04x: %a"
+          uid State.pp_raw packet) ; `Continue )
       | Protocol.Fail err -> `Error err
       | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
         ( match data with
@@ -135,24 +142,13 @@ module Client = struct
     let oc = Protocol.Done () in
     { state; ctx; ic; oc; closed= false; }
 
-  let finish t =
-    let rec go = function
-      | Protocol.Done () ->
-        ( match State.Client.next_packet t.state with
-        | Some (uid, packet) -> go (Protocol.send_packet t.ctx (uid, packet))
-        | None -> `Done )
-      | Protocol.Fail err -> `Error err
-      | Wr { str; off; len; k; } ->
-        let k () = t.oc <- k len ; go t.oc in
-        `Write (String.sub str off len, k)
-      | Rd _ -> assert false in
-    function
+  let agreement t = function
     | `Accept ->
       Log.debug (fun m -> m "The client accepts the agreement.") ;
-      State.Client.accept t.state ; go t.oc
+      State.Client.accept t.state 
     | `Refuse ->
       Log.debug (fun m -> m "The client refuses the agreement.") ;
-      State.Client.refuse t.state ; go t.oc
+      State.Client.refuse t.state
 end
 
 module Relay = struct
@@ -201,27 +197,23 @@ module Relay = struct
         | Protocol.Done (uid, packet) ->
           Log.debug (fun m -> m "Receive a packet from %04x: %a"
             uid State.pp_raw packet) ;
-          let ret = match State.Relay.dst_and_packet
+          let result = match State.Relay.dst_and_packet
               ~identity:(identity :> string) t.state uid packet with
             | Relay_packet (dst, packet) ->
-              ( match State.Relay.process_packet t.state
-                  ~identity:(identity :> string) dst packet with
-              | `Agreement (client, server) as agreement ->
-                Log.debug (fun m -> m "Agreement found between %s and %s."
-                  client server) ;
-                agreement
-              | `Continue -> `Continue )
+              State.Relay.process_packet t.state ~identity:(identity :> string)
+                dst packet
             | Invalid_packet (uid, packet) ->
               Log.err (fun m -> m "Receive an invalid packet (%04x): %a"
                 uid State.pp_raw packet) ;
               `Continue in
-          ( match ret with
+          ( match result with
           | `Agreement _ as agreement ->
             Protocol.save ctx data ;
             Hashtbl.replace t.ics identity (Protocol.recv ctx) ; agreement
           | `Continue ->
             if Protocol.income_is_empty ctx && data_is_empty data
-            then ( Hashtbl.replace t.ics identity (Protocol.recv ctx) ; `Continue )
+            then ( Hashtbl.replace t.ics identity (Protocol.recv ctx) 
+                 ; result )
             else ( let ic = Protocol.recv ctx in
                    Hashtbl.replace t.ics identity ic ;
                    go data ic ) )
