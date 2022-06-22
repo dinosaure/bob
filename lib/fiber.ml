@@ -145,15 +145,26 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
     Hashtbl.add prd fd (`Accept ivar) ;
     Ivar.read ivar
 
-let write fd ~off ~len str : int t =
+let write fd ~off ~len str : (int, Unix.error) result t =
   match Hashtbl.find_opt pwr fd with
   | Some (_, ivar) -> Ivar.read ivar
   | None ->
-    let ivar : int Ivar.t = Ivar.create () in
+    let ivar : (int, Unix.error) result Ivar.t = Ivar.create () in
     Hashtbl.add pwr fd ((str, off, len), ivar) ;
     Ivar.read ivar
 
-let close fd = Unix.close fd ; return ()
+let close fd =
+  begin try Unix.close fd
+        with Unix.Unix_error (errno, f, arg) ->
+          Log.err (fun m -> m "%s(%s): %s"
+            f arg (Unix.error_message errno)) end ;
+  ( match Hashtbl.find_opt prd fd with
+  | Some (`Read ivar) -> Hashtbl.remove prd fd ; Ivar.fill ivar `End
+  | Some _ -> () | None -> () ) ;
+  ( match Hashtbl.find_opt pwr fd with
+  | Some (_, ivar) -> Hashtbl.remove pwr fd ; Ivar.fill ivar (Error Unix.EBADF)
+  | None -> () ) ;
+  return ()
 
 let line_of_queue queue =
   let blit src src_off dst dst_off len =
@@ -206,9 +217,14 @@ let sigwr fd =
   match Hashtbl.find_opt pwr fd with
   | None -> ()
   | Some ((str, off, len), ivar) ->
-    let len = Unix.write_substring fd str off len in
-    Hashtbl.remove pwr fd ;
-    Ivar.fill ivar len
+    try
+      let len = Unix.write_substring fd str off len in
+      Hashtbl.remove pwr fd ;
+      Ivar.fill ivar (Ok len)
+    with Unix.Unix_error (errno, f, arg) ->
+      Log.err (fun m -> m "%s(%s): %s" f arg (Unix.error_message errno)) ;
+      Hashtbl.remove pwr fd ;
+      Ivar.fill ivar (Error errno)
 
 module Time = struct
   type t = float
@@ -258,7 +274,8 @@ let run fiber =
 
     let ready_rds, ready_wrs, _ = Unix.select rds wrs [] 0.1 in
 
-    List.iter (fun (Fiber (k, ivar)) -> k ivar (fun () -> ())) fbs ;
+    List.iter (fun (Fiber (k, ivar)) -> try k ivar (fun () -> ()) with exn ->
+      Log.err (fun m -> m "Got an unexpected exception: %s" (Printexc.to_string exn))) fbs ;
     List.iter (fun ivar -> Ivar.fill ivar ()) slp ;
     List.iter sigrd ready_rds ;
     List.iter sigwr ready_wrs ;

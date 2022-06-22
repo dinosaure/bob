@@ -6,16 +6,20 @@ open Fiber
 let ( <.> ) f g = fun x -> f (g x)
 
 let rec full_write fd str ~off ~len =
-  Fiber.write fd str ~off ~len >>= fun len' ->
-  if len - len' > 0 then full_write fd str ~off:(off + len') ~len:(len - len')
-  else Fiber.return ()
+  Fiber.write fd str ~off ~len >>= function
+  | Error _ as err -> Fiber.return err
+  | Ok len' ->
+    if len - len' > 0 then full_write fd str ~off:(off + len') ~len:(len - len')
+    else Fiber.return (Ok ())
 
 type error =
   [ `Connection_closed_by_relay
+  | `Write of Unix.error
   | Bob.Protocol.error ]
 
 let pp_error ppf = function
   | `Connection_closed_by_relay -> Fmt.string ppf "Connection closed by relay"
+  | `Write err -> Fmt.pf ppf "write(): %s" (Unix.error_message err)
   | #Bob.Protocol.error as err -> Bob.Protocol.pp_error ppf err
 
 let map_read = function
@@ -84,7 +88,13 @@ let run ~receive ~send socket t =
     | `Write str ->
       Log.debug (fun m -> m "-> @[<hov>%a@]"
         (Hxd_string.pp Hxd.default) str) ;
-      full_write socket str ~off:0 ~len:(String.length str) >>= write in
+      full_write socket str ~off:0 ~len:(String.length str) >>= function
+      | Ok () -> write ()
+      | Error err ->
+        Log.err (fun m -> m "Got a write error: %s" (Unix.error_message err)) ;
+        if Fiber.Ivar.is_empty errored
+        then Fiber.Ivar.fill errored (`Error (`Write err)) ;
+        Fiber.return (Error (`Write err)) in
   Fiber.fork_and_join write read >>= function
   | Ok (), Ok shared_keys -> Fiber.return (Ok shared_keys)
   | Error err, _ -> Fiber.return (Error err)
@@ -100,7 +110,9 @@ let finish socket t response =
     | `Done -> Fiber.return (Ok ())
     | `Error (#Bob.Protocol.error as err) -> Fiber.return (Error err)
     | `Write (str, k) ->
-    full_write socket str ~off:0 ~len:(String.length str) >>= (go <.> k) in
+    full_write socket str ~off:0 ~len:(String.length str) >>= function
+    | Ok v -> (go <.> k) v
+    | Error err -> Fiber.return (Error (`Write err)) in
   go (Bob.Client.finish t response)
 
 let client socket ~choose ~g ~password =
@@ -148,25 +160,23 @@ let relay ?(timeout= 5.) socket ~stop =
       [ begin fun () -> Fiber.wait stop >>| fun () -> `Stop end
       ; send_to ]
     >>= function
-    | `Stop -> Fiber.return ()
+    | `Stop     -> Fiber.return ()
     | `Continue -> Fiber.pause () >>= write
     | `Close identity ->
       ( match Hashtbl.find_opt fds identity with
-      | Some (fd, _) ->
-        Fiber.close fd >>= fun () -> 
-        Hashtbl.remove fds identity ;
-        write ()
-      | None -> write () )
+      | Some  _ -> Hashtbl.remove fds identity ; Fiber.return ()
+      | None -> Fiber.return () ) >>= write
     | `Write (identity, str) ->
       ( match Hashtbl.find_opt fds identity with
+      | None -> Fiber.return ()
       | Some (fd, _) ->
         Log.debug (fun m -> m "[%20s] <- @[<hov>%a@]"
           identity (Hxd_string.pp Hxd.default) str) ;
-        full_write fd str ~off:0 ~len:(String.length str) >>= write
-      | None ->
-        Log.warn (fun m -> m "%s does not exists as an active peer."
-          identity) ;
-        write () ) in
+        full_write fd str ~off:0 ~len:(String.length str) >>= function
+        | Ok v -> Fiber.return v
+        | Error _err ->
+          Hashtbl.remove fds identity ;
+          Fiber.close fd ) >>= write in
   let rec read () =
     Fiber.npick [ begin fun () -> Fiber.wait stop >>| fun () -> `Stop end
                 ; begin fun () -> Fiber.return `Continue end ] >>= function
@@ -183,7 +193,9 @@ let relay ?(timeout= 5.) socket ~stop =
           Log.debug (fun m -> m "[%20s] -> %a" identity pp_data data) ;
           match Bob.Relay.receive_from t ~identity data with
           | `Continue | `Read -> Fiber.return `Continue
-          | `Close | `Agreement _ -> Fiber.return `Delete end in
+          | `Close | `Agreement _ ->
+            Fiber.close fd >>= fun () ->
+            Fiber.return `Delete end in
         Some (fd, ivar) end fds ; 
       Fiber.pause () >>= read in
   let handler fd sockaddr =
@@ -196,7 +208,8 @@ let relay ?(timeout= 5.) socket ~stop =
     if Bob.Relay.exists t ~identity
     then ( Log.warn (fun m -> m "%s timeout" identity)
          ; Bob.Relay.rem_peer t ~identity ) ;
-    Fiber.return () end ;
+    Hashtbl.remove fds identity ;
+    Fiber.close fd end ;
     Fiber.return () in
   fork_and_join
     begin fun () -> serve_when_ready ~stop ~handler socket end

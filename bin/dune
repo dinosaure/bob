@@ -8,9 +8,11 @@
  (name bob)
  (public_name bob)
  (modules bob client server relay connect args)
- (libraries base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli logs.cli fmt.tty logs.fmt bob.unix))
+ (libraries base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli logs.cli fmt.tty
+   logs.fmt bob.unix))
 
 (rule
  (target bob.com)
  (mode promote)
- (action (copy %{bin:bob} %{target})))
+ (action
+  (copy %{bin:bob} %{target})))

@@ -6,6 +6,9 @@ type ('a, 'b) peer =
 
 type ('f, 't) src and ('f, 't) dst
 
+val uid_of_src : ('f, 't) src -> int
+val uid_of_dst : ('f, 't) dst -> int
+
 type ('f, 't) packet
 
 type raw =
@@ -27,6 +30,7 @@ type raw =
   | `Spoke_failure of Spoke.error ]
 
 val pp_raw : raw Fmt.t
+val packet_to_raw : ('f, 't) packet -> raw
 
 type src_rel =
   | Server_packet : ('a, server) src * ('a, server) packet -> src_rel

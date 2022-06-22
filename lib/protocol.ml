@@ -29,10 +29,23 @@ let income_is_empty { ic_pos; ic_max; _ } = ic_max - ic_pos = 0
 let save ctx = function
   | `End | `Data (_, _, 0) -> ()
   | `Data (str, off, len) ->
+    if ctx.ic_pos > 0
+    then begin 
+    let rest = ctx.ic_max - ctx.ic_pos in
+    Bytes.blit ctx.ic_buffer ctx.ic_pos ctx.ic_buffer 0 rest ;
+    Bytes.fill ctx.ic_buffer rest (Bytes.length ctx.ic_buffer - rest) '\000' ;
+    ctx.ic_max <- rest ;
+    ctx.ic_pos <- 0 end ;
     let free = Bytes.length ctx.ic_buffer - ctx.ic_max in
     if len <= free
-    then ( Bytes.blit_string str off ctx.ic_buffer ctx.ic_max len ; ctx.ic_max <- ctx.ic_max + len )
-    else Log.err (fun m -> m "We lost @[<hov>%a@]" (Hxd_string.pp Hxd.default) (String.sub str off len))
+    then ( Bytes.blit_string str off ctx.ic_buffer ctx.ic_max len
+         ; ctx.ic_max <- ctx.ic_max + len )
+    else Log.err (fun m -> m "We lost @[<hov>%a@]"
+      (Hxd_string.pp Hxd.default) (String.sub str off len))
+(* XXX(dinosaure): the last case (where we don't have enough spaces to save
+   [data] shoud never occur according to our protocol. Indeed, [save] is called
+   only when we found an agreement between two peers. That mostly means that
+   they should not exchange something else: [data] should be empty. *)
 
 let make () =
   { ic_buffer= Bytes.create 102
@@ -88,13 +101,10 @@ let flush k0 ctx =
 
 let write_string ctx str =
   let max = Bytes.length ctx.oc_buffer in
-  let go j l ctx =
-    let rem = max - ctx.oc_pos in
-    let len = if l > rem then rem else l in
-    Bytes.blit_string str j ctx.oc_buffer ctx.oc_pos len ;
-    ctx.oc_pos <- ctx.oc_pos + len ;
-    if len < l then leave_with ctx `Not_enough_space in
-  go 0 (String.length str) ctx
+  if String.length str > max - ctx.oc_pos
+  then leave_with ctx `Not_enough_space ;
+  Bytes.blit_string str 0 ctx.oc_buffer ctx.oc_pos (String.length str) ;
+  ctx.oc_pos <- ctx.oc_pos + String.length str
 
 let write_fmt ctx fmt = Fmt.kstr (write_string ctx) fmt
 

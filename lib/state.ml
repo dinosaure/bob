@@ -123,9 +123,15 @@ type ('f, 't) src =
   | Relay : (relay, 't) src
   | Peer  : ('f, 'nf) peer * int -> ('f, 'nf) src
 
+let uid_of_src : type f t. (f, t) src -> int = function
+  | Relay -> 0 | Peer (_, uid) -> uid
+
 type ('f, 't) dst =
   | Relay : ('f, relay) dst
   | Peer  : ('t, 'nt) peer * int -> ('nt, 't) dst
+
+let uid_of_dst : type f t. (f, t) dst -> int = function
+  | Relay -> 0 | Peer (_, uid) -> uid
 
 let to_relay = Relay
 let to_server ~uid = Peer (Server, uid)
@@ -500,7 +506,7 @@ module Relay = struct
   type t =
     { clients    : (int, string * Set.t) Hashtbl.t
     ; servers    : (int, string * Spoke.public * Set.t) Hashtbl.t
-    ; uids       : [ `Client of int | `Server of int ] Art.t
+    ; uids       : (string, [ `Client of int | `Server of int ]) Hashtbl.t
     ; identities : (int, string) Hashtbl.t
     ; gen        : unit -> int
     ; queue      : relay send Queue.t }
@@ -512,10 +518,6 @@ module Relay = struct
       (Hashtbl.length t.servers)
       (Queue.length t.queue)
 
-  let exists ~identity t =
-    match Art.find_opt t.uids (Art.unsafe_key identity) with
-    | Some _ -> true | None -> false
-
   let make () =
     let gen =
       let v = ref 1 in
@@ -524,40 +526,41 @@ module Relay = struct
         incr v ; if !v > 0xff then v := 1 ; ret in
     { clients= Hashtbl.create 0x100
     ; servers= Hashtbl.create 0x100
-    ; uids= Art.make ()
+    ; uids= Hashtbl.create 0x100
     ; identities= Hashtbl.create 0x100
     ; gen
     ; queue= Queue.create () }
 
-  let rec next_packet t = match Queue.pop t.queue with
-    | Respond (Peer (_, uid), packet) ->
-      ( match Hashtbl.find_opt t.identities uid with
-      | Some identity -> Some (identity, 00, packet_to_raw packet)
-      | None -> next_packet t )
-    | Transmit (Peer (_, from_uid), Peer (_, to_uid), packet) ->
-      Log.debug (fun m -> m "Transmit a packet from %04x to %04x."
-        from_uid to_uid) ;
-      ( match Hashtbl.find_opt t.identities to_uid with
-      | Some identity -> Some (identity, from_uid, packet_to_raw packet)
-      | None -> next_packet t )
+  let rec next_packet t = match Queue.take_opt t.queue with
+    | None -> None
+    | Some packet ->
+      match packet with
+      | Respond (Peer (_, uid), packet) ->
+        ( match Hashtbl.find_opt t.identities uid with
+        | Some identity -> Some (identity, 00, packet_to_raw packet)
+        | None -> next_packet t )
+      | Transmit (Peer (_, from_uid), Peer (_, to_uid), packet) ->
+        Log.debug (fun m -> m "Transmit a packet from %04x to %04x."
+          from_uid to_uid) ;
+        ( match Hashtbl.find_opt t.identities to_uid with
+        | Some identity -> Some (identity, from_uid, packet_to_raw packet)
+        | None -> next_packet t )
 
-    | Send_to  (Relay,        Closed _)
-    | Respond  (Relay,        Closed _)
-    | Transmit (Relay, Relay, Closed _) -> next_packet t
+      | Send_to  (Relay,        Closed _)
+      | Respond  (Relay,        Closed _)
+      | Transmit (Relay, Relay, Closed _) -> next_packet t
 
-    | Send_to (Relay,  _) -> .
-    | Send_to (Peer _, _) -> .
+      | Send_to (Relay,  _) -> .
+      | Send_to (Peer _, _) -> .
 
-    | Respond (Relay,  Relay_failure _) -> .
-    | Respond (Relay,  Spoke_failure _) -> .
-    | Respond (Peer _, _)               -> .
+      | Respond (Relay,  Relay_failure _) -> .
+      | Respond (Relay,  Spoke_failure _) -> .
+      | Respond (Peer _, _)               -> .
 
-    | Transmit (Relay,  Relay, Relay_failure _) -> .
-    | Transmit (Relay,  Relay, Spoke_failure _) -> .
-    | Transmit (Peer _, Relay, _)               -> .
-    | Transmit (Relay, Peer _, _)               -> .
-
-    | exception _ -> None
+      | Transmit (Relay,  Relay, Relay_failure _) -> .
+      | Transmit (Relay,  Relay, Spoke_failure _) -> .
+      | Transmit (Peer _, Relay, _)               -> .
+      | Transmit (Relay, Peer _, _)               -> .
 
   type dst_rel =
     | Relay_packet : ('a, 'b) dst * ('a, 'b) packet -> dst_rel
@@ -569,7 +572,7 @@ module Relay = struct
     | 00, `Hello_as_a_client ->
       Relay_packet (Relay, Hello_as_a_client)
     | 00, `Relay_failure err ->
-      ( match Art.find_opt t.uids (Art.unsafe_key identity) with
+      ( match Hashtbl.find_opt t.uids identity with
       | Some (`Server _uid) ->
         Relay_packet (Relay, Relay_failure (Server, err))
       | Some (`Client _uid) ->
@@ -590,7 +593,7 @@ module Relay = struct
     | uid, `Refused ->
       Relay_packet (Peer (Server, uid), Refused)
     | uid, `Spoke_failure err ->
-      ( match Art.find_opt t.uids (Art.unsafe_key identity) with
+      ( match Hashtbl.find_opt t.uids identity with
       | Some (`Server _) ->
         Relay_packet (Peer (Client, uid), Spoke_failure (Server, err))
       | Some (`Client _) ->
@@ -621,13 +624,19 @@ module Relay = struct
     Some (server_identity, public, Set.remove uid clients) end t.servers ;
     !active_servers
 
+  let remove_if_it_exists t ~identity =
+    match Hashtbl.find_opt t identity with
+    | Some _ -> Hashtbl.remove t identity | None -> ()
+
+  let exists ~identity t = Hashtbl.mem t.uids identity
+
   let delete ~identity t =
-    match Art.find_opt t.uids (Art.unsafe_key identity) with
+    match Hashtbl.find_opt t.uids identity with
     | Some (`Server uid) ->
       Log.debug (fun m -> m "Delete the server %04x" uid) ;
       if Hashtbl.mem t.servers uid
       then Hashtbl.remove t.servers uid ;
-      Art.remove t.uids (Art.unsafe_key identity) ;
+      remove_if_it_exists t.uids ~identity ;
       let clients = remove_server_candidate_from_clients t uid in
       respond (to_server ~uid) (Closed Relay) t.queue ;
       let packet = Closed (Peer (Server, uid)) in
@@ -637,7 +646,7 @@ module Relay = struct
       Log.debug (fun m -> m "Delete the client %04x" uid) ;
       if Hashtbl.mem t.clients uid
       then Hashtbl.remove t.clients uid ;
-      Art.remove t.uids (Art.unsafe_key identity) ;
+      remove_if_it_exists t.uids ~identity ;
       let servers = remove_client_candidate_from_servers t uid in
       respond (to_client ~uid) (Closed Relay) t.queue ;
       let packet = Closed (Peer (Client, uid)) in
@@ -699,14 +708,18 @@ module Relay = struct
     | Peer _, From_server, Peer _, _ -> .
 
     | Peer (Client, uid), From_client, Relay, Hello_as_a_client ->
+      Log.debug (fun m -> m "New client into the pool." ) ;
       let uid = match uid with
         | 0 ->
           let uid = t.gen () in
-          Art.insert t.uids (Art.unsafe_key identity) (`Client uid) ;
+          Hashtbl.replace t.uids identity (`Client uid) ;
           Hashtbl.replace t.identities uid identity ;
           Hashtbl.add t.clients uid (identity, all_servers t) ;
           uid
-        | uid -> uid in
+        | uid ->
+          Log.warn (fun m -> m "The incoming client %s already as an \
+            unique ID: %04x" identity uid) ;
+          uid in
       respond (to_client ~uid) (Client_identity identity) t.queue ;
       (* broadcast available servers to **the** client *)
       Hashtbl.filter_map_inplace
@@ -718,14 +731,18 @@ module Relay = struct
       end t.servers ;
       `Continue
     | Peer (Server, uid), From_server, Relay, Hello_as_a_server { public } ->
+      Log.debug (fun m -> m "New server into the pool." ) ;
       let uid = match uid with
         | 0 ->
           let uid = t.gen () in
-          Art.insert t.uids (Art.unsafe_key identity) (`Server uid) ;
+          Hashtbl.replace t.uids identity (`Server uid) ;
           Hashtbl.replace t.identities uid identity ;
           Hashtbl.add t.servers uid (identity, public, all_clients t) ;
           uid
-        | uid -> uid in
+        | uid ->
+          Log.warn (fun m -> m "The incoming server %s already as an \
+            unique ID: %04x" identity uid) ;
+          uid in
       respond (to_server ~uid) (Server_identity identity) t.queue ;
       (* broadcast **the** server to available clients *)
       Hashtbl.filter_map_inplace
@@ -763,22 +780,19 @@ module Relay = struct
         Log.debug (fun m -> m "Intersection: @[<hov>%a@]"
           Fmt.(Dump.list int) inter) ;
         (* clean hashtbls *)
-        Hashtbl.remove t.clients from_uid ;
-        Hashtbl.remove t.servers to_uid ;
-        (* clean radix tree *)
-        Art.remove t.uids (Art.unsafe_key client_identity) ;
-        Art.remove t.uids (Art.unsafe_key server_identity) ;
+        remove_if_it_exists t.clients ~identity:from_uid ;
+        remove_if_it_exists t.servers ~identity:to_uid ;
+        remove_if_it_exists t.uids    ~identity:client_identity ;
+        remove_if_it_exists t.uids    ~identity:server_identity ;
         transmit ~src ~dst packet t.queue ;
         `Agreement (client_identity, server_identity)
       | Some _, Some _ ->
         Log.err (fun m -> m "An agreement with a bad identity was done.") ;
-        (* TODO *)
-        transmit ~src ~dst packet t.queue ;
+        (* transmit ~src ~dst packet t.queue ; *)
         `Continue
       | None, Some _ | Some _, None | None, None ->
         Log.err (fun m -> m "An agreement exists between a peer and nothing.") ;
-        (* TODO *)
-        transmit ~src ~dst packet t.queue ;
+        (* transmit ~src ~dst packet t.queue ; *)
         `Continue )
     | (Peer (Client, from_uid) as src), Blind, (Peer (Server, to_uid) as dst),
       Refused ->
@@ -810,7 +824,7 @@ module Relay = struct
       t -> identity:string -> (a, b) dst -> (a, b) packet ->
       [> `Continue | `Agreement of string * string ]
     = fun t ~identity dst packet ->
-    let src = match Art.find_opt t.uids (Art.unsafe_key identity) with
+    let src = match Hashtbl.find_opt t.uids identity with
       | Some (`Client uid) -> Exists (Client, Peer (Client, uid))
       | Some (`Server uid) -> Exists (Server, Peer (Server, uid))
       | None -> None in
@@ -854,13 +868,25 @@ module Relay = struct
     | None, Relay, Closed _ -> `Continue
 
     (* A client wants to communicate to a client. *)  
-    | Exists (_, Peer (Client, _)), Peer (Client, _), _ -> `Continue
+    | Exists (_, Peer (Client, src)), Peer (Client, dst), _ ->
+      Log.err (fun m -> m "An existing client (%04x) wants to communicate \
+        with another client (%04x)" src dst) ;
+      `Continue
     (* A server wants to communicate to a server. *)
-    | Exists (_, Peer (Server, _)), Peer (Server, _), _ -> `Continue
+    | Exists (_, Peer (Server, src)), Peer (Server, dst), _ ->
+      Log.err (fun m -> m "An existing server (%04x) wants to communicate \
+        with another server (%04x)" src dst) ;
+      `Continue
     (* An unregistered peer wants to communicate to a client. *)
-    | None, Peer (Client, _), _ -> `Continue
+    | None, Peer (Client, dst), _ ->
+      Log.err (fun m -> m "An unregistered peer wants to communicate \
+        with a client (%04x)" dst) ;
+      `Continue
     (* An unregistered peer wants to communicate to a server. *)
-    | None, Peer (Server, _), _ -> `Continue
+    | None, Peer (Server, dst), _ ->
+      Log.err (fun m -> m "An unregistered peer wants to communicate \
+        with a server (%04x)" dst) ;
+      `Continue
     (* A source identified as a client wants to send an error
        to the relay as a server. *)
     | Exists (Client, _), Relay, Relay_failure (Server, _) -> `Continue
@@ -870,6 +896,14 @@ module Relay = struct
     (* An unregistered peer wants to send an error to the relay. *)
     | None, Relay, Relay_failure _ -> `Continue
 
-    | Exists (Client, _), Relay, Hello_as_a_server _ -> `Continue
-    | Exists (Server, _), Relay, Hello_as_a_client -> `Continue
+    | Exists (Client, src), Relay, Hello_as_a_server _ ->
+      let src = uid_of_src src in
+      Log.err (fun m -> m "An already registered client (%S:%04x) wants to \
+        say hello." identity src) ;
+      `Continue
+    | Exists (Server, src), Relay, Hello_as_a_client ->
+      let src = uid_of_src src in
+      Log.err (fun m -> m "An already registered server (%S:%04x) wants to \
+        say hello." identity src) ;
+      `Continue
 end

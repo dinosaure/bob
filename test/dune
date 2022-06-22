@@ -8,4 +8,5 @@
 
 (rule
  (alias runtest)
- (action (run ./protocol.exe --color=always)))
+ (action
+  (run ./protocol.exe --color=always)))

@@ -88,8 +88,12 @@ module Server = struct
     let peer = `Server
     let src_and_packet = function
       | State.Server_packet (src, packet) -> Some (Income (src, packet))
-      | State.Client_packet (_src, _packet) ->
-        Log.warn (fun m -> m "Got an unexpected client packet.") ; None
+      | State.Client_packet (src, packet) ->
+        let src = State.uid_of_src src in
+        let packet = State.packet_to_raw packet in
+        Log.warn (fun m -> m "Got an unexpected client (%04x) packet: %a"
+          src State.pp_raw packet) ;
+        None
       | State.Invalid_packet (uid, packet) ->
         Log.warn (fun m -> m "Got an invalid packet (%04x): %a"
           uid State.pp_raw packet) ; None
@@ -112,8 +116,12 @@ module Client = struct
     let peer = `Client
     let src_and_packet = function
       | State.Client_packet (src, packet) -> Some (Income (src, packet))
-      | State.Server_packet (_src, _packet) ->
-        Log.warn (fun m -> m "Got an unexpected server packet.") ; None
+      | State.Server_packet (src, packet) ->
+        let src = State.uid_of_src src in
+        let packet = State.packet_to_raw packet in
+        Log.warn (fun m -> m "Got an unexpected server (%04x) packet: %a"
+          src State.pp_raw packet) ;
+        None
       | State.Invalid_packet (uid, packet) ->
         Log.warn (fun m -> m "Got an invalid packet (%04x): %a"
           uid State.pp_raw packet) ; None
@@ -139,35 +147,35 @@ module Client = struct
         `Write (String.sub str off len, k)
       | Rd _ -> assert false in
     function
-    | `Accept -> State.Client.accept t.state ; go t.oc
-    | `Refuse -> State.Client.refuse t.state ; go t.oc
+    | `Accept ->
+      Log.debug (fun m -> m "The client accepts the agreement.") ;
+      State.Client.accept t.state ; go t.oc
+    | `Refuse ->
+      Log.debug (fun m -> m "The client refuses the agreement.") ;
+      State.Client.refuse t.state ; go t.oc
 end
 
 module Relay = struct
   type t =
     { state : State.Relay.t
-    ; ctxs  : Protocol.ctx Art.t
-    ; ics   : (int * State.raw) Protocol.t Art.t
-    ; ocs   : unit Protocol.t Art.t }
+    ; ctxs  : (string, Protocol.ctx) Hashtbl.t
+    ; ics   : (string, (int * State.raw) Protocol.t) Hashtbl.t
+    ; ocs   : (string, unit Protocol.t) Hashtbl.t }
 
   let make () =
     { state= State.Relay.make ()
-    ; ctxs= Art.make ()
-    ; ics=  Art.make ()
-    ; ocs=  Art.make () }
+    ; ctxs=  Hashtbl.create 0x100
+    ; ics=   Hashtbl.create 0x100
+    ; ocs=   Hashtbl.create 0x100 }
 
-  let replace art key value =
-    ( match Art.find_opt art key with
-    | Some _ ->
-      Art.remove art key ;
-      Art.insert art key value
-    | None -> Art.insert art key value )
+  let remove_if_it_exists t ~identity =
+    match Hashtbl.find_opt t identity with
+    | Some _ -> Hashtbl.remove t identity | None -> ()
 
   let new_peer t ~identity =
     let ctx = Protocol.make () in
-    let identity = Art.unsafe_key identity in
-    Art.insert t.ctxs identity ctx ;
-    Art.insert t.ics identity (Protocol.recv ctx)
+    Hashtbl.add t.ctxs identity ctx ;
+    Hashtbl.add t.ics identity (Protocol.recv ctx)
 
   let rem_peer t ~identity =
     State.Relay.delete ~identity t.state
@@ -175,12 +183,19 @@ module Relay = struct
   let exists t ~identity = State.Relay.exists ~identity t.state
 
   let receive_from t ~identity data =
-    let identity = Art.unsafe_key identity in
-    match Art.find_opt t.ics identity,
-          Art.find_opt t.ctxs identity with
-    | None,    None   -> `Close
-    | None,    Some _ -> Art.remove t.ctxs identity ; `Close
-    | Some _,  None   -> Art.remove t.ics  identity ; `Close
+    match Hashtbl.find_opt t.ics identity,
+          Hashtbl.find_opt t.ctxs identity with
+    | None,    None   ->
+      Log.err (fun m -> m "%s does not exists as an active peer"
+        (identity :> string)) ; `Close
+    | None,    Some _ ->
+      Log.err (fun m -> m "%s does not have input anymore."
+        (identity :> string)) ;
+      remove_if_it_exists t.ctxs ~identity ; `Close
+    | Some _,  None   ->
+      Log.err (fun m -> m "%s does not have context anymore."
+        (identity :> string)) ;
+      remove_if_it_exists t.ics  ~identity ; `Close
     | Some ic, Some ctx ->
       let rec go data = function
         | Protocol.Done (uid, packet) ->
@@ -191,34 +206,39 @@ module Relay = struct
             | Relay_packet (dst, packet) ->
               ( match State.Relay.process_packet t.state
                   ~identity:(identity :> string) dst packet with
-              | `Agreement (a, b) as agreement ->
-                Art.remove t.ics (Art.unsafe_key a) ;
-                Art.remove t.ics (Art.unsafe_key b) ; agreement
-              | continue -> continue )
-            | _ -> `Continue in
+              | `Agreement (client, server) as agreement ->
+                Log.debug (fun m -> m "Agreement found between %s and %s."
+                  client server) ;
+                agreement
+              | `Continue -> `Continue )
+            | Invalid_packet (uid, packet) ->
+              Log.err (fun m -> m "Receive an invalid packet (%04x): %a"
+                uid State.pp_raw packet) ;
+              `Continue in
           ( match ret with
-          | `Agreement _ as agreement -> Protocol.save ctx data ; agreement
-          | continue ->
+          | `Agreement _ as agreement ->
+            Protocol.save ctx data ;
+            Hashtbl.replace t.ics identity (Protocol.recv ctx) ; agreement
+          | `Continue ->
             if Protocol.income_is_empty ctx && data_is_empty data
-            then ( replace t.ics identity (Protocol.recv ctx) ; continue )
+            then ( Hashtbl.replace t.ics identity (Protocol.recv ctx) ; `Continue )
             else ( let ic = Protocol.recv ctx in
-                   replace t.ics identity ic ;
+                   Hashtbl.replace t.ics identity ic ;
                    go data ic ) )
         | Protocol.Fail err ->
           Log.err (fun m -> m "Got an error from %s: %a"
             (identity :> string) Protocol.pp_error err) ;
-          Art.remove t.ics  identity ;
-          Art.remove t.ctxs identity ;
+          remove_if_it_exists t.ics  ~identity ;
+          remove_if_it_exists t.ctxs ~identity ;
           `Close
         | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
           ( match data with
           | `End -> go data (k `End)
           | `Data (  _,   _, 0) ->
-            replace t.ics identity ic ; `Read
+            Hashtbl.replace t.ics identity ic ; `Read
           | `Data (str, off, len) ->
             let max = min dst_len len in
             Bytes.blit_string str off dst dst_off max ;
-            Log.debug (fun m -> m "Fill %d byte(s)." max) ;
             go (`Data (str, off + max, len - max)) (k (`Len max)) ) 
         | Wr _ -> assert false in
       go data ic
@@ -226,26 +246,26 @@ module Relay = struct
   let rec send_to t =
     match State.Relay.next_packet t.state with
     | Some (identity, uid, packet) ->
-      ( match Art.find_opt t.ctxs (Art.unsafe_key identity) with
+      ( match Hashtbl.find_opt t.ctxs identity with
       | None ->
-        Log.warn (fun m -> m "%s is not an active connection." identity) ;
+        Log.warn (fun m -> m "[%04x]%s is not an active connection."
+          uid identity) ;
         `Close identity
       | Some ctx ->
         go t ~identity (Protocol.send_packet ctx (uid, packet)) )
     | None -> `Continue
   and go t ~identity = function
     | Protocol.Done () ->
-      replace t.ocs (Art.unsafe_key identity) (Done ()) ;
+      Hashtbl.replace t.ocs identity (Done ()) ;
       send_to t
     | Protocol.Fail err ->
       Log.err (fun m -> m "Got an error from %s: %a"
         identity Protocol.pp_error err) ;
-      let identity = Art.unsafe_key identity in
-      Art.remove t.ocs  identity ;
-      Art.remove t.ctxs identity ;
+      remove_if_it_exists t.ocs  ~identity ;
+      remove_if_it_exists t.ctxs ~identity ;
       `Close (identity :> string)
     | Wr { str; off; len; k; } ->
-      replace t.ocs (Art.unsafe_key identity) (k len) ;
+      Hashtbl.replace t.ocs identity (k len) ;
       `Write (identity, String.sub str off len)
     | Rd _ -> assert false
 end
