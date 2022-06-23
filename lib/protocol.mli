@@ -28,3 +28,5 @@ val send_string : ctx -> string -> unit t
 val send_packet : ctx -> int * State.raw -> unit t
 val recv : ctx -> (int * State.raw) t
 val save : ctx -> [ `End | `Data of string * int * int ] -> unit
+val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+val return : 'a -> 'a t

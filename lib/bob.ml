@@ -44,8 +44,8 @@ module Make (Peer : PEER) = struct
         ( match Peer.src_and_packet src_rel with
         | Some (Income (src, packet)) ->
           ( match Peer.process_packet t.state src packet with
-          | `Done sk -> `Done sk
-          | `Close -> t.closed <- true ; `Close
+          | `Done sk -> Log.debug (fun m -> m "The peer is done.") ; `Done sk
+          | `Close -> Log.debug (fun m -> m "The relay closed the connection.") ; t.closed <- true ; `Close
           | `Agreement _ as agreement ->
             Protocol.save t.ctx data ;
             t.ic <- Protocol.recv t.ctx ;
@@ -63,7 +63,10 @@ module Make (Peer : PEER) = struct
             else ( t.ic <- Protocol.recv t.ctx ; go data t.ic ) )
         | None -> Log.warn (fun m -> m "Discard a packet from %04x: %a"
           uid State.pp_raw packet) ; `Continue )
-      | Protocol.Fail err -> `Error err
+      | Protocol.Fail err ->
+        Log.err (fun m -> m "Got an error while parsing: %a"
+          Protocol.pp_error err) ;
+        `Error err
       | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
         ( match data with
         | `End -> go data (k `End)
@@ -156,17 +159,20 @@ module Relay = struct
     { state : State.Relay.t
     ; ctxs  : (string, Protocol.ctx) Hashtbl.t
     ; ics   : (string, (int * State.raw) Protocol.t) Hashtbl.t
-    ; ocs   : (string, unit Protocol.t) Hashtbl.t }
+    ; mutable k : [ `Close of string | `Continue ] Protocol.t
+    ; mutable peer_identity : string }
+
+  let pp ppf t =
+    Fmt.pf ppf "{ @[<hov>ctxs=@[<hov>%a@];@ ics=%d;@] }"
+      Fmt.(Dump.list string) (Hashtbl.fold (fun k _ acc -> k :: acc) t.ctxs [])
+      (Hashtbl.length t.ics)
 
   let make () =
     { state= State.Relay.make ()
     ; ctxs=  Hashtbl.create 0x100
     ; ics=   Hashtbl.create 0x100
-    ; ocs=   Hashtbl.create 0x100 }
-
-  let remove_if_it_exists t ~identity =
-    match Hashtbl.find_opt t identity with
-    | Some _ -> Hashtbl.remove t identity | None -> ()
+    ; k=     Done `Continue
+    ; peer_identity= "\xde\xad\xbe\xef" }
 
   let new_peer t ~identity =
     let ctx = Protocol.make () in
@@ -174,24 +180,25 @@ module Relay = struct
     Hashtbl.add t.ics identity (Protocol.recv ctx)
 
   let rem_peer t ~identity =
-    State.Relay.delete ~identity t.state
+    State.Relay.delete ~identity t.state ;
+    Hashtbl.remove t.ctxs identity ;
+    Hashtbl.remove t.ics  identity
 
   let exists t ~identity = State.Relay.exists ~identity t.state
 
   let receive_from t ~identity data =
+    Log.debug (fun m -> m "Current state: %a" pp t) ;
     match Hashtbl.find_opt t.ics identity,
           Hashtbl.find_opt t.ctxs identity with
     | None,    None   ->
-      Log.err (fun m -> m "%s does not exists as an active peer"
-        (identity :> string)) ; `Close
+      Log.err (fun m -> m "%s does not exists as an active peer" identity) ;
+      `Close
     | None,    Some _ ->
-      Log.err (fun m -> m "%s does not have input anymore."
-        (identity :> string)) ;
-      remove_if_it_exists t.ctxs ~identity ; `Close
+      Log.err (fun m -> m "%s does not have input anymore." identity) ;
+      Hashtbl.remove t.ctxs identity ; `Close
     | Some _,  None   ->
-      Log.err (fun m -> m "%s does not have context anymore."
-        (identity :> string)) ;
-      remove_if_it_exists t.ics  ~identity ; `Close
+      Log.err (fun m -> m "%s does not have context anymore." identity) ;
+      Hashtbl.remove t.ics  identity ; `Close
     | Some ic, Some ctx ->
       let rec go data = function
         | Protocol.Done (uid, packet) ->
@@ -219,9 +226,9 @@ module Relay = struct
                    go data ic ) )
         | Protocol.Fail err ->
           Log.err (fun m -> m "Got an error from %s: %a"
-            (identity :> string) Protocol.pp_error err) ;
-          remove_if_it_exists t.ics  ~identity ;
-          remove_if_it_exists t.ctxs ~identity ;
+            identity Protocol.pp_error err) ;
+          Hashtbl.remove t.ics  identity ;
+          Hashtbl.remove t.ctxs identity ;
           `Close
         | Rd { buf= dst; off= dst_off; len= dst_len; k; } as ic ->
           ( match data with
@@ -235,29 +242,38 @@ module Relay = struct
         | Wr _ -> assert false in
       go data ic
 
-  let rec send_to t =
-    match State.Relay.next_packet t.state with
-    | Some (identity, uid, packet) ->
-      ( match Hashtbl.find_opt t.ctxs identity with
-      | None ->
-        Log.warn (fun m -> m "[%04x]%s is not an active connection."
-          uid identity) ;
-        `Close identity
-      | Some ctx ->
-        go t ~identity (Protocol.send_packet ctx (uid, packet)) )
-    | None -> `Continue
-  and go t ~identity = function
-    | Protocol.Done () ->
-      Hashtbl.replace t.ocs identity (Done ()) ;
-      send_to t
+  let rec send_to t = match t.k with
+    | Protocol.Rd _ -> assert false
     | Protocol.Fail err ->
       Log.err (fun m -> m "Got an error from %s: %a"
-        identity Protocol.pp_error err) ;
-      remove_if_it_exists t.ocs  ~identity ;
-      remove_if_it_exists t.ctxs ~identity ;
-      `Close (identity :> string)
-    | Wr { str; off; len; k; } ->
-      Hashtbl.replace t.ocs identity (k len) ;
-      `Write (identity, String.sub str off len)
-    | Rd _ -> assert false
+        t.peer_identity Protocol.pp_error err) ;
+      Hashtbl.remove t.ctxs t.peer_identity ;
+      `Close t.peer_identity
+    | Protocol.Wr { str; off; len; k; } ->
+      t.k <- k len ; `Write (t.peer_identity, String.sub str off len)
+    | Protocol.Done (`Close identity) ->
+      t.k <- Protocol.Done `Continue ; `Close identity
+    | Protocol.Done `Continue ->
+      match State.Relay.next_packet t.state with
+      | Some (identity, uid, (`Done as packet))
+      | Some (identity, uid, (`Accepted _ as packet)) ->
+        ( match Hashtbl.find_opt t.ctxs identity with
+        | None -> `Close identity
+        | Some ctx ->
+          t.peer_identity <- identity ;
+          t.k <- Protocol.(send_packet ctx (uid, packet) >>= fun () ->
+                           Hashtbl.remove t.ics  identity ;
+                           Hashtbl.remove t.ctxs identity ;
+                           return (`Close identity)) ;
+          Log.debug (fun m -> m "Send the last packet to %s" identity) ;
+          send_to t )
+      | Some (identity, uid, packet) ->
+        ( match Hashtbl.find_opt t.ctxs identity with
+        | None -> `Close t.peer_identity
+        | Some ctx ->
+          t.peer_identity <- identity ;
+          t.k <- Protocol.(send_packet ctx (uid, packet) >>= fun () ->
+                           return `Continue) ;
+          send_to t )
+      | None -> `Continue
 end

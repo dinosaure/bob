@@ -124,6 +124,7 @@ let read fd : [ `Data of string | `End ] t =
   match Hashtbl.find_opt prd fd with
   | Some (`Read ivar) -> Ivar.read ivar
   | _ ->
+    Log.debug (fun m -> m "Start to read something into %d." (Obj.magic fd)) ;
     let ivar : [ `Data of string | `End ] Ivar.t = Ivar.create () in
     Hashtbl.add prd fd (`Read ivar) ;
     Ivar.read ivar
@@ -145,11 +146,13 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
     Hashtbl.add prd fd (`Accept ivar) ;
     Ivar.read ivar
 
-let write fd ~off ~len str : (int, Unix.error) result t =
-  match Hashtbl.find_opt pwr fd with
+let write fd ~off ~len str
+  : (int, [ `Closed | `Unix of Unix.error ]) result t
+  = match Hashtbl.find_opt pwr fd with
   | Some (_, ivar) -> Ivar.read ivar
   | None ->
-    let ivar : (int, Unix.error) result Ivar.t = Ivar.create () in
+    let ivar : (int, [ `Closed | `Unix of Unix.error ]) result Ivar.t =
+      Ivar.create () in
     Hashtbl.add pwr fd ((str, off, len), ivar) ;
     Ivar.read ivar
 
@@ -163,7 +166,7 @@ let close fd =
   | Some (`Read ivar) -> Hashtbl.remove prd fd ; Ivar.fill ivar `End
   | Some _ -> () | None -> () ) ;
   ( match Hashtbl.find_opt pwr fd with
-  | Some (_, ivar) -> Hashtbl.remove pwr fd ; Ivar.fill ivar (Error Unix.EBADF)
+  | Some (_, ivar) -> Hashtbl.remove pwr fd ; Ivar.fill ivar (Error `Closed)
   | None -> () ) ;
   return ()
 
@@ -221,10 +224,13 @@ let sigwr fd =
       let len = Unix.write_substring fd str off len in
       Hashtbl.remove pwr fd ;
       Ivar.fill ivar (Ok len)
-    with Unix.Unix_error (errno, f, arg) ->
-      Log.err (fun m -> m "%s(%s): %s" f arg (Unix.error_message errno)) ;
-      Hashtbl.remove pwr fd ;
-      Ivar.fill ivar (Error errno)
+    with
+      | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
+        Hashtbl.remove pwr fd ; Ivar.fill ivar (Error `Closed)
+      | Unix.Unix_error (errno, f, arg) ->
+        Log.err (fun m -> m "%s(%s): %s" f arg (Unix.error_message errno)) ;
+        Hashtbl.remove pwr fd ;
+        Ivar.fill ivar (Error (`Unix errno))
 
 module Time = struct
   type t = float
@@ -272,10 +278,16 @@ let run fiber =
     let fbs = to_list root in
     let slp = Time.sleepers [] in
 
-    let ready_rds, ready_wrs, _ = Unix.select rds wrs [] 0.1 in
+    let ready_rds, ready_wrs, _ =
+      try Unix.select rds wrs [] 0.1
+      with exn ->
+        Log.err (fun m -> m "Got an exception with rds:@[<hov>%a@] and wrs:@[<hov>%a@]"
+          Fmt.(Dump.list (using Obj.magic int)) rds
+          Fmt.(Dump.list (using Obj.magic int)) wrs) ; raise exn in
 
     List.iter (fun (Fiber (k, ivar)) -> try k ivar (fun () -> ()) with exn ->
       Log.err (fun m -> m "Got an unexpected exception: %s" (Printexc.to_string exn))) fbs ;
+
     List.iter (fun ivar -> Ivar.fill ivar ()) slp ;
     List.iter sigrd ready_rds ;
     List.iter sigwr ready_wrs ;

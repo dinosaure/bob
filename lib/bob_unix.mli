@@ -12,7 +12,7 @@
 
 type error =
   [ `Connection_closed_by_relay
-  | `Write of Unix.error
+  | `Write of [ `Closed | `Unix of Unix.error ]
   | Bob.Protocol.error ]
 
 val pp_error : error Fmt.t

@@ -10,23 +10,15 @@ let rec full_write fd str ~off ~len =
     if len - len' > 0 then full_write fd str ~off:(off + len') ~len:(len - len')
     else Fiber.return (Ok ())
 
-let full_read fd =
-  let buf = Buffer.create 0x100 in
-  let rec go () = Fiber.read fd >>= function
-    | `Data str -> Buffer.add_string buf str ; go ()
-    | `End -> Fiber.return (Buffer.contents buf) in
-  go () >>= function
-  | "" -> Fiber.return `End
-  | str -> Fiber.return (`Data (str, 0, String.length str))
-
 type error =
   [ `Connection_closed_by_relay
-  | `Write of Unix.error
+  | `Write of [ `Closed | `Unix of Unix.error ]
   | Bob.Protocol.error ]
 
 let pp_error ppf = function
   | `Connection_closed_by_relay -> Fmt.string ppf "Connection closed by relay"
-  | `Write err -> Fmt.pf ppf "write(): %s" (Unix.error_message err)
+  | `Write `Closed -> Fmt.pf ppf "Connection closed"
+  | `Write (`Unix err) -> Fmt.pf ppf "write(): %s" (Unix.error_message err)
   | #Bob.Protocol.error as err -> Bob.Protocol.pp_error ppf err
 
 let map_read = function
@@ -69,7 +61,8 @@ let run ~choose ~agreement ~receive ~send socket t =
         agreement t v ; Fiber.pause () >>= read
       | `Done shared_keys ->
         Fiber.Ivar.fill handshake_is_done `Done ;
-        Fiber.return (Ok shared_keys)
+        Log.debug (fun m -> m "Finish the read fiber.") ;
+        Fiber.close socket >>= fun () -> Fiber.return (Ok shared_keys)
       | `Close ->
         Log.err (fun m -> m "The relay closed the connection.") ;
         Fiber.Ivar.fill errored (`Error `Connection_closed_by_relay) ;
@@ -87,7 +80,9 @@ let run ~choose ~agreement ~receive ~send socket t =
                         (v :> outcome) end
       ; begin fun () -> send () >>| fun v ->
                         (v :> outcome) end ] >>= function
-    | `Done -> Fiber.return (Ok ())
+    | `Done ->
+      Log.debug (fun m -> m "Finish the write fiber.") ;
+      Fiber.return (Ok ())
     | `Continue -> Fiber.pause () >>= write
     | `Error err ->
       Log.err (fun m -> m "Got an error: %a" pp_error err) ;
@@ -98,14 +93,24 @@ let run ~choose ~agreement ~receive ~send socket t =
       Log.debug (fun m -> m "send -> @[<hov>%a@]"
         (Hxd_string.pp Hxd.default) str) ;
       full_write socket str ~off:0 ~len:(String.length str) >>= function
-      | Ok () -> write ()
-      | Error err ->
+      | Ok () -> Fiber.pause () >>= write
+      | Error `Closed ->
+        (* XXX(dinosaure): according to our protocol, only the relay is able
+           to close the connection. *)
+        if not (Fiber.Ivar.is_empty handshake_is_done)
+        then Fiber.return (Ok ())
+        else ( if Fiber.Ivar.is_empty errored
+               then Fiber.Ivar.fill errored (`Error (`Write `Closed))
+             ; Fiber.return (Error (`Write `Closed)) )
+      | Error (`Unix err) ->
         Log.err (fun m -> m "Got a write error: %s" (Unix.error_message err)) ;
         if Fiber.Ivar.is_empty errored
-        then Fiber.Ivar.fill errored (`Error (`Write err)) ;
-        Fiber.return (Error (`Write err)) in
+        then Fiber.Ivar.fill errored (`Error (`Write (`Unix err))) ;
+        Fiber.return (Error (`Write (`Unix err))) in
   Fiber.fork_and_join write read >>= function
-  | Ok (), Ok shared_keys -> Fiber.return (Ok shared_keys)
+  | Ok (), Ok shared_keys ->
+    Log.debug (fun m -> m "The peer finished correctly.") ;
+    Fiber.return (Ok shared_keys)
   | Error err, _ -> Fiber.return (Error err)
   | _, Error err -> Fiber.return (Error err)
 
@@ -114,16 +119,13 @@ let server socket ~g ~secret =
   let choose _ = assert false in
   let agreement _ = assert false in
   run ~choose ~agreement
-    ~receive:Bob.Server.receive ~send:Bob.Server.send socket t >>= fun res ->
-  Fiber.close socket >>= fun () -> Fiber.return res
+    ~receive:Bob.Server.receive ~send:Bob.Server.send socket t
 
 let client socket ~choose ~g ~password =
   let identity = Unix.gethostname () in
   let t = Bob.Client.make ~g ~password ~identity in
   run ~choose ~agreement:Bob.Client.agreement
-    ~receive:Bob.Client.receive ~send:Bob.Client.send socket t >>= fun res ->
-  (* TODO(dinosaure): when we refuse, we should keep alive the socket. *)
-  Fiber.close socket >>= fun () -> Fiber.return res
+    ~receive:Bob.Client.receive ~send:Bob.Client.send socket t
 
 let pp_sockaddr ppf = function
   | Unix.ADDR_UNIX str -> Fmt.pf ppf "<%s>" str
@@ -159,12 +161,17 @@ let relay ?(timeout= 5.) socket ~stop =
     | `Stop     -> Fiber.return ()
     | `Continue -> Fiber.pause () >>= write
     | `Close identity ->
+      Log.debug (fun m -> m "Close %s" identity) ;
       ( match Hashtbl.find_opt fds identity with
-      | Some  _ -> Hashtbl.remove fds identity ; Fiber.return ()
+      | Some (fd, _) ->
+        Hashtbl.remove fds identity ;
+        Fiber.close fd
       | None -> Fiber.return () ) >>= write
     | `Write (identity, str) ->
       ( match Hashtbl.find_opt fds identity with
-      | None -> Fiber.return ()
+      | None ->
+        Log.err (fun m -> m "%s does not exists as an active peer."
+          identity) ; write ()
       | Some (fd, _) ->
         Log.debug (fun m -> m "to   [%20s] <- @[<hov>%a@]"
           identity (Hxd_string.pp Hxd.default) str) ;
@@ -181,37 +188,36 @@ let relay ?(timeout= 5.) socket ~stop =
       Hashtbl.filter_map_inplace begin fun identity (fd, ivar) ->
       match Fiber.Ivar.get ivar with
       | None -> Some (fd, ivar)
-      | Some `Delete -> None
+      | Some `Delete -> Log.debug (fun m -> m "Delete %s from the reader" identity) ; None
       | Some `Continue ->
         let ivar = Fiber.detach begin fun () ->
-          Fiber.read fd >>| map_read >>= fun (`Read data) ->
-          Log.debug (fun m -> m "from [%20s] -> %a" identity pp_data data) ;
-          match Bob.Relay.receive_from t ~identity data with
-          | `Continue | `Read -> Fiber.return `Continue
-          | `Close -> Fiber.close fd >>= fun () -> Fiber.return `Delete
-          | `Agreement _ ->
-            (* XXX(dinosaure): In such case, the peer is a client and it sent
-               an [Accepted] packet. *)
-            full_read fd >>= fun data ->
-            Log.debug (fun m -> m "Remaining data from %s: %a"
-              identity pp_data data) ;
-            let _continue_or_read = Bob.Relay.receive_from t ~identity data in
-            Fiber.close fd >>= fun () ->
-            Fiber.return `Delete end in
+          match Hashtbl.mem fds identity with
+          | false -> Fiber.return `Delete
+          | true  ->
+          Fiber.read fd >>| map_read >>= function
+          | `Read `End -> Fiber.return `Delete
+          | `Read (`Data _ as data) ->
+            Log.debug (fun m -> m "from [%20s] -> %a" identity pp_data data) ;
+            match Bob.Relay.receive_from t ~identity data with
+            | `Close -> Fiber.return `Delete
+            | `Agreement _ | `Read | `Continue -> Fiber.return `Continue end in
         Some (fd, ivar) end fds ; 
       Fiber.pause () >>= read in
   let handler fd sockaddr =
+    Log.debug (fun m -> m "Current state: %a" Bob.Relay.pp t) ;
     let identity = Fmt.str "%a" pp_sockaddr sockaddr in
     Log.debug (fun m -> m "Add %s as an active connection." identity) ;
-    let ivar = Fiber.Ivar.full `Continue in
-    Hashtbl.add fds identity (fd, ivar) ;
+    Hashtbl.add fds identity (fd, Fiber.Ivar.full `Continue) ;
     Bob.Relay.new_peer t ~identity ;
+
+    (* XXX(dinosaure): handle timeout. *)
     Fiber.async begin fun () -> Fiber.sleep timeout >>= fun () ->
     if Bob.Relay.exists t ~identity
     then ( Log.warn (fun m -> m "%s timeout" identity)
          ; Bob.Relay.rem_peer t ~identity ) ;
     Hashtbl.remove fds identity ;
     Fiber.close fd end ;
+
     Fiber.return () in
   fork_and_join
     begin fun () -> serve_when_ready ~stop ~handler socket end

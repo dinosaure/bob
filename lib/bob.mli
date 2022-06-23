@@ -44,6 +44,7 @@ module Relay : sig
   val new_peer : t -> identity:string -> unit
   val rem_peer : t -> identity:string -> unit
   val exists : t -> identity:string -> bool
+  val pp : t Fmt.t
 
   val receive_from : t -> identity:string ->
     [ `End | `Data of (string * int * int) ] ->

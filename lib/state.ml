@@ -657,19 +657,14 @@ module Relay = struct
     Some (server_identity, public, Set.remove uid clients) end t.servers ;
     !active_servers
 
-  let remove_if_it_exists t ~identity =
-    match Hashtbl.find_opt t identity with
-    | Some _ -> Hashtbl.remove t identity | None -> ()
-
   let exists ~identity t = Hashtbl.mem t.uids identity
 
   let delete ~identity t =
     match Hashtbl.find_opt t.uids identity with
     | Some (`Server uid) ->
       Log.debug (fun m -> m "Delete the server %04x" uid) ;
-      if Hashtbl.mem t.servers uid
-      then Hashtbl.remove t.servers uid ;
-      remove_if_it_exists t.uids ~identity ;
+      Hashtbl.remove t.servers uid ;
+      Hashtbl.remove t.uids    identity ;
       let clients = remove_server_candidate_from_clients t uid in
       respond (to_server ~uid) (Closed Relay) t.queue ;
       let packet = Closed (Peer (Server, uid)) in
@@ -677,9 +672,8 @@ module Relay = struct
       respond (to_client ~uid) packet t.queue end clients
     | Some (`Client uid) ->
       Log.debug (fun m -> m "Delete the client %04x" uid) ;
-      if Hashtbl.mem t.clients uid
-      then Hashtbl.remove t.clients uid ;
-      remove_if_it_exists t.uids ~identity ;
+      Hashtbl.remove t.clients uid ;
+      Hashtbl.remove t.uids    identity ;
       let servers = remove_client_candidate_from_servers t uid in
       respond (to_client ~uid) (Closed Relay) t.queue ;
       let packet = Closed (Peer (Client, uid)) in
@@ -814,8 +808,8 @@ module Relay = struct
         Log.debug (fun m -> m "Intersection: @[<hov>%a@]"
           Fmt.(Dump.list int) inter) ;
         (* clean hashtbls *)
-        remove_if_it_exists t.clients ~identity:from_uid ;
-        remove_if_it_exists t.servers ~identity:to_uid ;
+        Hashtbl.remove t.clients from_uid ;
+        Hashtbl.remove t.servers to_uid ;
         transmit ~src ~dst packet t.queue ;
         respond (to_client ~uid:from_uid) Done t.queue ;
         `Agreement (client_identity, server_identity)

@@ -80,6 +80,29 @@ type 'a t =
 and 'a krd = [ `End | `Len of int ] -> 'a t
 and 'a kwr = int -> 'a t
 
+let ( >>= ) =
+  let rec go f m len = match m len with
+    | Done v -> f v
+    | Fail err -> Fail err
+    | Rd { buf; off; len; k } ->
+      Rd { buf; off; len; k= go f k }
+    | Wr { str; off; len; k } ->
+      let k0 = function `End -> k 0 | `Len len -> k len in
+      let k1 = function
+        | 0 -> go f k0 `End | len -> go f k0 (`Len len) in
+      Wr { str; off; len; k= k1; } in
+  fun m f -> match m with
+  | Done v -> f v
+  | Fail err -> Fail err
+  | Rd { buf; off; len; k; } ->
+    Rd { buf; off; len; k= go f k }
+  | Wr { str; off; len; k; } ->
+    let k0 = function `End -> k 0 | `Len len -> k len in
+    let k1 = function 0 -> go f k0 `End | len -> go f k0 (`Len len) in
+    Wr { str; off; len; k= k1; }
+
+let return v = Done v
+
 exception Leave of error
 
 let leave_with _ctx error = raise (Leave error)
