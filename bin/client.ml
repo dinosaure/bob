@@ -42,11 +42,11 @@ let relay =
   let doc = "The IP address of the relay." in
   Arg.(value & opt (addr_inet ~default:9000)
                    Unix.(ADDR_INET (inet_addr_loopback, 9000))
-             & info ["r"; "relay"] ~doc)
+             & info ["r"; "relay"] ~doc ~docv:"<addr>:<port>")
 
 let password =
   let doc = "The password to share." in
-  Arg.(required & pos ~rev:true 0 (some string) None & info [] ~doc)
+  Arg.(required & pos ~rev:true 0 (some string) None & info [] ~doc ~docv:"<password>")
 
 let yes =
   let doc = "Answer yes to all bob questions without prompting." in
@@ -57,7 +57,9 @@ let cmd =
   let man =
     [ `S Manpage.s_description
     ; `P "$(tname) tries many handshakes with many peers throught the given \
-          relay and the given password. Once found, we receive the desired \
-          file." ] in
+          relay with the given password. Once found, it asks the user if it \
+          wants to complete the handshake. Therefore, if the user accepts, we \
+          receive the desired file. Otherwise, $(tname) waits for another \
+          peer." ] in
   Cmd.v (Cmd.info "recv" ~doc ~man)
     Term.(ret (const run $ setup_logs $ setup_random $ relay $ password $ yes)) 

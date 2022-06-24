@@ -15,25 +15,26 @@ open Cmdliner
 open Args
 
 let timeout =
-  let doc = "How long the relay can keep an active connection." in
-  Arg.(value & opt float 5.0 & info [ "t"; "timeout" ] ~doc)
+  let doc = "How long the relay can keep an active connection (in seconds)." in
+  Arg.(value & opt float 3600. & info [ "t"; "timeout" ] ~doc ~docv:"<seconds>")
 
 let inet_addr =
   let doc = "Set the source address where the relay will be bound." in
-  Arg.(value & pos 0 inet_addr Unix.inet_addr_any & info [] ~doc)
+  Arg.(value & pos 0 inet_addr Unix.inet_addr_any & info [] ~doc ~docv:"<inet-addr>")
 
 let port =
   let doc = "Set the port where the relay will listen." in
-  Arg.(value & pos 1 int 9000 & info [] ~doc)
+  Arg.(value & pos 1 int 9000 & info [] ~doc ~docv:"<port>")
 
 let backlog =
   let doc = "The maximum length to which the queue of pending connections may grow." in
-  Arg.(value & opt int 40 & info [ "b"; "backlog" ] ~doc)
+  Arg.(value & opt int 40 & info [ "b"; "backlog" ] ~doc ~docv:"<backlog>")
 
 let pid =
   let doc = "Write into a file the PID of the relay." in
+  let env = Cmd.Env.info "BOB_PID" in
   let fpath = Arg.conv (Fpath.of_string, Fpath.pp) in
-  Arg.(value & opt (some fpath) None & info [ "p"; "pid" ] ~doc)
+  Arg.(value & opt (some fpath) None & info [ "p"; "pid" ] ~env ~doc ~docv:"<filename>")
 
 let setup_pid = function
   | None -> ()
@@ -49,6 +50,7 @@ let cmd =
   let man =
     [ `S Manpage.s_description
     ; `P "$(tname) launches a Bob relay which is able to handle peers and let \
-          them to do handshakes and transfer files." ] in
+          them to do handshakes and transfer files. The relay can be safely \
+          killed by a $(b,SIGINT) (^C) signal." ] in
   Cmd.v (Cmd.info "relay" ~doc ~man)
     Term.(ret (const run $ setup_logs $ timeout $ inet_addr $ port $ backlog $ setup_pid))

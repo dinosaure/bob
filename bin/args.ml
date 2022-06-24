@@ -61,7 +61,7 @@ let inet_addr =
     | inet_addr -> Ok inet_addr
     | exception _ -> Error (msgf "Invalid address: %S" str) in
   let pp = Fmt.using Unix.string_of_inet_addr Fmt.string in
-  Arg.conv (parser, pp)
+  Arg.conv ~docv:"<inet-addr>" (parser, pp)
 
 let addr_inet ~default =
   let parser str = match Ipaddr.with_port_of_string ~default str with
@@ -70,7 +70,7 @@ let addr_inet ~default =
   let pp ppf = function
     | Unix.ADDR_INET (inet_addr, port) -> Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port
     | Unix.ADDR_UNIX str -> Fmt.pf ppf "<%s>" str in
-  Arg.conv (parser, pp)
+  Arg.conv ~docv:"<addr>" (parser, pp)
 
 let string_to_int_array str =
   let res = Array.make (String.length str / 2) 0 in
@@ -89,11 +89,11 @@ let seed =
     | Ok seed -> Ok (string_to_int_array seed)
     | Error _ as err -> err in
   let pp = Fmt.using (Base64.encode_exn <.> int_array_to_string) Fmt.string in
-  Arg.conv (parser, pp)
+  Arg.conv ~docv:"<seed>" (parser, pp)
 
 let seed =
-  let doc = "The seed used to initialize the random number generator." in
-  Arg.(value & opt (some seed) None & info ["s"; "seed"] ~doc)
+  let doc = "The seed (in base64) used to initialize the random number generator." in
+  Arg.(value & opt (some seed) None & info ["s"; "seed"] ~doc ~docv:"<seed>")
 
 let setup_random = function
   | None -> Random.State.make_self_init ()
