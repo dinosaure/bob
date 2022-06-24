@@ -24,9 +24,25 @@ Then, you can launch a relay, a server and a client:
 $ git clone https://github.com/dinosaure/bob
 $ cd bob
 relay $ dune exec bin/bob.exe -- relay
-client$ dune exec bin/bob.exe -- client <password>
-server$ dune exec bin/bob.exe -- server <password>
+server$ dune exec bin/bob.exe -- send <password>
+client$ dune exec bin/bob.exe -- recv <password>
+Accept from <server-identity> [Y/n]: Y
+Handshake is done with <server-identity>
 ```
+
+### Avantage of `bob`
+
+#### The relay implementation
+
+One of the advantage of `bob` is the implementation of its relay, which simply
+transfers information from one peer to another without altering the content.
+The investigators of the agreement are **only** the peers and the relay does
+not intervene **in any way** in this agreement. The sole role of the relay is
+to transfer information from one peer to another. When two peers reach an
+agreement, they notif the relay so that it can allocate a secure channel
+between the two peers.
+
+The relay is therefore _blind_ to the algorithm used to reach an agreement.
 
 [spoke]: https://github.com/dinosaure/spoke
 [article]: https://blog.osau.re/articles/spoke.html
