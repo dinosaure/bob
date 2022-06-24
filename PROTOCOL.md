@@ -43,8 +43,8 @@ to the relay.
 
 ````
 | destination | packet |    data    |
-    [ 0000 ]    [ 00 ]   [ public ]   => `Hello_as_a_server public
-    [ 0000 ]    [ 01 ]                => `Hello_as_a_client
+    [ 0000 ]    [ 00 ]   [ public ]   => Hello_as_a_server public
+    [ 0000 ]    [ 01 ]                => Hello_as_a_client
 ```
 
 When the relay receives these packets, it can assign a unique identifier to
@@ -56,8 +56,8 @@ this kind of packet.
 
 ```
 |  source  | packet |        data         |
-  [ 0000 ] | [ 02 ] | <addr>:<port>'\000' | => `Server_identity <addr>:<port>
-  [ 0000 ] | [ 03 ] | <addr>:<port>'\000' | => `Client_identity <addr>:<port>
+  [ 0000 ] | [ 02 ] | <addr>:<port>'\000' | => Server_identity <addr>:<port>
+  [ 0000 ] | [ 03 ] | <addr>:<port>'\000' | => Client_identity <addr>:<port>
 ```
 
 ### Broadcast
@@ -75,7 +75,7 @@ to handle this kind of packet.
 |  source  | packet |                    data                     |
   [ 0000 ]   [ 04 ]   [ xxxx ] [ public ] [ <addr>:<port>'\000' ]
 
-  => `New_server (uid, public, identity)
+  => New_server (uid, public, identity)
 ```
 
 [spoke]: https://github.com/dinosaure/spoke
