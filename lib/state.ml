@@ -138,41 +138,31 @@ let to_server ~uid = Peer (Server, uid)
 let to_client ~uid = Peer (Client, uid)
 
 type ('f, 't) packet =
-  | Hello_as_a_server
-    : { public : Spoke.public } -> (server, relay) packet
-  | Hello_as_a_client
-    : (client, relay) packet
-  | Server_identity
-    : string -> (relay, server) packet
-  | Client_identity
-    : string -> (relay, client) packet
-  | New_server
-    : { uid : int
-      ; public : Spoke.public
-      ; identity : string; } -> (relay, client) packet
-  | Client_validator
-    : string -> (client, server) packet
+  | Hello_as_a_server : { public : Spoke.public } -> (server, relay) packet
+  | Hello_as_a_client : (client, relay) packet
+  | Server_identity   : string -> (relay, server) packet
+  | Client_identity   : string -> (relay, client) packet
+  | New_server        : { uid : int
+                      ; public : Spoke.public
+                      ; identity : string; } -> (relay, client) packet
+  | Client_validator  : string -> (client, server) packet
   | Y_and_server_validator
-    : { _Y : string; server_validator : string; } -> (server, client) packet
+    : { _Y : string
+      ; server_validator : string; } -> (server, client) packet
   | X_and_client_identity
-    : { _X : string; identity : string; } -> (client, server) packet
-  | Agreement
-    : string -> (server, client) packet
-  | Closed : ('f, 't) src -> (relay, 't) packet
-  | Accepted
-    : string -> (client, server) packet
-  | Refused
-    : (client, server) packet
-  | Relay_failure
-    : ('f, 't) peer *
-      [ `Invalid_client of int
-      | `Invalid_server of int
-      | `No_handshake_with of int
-      | `No_agreement ] -> ('f, relay) packet
-  | Spoke_failure
-    : ('f, 't) peer * Spoke.error -> ('f, 't) packet
-  | Done
-    : (relay, client) packet
+    : { _X : string
+      ; identity : string; } -> (client, server) packet
+  | Agreement         : string -> (server, client) packet
+  | Closed            : ('f, 't) src -> (relay, 't) packet
+  | Accepted          : string -> (client, server) packet
+  | Refused           : (client, server) packet
+  | Relay_failure     : ('f, 't) peer * [ `Invalid_client of int
+                                        | `Invalid_server of int
+                                        | `No_handshake_with of int
+                                        | `No_agreement ] -> ('f, relay) packet
+  | Spoke_failure     : ('f, 't) peer * Spoke.error -> ('f, 't) packet
+  | Done              : (relay, client) packet
+  | Timeout           : ('t, _) peer -> (relay, 't) packet
 
 type raw =
   [ `Hello_as_a_server of Spoke.public
@@ -192,7 +182,8 @@ type raw =
                       | `No_handshake_with of int
                       | `No_agreement ]
   | `Spoke_failure of Spoke.error
-  | `Done ]
+  | `Done
+  | `Timeout ]
 
 let to_hex str =
   let res = Bytes.create (String.length str * 2) in
@@ -228,6 +219,7 @@ let pp_raw ppf = function
   | `Relay_failure _ -> Fmt.pf ppf "Relay_failure"
   | `Spoke_failure _ -> Fmt.pf ppf "Spoke_failure"
   | `Done -> Fmt.pf ppf "Done"
+  | `Timeout -> Fmt.pf ppf "Timeout"
 
 let packet_to_raw
   : type f t. (f, t) packet -> raw
@@ -253,6 +245,8 @@ let packet_to_raw
   | Spoke_failure (_, err) -> `Spoke_failure err
   | Closed Relay -> `Closed 000
   | Done -> `Done
+  | Timeout Client -> `Timeout
+  | Timeout Server -> `Timeout
 
 type 'f send =
   | Send_to  : ('f, 't) dst * ('f, 't) packet -> 'f send
@@ -287,6 +281,10 @@ let src_and_packet ~peer uid packet = match uid, packet with
     | `Server -> Client_packet (Relay, Closed (Peer (Server, uid)))
     | `Client -> Server_packet (Relay, Closed (Peer (Client, uid))) )
   | 00, `Done -> Client_packet (Relay, Done)
+  | 00, `Timeout ->
+    ( match peer with
+    | `Server -> Client_packet (Relay, Timeout Client)
+    | `Client -> Server_packet (Relay, Timeout Server) )
   | uid, `Client_validator validator ->
     Server_packet (Peer (Client, uid), Client_validator validator)
   | uid, `Y_and_server_validator (_Y, server_validator) ->
@@ -406,6 +404,7 @@ module Server = struct
       then Hashtbl.remove t.clients client_uid ;
       `Continue
     | Relay, Closed Relay -> `Close
+    | Relay, Timeout Server -> `Close
 end
 
 module Client = struct
@@ -501,9 +500,8 @@ module Client = struct
       if Hashtbl.mem t.servers server_uid
       then Hashtbl.remove t.servers server_uid ;
       `Continue
-    | Relay, Closed Relay ->
-      Log.debug (fun m -> m "The connection was closed by the relay.") ;
-      `Close
+    | Relay, Closed Relay -> `Close
+    | Relay, Timeout Client -> `Close
     | Peer (Server, uid), Y_and_server_validator { _Y; server_validator; } ->
       ( match Hashtbl.find_opt t.servers uid with
       | None ->
@@ -586,6 +584,7 @@ module Relay = struct
       | Send_to (Relay,  _) -> .
       | Send_to (Peer _, _) -> .
 
+      | Respond (Relay,  Timeout _      ) -> .
       | Respond (Relay,  Relay_failure _) -> .
       | Respond (Relay,  Spoke_failure _) -> .
       | Respond (Peer _, _)               -> .
@@ -594,6 +593,7 @@ module Relay = struct
       | Transmit (Relay,  Relay, Spoke_failure _) -> .
       | Transmit (Peer _, Relay, _)               -> .
       | Transmit (Relay, Peer _, _)               -> .
+      | Transmit (Relay, Relay, Timeout _)        -> .
 
   type dst_rel =
     | Relay_packet : ('a, 'b) dst * ('a, 'b) packet -> dst_rel
@@ -659,14 +659,14 @@ module Relay = struct
 
   let exists ~identity t = Hashtbl.mem t.uids identity
 
-  let delete ~identity t =
+  let timeout ~identity t =
     match Hashtbl.find_opt t.uids identity with
     | Some (`Server uid) ->
       Log.debug (fun m -> m "Delete the server %04x" uid) ;
       Hashtbl.remove t.servers uid ;
       Hashtbl.remove t.uids    identity ;
       let clients = remove_server_candidate_from_clients t uid in
-      respond (to_server ~uid) (Closed Relay) t.queue ;
+      respond (to_server ~uid) (Timeout Server) t.queue ;
       let packet = Closed (Peer (Server, uid)) in
       Set.iter begin fun uid ->
       respond (to_client ~uid) packet t.queue end clients
@@ -675,7 +675,7 @@ module Relay = struct
       Hashtbl.remove t.clients uid ;
       Hashtbl.remove t.uids    identity ;
       let servers = remove_client_candidate_from_servers t uid in
-      respond (to_client ~uid) (Closed Relay) t.queue ;
+      respond (to_client ~uid) (Timeout Client) t.queue ;
       let packet = Closed (Peer (Client, uid)) in
       Set.iter begin fun uid ->
       respond (to_server ~uid) packet t.queue end servers
@@ -862,6 +862,8 @@ module Relay = struct
      *)
     | Exists (_, Relay), _, _ -> .
     | _, Relay, Spoke_failure _ -> .
+    | Exists (_, Peer _), Relay, Timeout _ -> .
+    | None, Relay, Timeout _ -> .
 
     | Exists (Client, src), Relay, Relay_failure (Client, _) ->
       process_packet t ~identity src From_client Relay packet

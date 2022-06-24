@@ -29,7 +29,8 @@ type raw =
                       | `No_handshake_with of int
                       | `No_agreement ]
   | `Spoke_failure of Spoke.error
-  | `Done ]
+  | `Done
+  | `Timeout ]
 
 val pp_raw : raw Fmt.t
 val packet_to_raw : ('f, 't) packet -> raw
@@ -75,7 +76,7 @@ module Relay : sig
   val dst_and_packet : identity:string -> t -> int -> raw -> dst_rel
 
   val exists : identity:string -> t -> bool
-  val delete : identity:string -> t -> unit
+  val timeout : identity:string -> t -> unit
   val process_packet : t -> identity:string ->
    ('a, 'b) dst -> ('a, 'b) packet ->
    [> `Continue | `Agreement of string * string ]

@@ -155,6 +155,7 @@ let uid_of_packet = function
   | `Relay_failure _          -> 12
   | `Spoke_failure _          -> 13
   | `Done                     -> 14
+  | `Timeout                  -> 15
 
 let pp_packet ppf = function
   | `Hello_as_a_server public -> Fmt.string ppf (Spoke.public_to_string public)
@@ -175,6 +176,7 @@ let pp_packet ppf = function
   | `Accepted identity -> Fmt.pf ppf "%s\000" identity
   | `Refused -> ()
   | `Done -> ()
+  | `Timeout -> ()
   | `Relay_failure (`Invalid_client uid)    -> Fmt.pf ppf "C%04x" uid
   | `Relay_failure (`Invalid_server uid)    -> Fmt.pf ppf "S%04x" uid
   | `Relay_failure (`No_handshake_with uid) -> Fmt.pf ppf "H%04x" uid
@@ -208,6 +210,7 @@ let len_of_packet = function
   | 12 -> `Fixed 5
   | 13 -> `Fixed 1
   | 14 -> `Fixed 0
+  | 15 -> `Fixed 0
   | _  -> invalid_arg "Invalid packet"
 
 let hex_of_chr = function
@@ -373,6 +376,7 @@ let packet_of_bytes ~pkt ~off buf = match pkt with
     | '\004' -> Ok (1, `Spoke_failure `Invalid_secret_packet)
     | _ -> Error (`Invalid_packet pkt) )
   | 14 -> Ok (0, `Done)
+  | 15 -> Ok (0, `Timeout)
   | _ -> Error (`Invalid_packet pkt)
 
 let recv ctx =

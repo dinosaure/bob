@@ -180,9 +180,7 @@ module Relay = struct
     Hashtbl.add t.ics identity (Protocol.recv ctx)
 
   let rem_peer t ~identity =
-    State.Relay.delete ~identity t.state ;
-    Hashtbl.remove t.ctxs identity ;
-    Hashtbl.remove t.ics  identity
+    State.Relay.timeout ~identity t.state
 
   let exists t ~identity = State.Relay.exists ~identity t.state
 
@@ -256,7 +254,8 @@ module Relay = struct
     | Protocol.Done `Continue ->
       match State.Relay.next_packet t.state with
       | Some (identity, uid, (`Done as packet))
-      | Some (identity, uid, (`Accepted _ as packet)) ->
+      | Some (identity, uid, (`Accepted _ as packet))
+      | Some (identity, uid, (`Timeout as packet)) ->
         ( match Hashtbl.find_opt t.ctxs identity with
         | None -> `Close identity
         | Some ctx ->

@@ -215,8 +215,7 @@ let relay ?(timeout= 5.) socket ~stop =
     if Bob.Relay.exists t ~identity
     then ( Log.warn (fun m -> m "%s timeout" identity)
          ; Bob.Relay.rem_peer t ~identity ) ;
-    Hashtbl.remove fds identity ;
-    Fiber.close fd end ;
+    Fiber.return () end ;
 
     Fiber.return () in
   fork_and_join
