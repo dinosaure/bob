@@ -41,7 +41,7 @@ algorithm used. The format of this information is that proposed by
 size of this information is always 34 bytes. These packets are always destined
 to the relay.
 
-````
+```
 | destination | packet |    data    |
     [ 0000 ]    [ 00 ]   [ public ]   => Hello_as_a_server public
     [ 0000 ]    [ 01 ]                => Hello_as_a_client
