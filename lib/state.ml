@@ -402,9 +402,7 @@ module Server = struct
         send_to to_relay err t.queue ;
         `Continue )
     | Relay, Closed (Peer (Client, client_uid)) ->
-      if Hashtbl.mem t.clients client_uid
-      then Hashtbl.remove t.clients client_uid ;
-      `Continue
+      Hashtbl.remove t.clients client_uid ; `Continue
     | Relay, Closed Relay -> `Close
     | Relay, Timeout Server -> `Close
 end
@@ -500,9 +498,7 @@ module Client = struct
         send_to to_relay err t.queue ;
         `Continue )
     | Relay, Closed (Peer (Server, server_uid)) ->
-      if Hashtbl.mem t.servers server_uid
-      then Hashtbl.remove t.servers server_uid ;
-      `Continue
+      Hashtbl.remove t.servers server_uid ; `Continue
     | Relay, Closed Relay -> `Close
     | Relay, Timeout Client -> `Close
     | Peer (Server, uid), Y_and_server_validator { _Y; server_validator; } ->
@@ -533,7 +529,7 @@ module Relay = struct
     { clients    : (int, string * Set.t) Hashtbl.t
     ; servers    : (int, string * Spoke.public * Set.t) Hashtbl.t
     ; uids       : (string, [ `Client of int | `Server of int ]) Hashtbl.t
-    ; identities : (int, string) Hashtbl.t
+    ; identities : string array
     ; gen        : unit -> int
     ; queue      : relay send Queue.t }
 
@@ -549,11 +545,11 @@ module Relay = struct
       let v = ref 1 in
       fun () ->
         let ret = !v in
-        incr v ; if !v > 0xff then v := 1 ; ret in
+        incr v ; if !v > 0xffff then v := 1 ; ret in
     { clients= Hashtbl.create 0x100
     ; servers= Hashtbl.create 0x100
     ; uids= Hashtbl.create 0x100
-    ; identities= Hashtbl.create 0x100
+    ; identities= Array.make 0xffff "\xde\xad\xbe\xef"
     ; gen
     ; queue= Queue.create () }
 
@@ -562,23 +558,21 @@ module Relay = struct
     | Some packet ->
       match packet with
       | Respond (Peer (_, uid), packet) ->
-        ( match Hashtbl.find_opt t.identities uid, packet with
-        | Some identity, Done ->
-          Hashtbl.remove t.identities uid ;
-          Some (identity, 00, packet_to_raw packet)
-        | Some identity, _ ->
-          Some (identity, 00, packet_to_raw packet)
-        | None, _ -> next_packet t )
+        let identity = t.identities.(uid) in
+        ( match packet with
+        | Done ->
+          Hashtbl.remove t.uids identity ;
+          Hashtbl.remove t.clients uid
+        | _ -> () ) ;
+        Some (identity, 00, packet_to_raw packet)
       | Transmit (Peer (_, from_uid), Peer (_, to_uid), packet) ->
-        Log.debug (fun m -> m "Transmit a packet from %04x to %04x."
-          from_uid to_uid) ;
-        ( match Hashtbl.find_opt t.identities to_uid, packet with
-        | Some identity, Accepted ->
-          Hashtbl.remove t.identities to_uid ;
-          Some (identity, from_uid, packet_to_raw packet)
-        | Some identity, _ ->
-          Some (identity, from_uid, packet_to_raw packet)
-        | None, _ -> next_packet t )
+        let identity = t.identities.(to_uid) in
+        ( match packet with
+        | Accepted ->
+          Hashtbl.remove t.uids identity ;
+          Hashtbl.remove t.servers to_uid
+        | _ -> () ) ;
+        Some (identity, from_uid, packet_to_raw packet)
 
       | Send_to  (Relay,        Closed _)
       | Respond  (Relay,        Closed _)
@@ -662,7 +656,7 @@ module Relay = struct
 
   let exists ~identity t = Hashtbl.mem t.uids identity
 
-  let timeout ~identity t =
+  let delete ~identity t =
     match Hashtbl.find_opt t.uids identity with
     | Some (`Server uid) ->
       Log.debug (fun m -> m "Delete the server %04x" uid) ;
@@ -744,7 +738,7 @@ module Relay = struct
         | 0 ->
           let uid = t.gen () in
           Hashtbl.replace t.uids identity (`Client uid) ;
-          Hashtbl.replace t.identities uid identity ;
+          t.identities.(uid) <- identity ;
           Hashtbl.add t.clients uid (identity, all_servers t) ;
           uid
         | uid ->
@@ -767,7 +761,7 @@ module Relay = struct
         | 0 ->
           let uid = t.gen () in
           Hashtbl.replace t.uids identity (`Server uid) ;
-          Hashtbl.replace t.identities uid identity ;
+          t.identities.(uid) <- identity ;
           Hashtbl.add t.servers uid (identity, public, all_clients t) ;
           uid
         | uid ->

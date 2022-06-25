@@ -76,7 +76,7 @@ module Relay : sig
   val dst_and_packet : identity:string -> t -> int -> raw -> dst_rel
 
   val exists : identity:string -> t -> bool
-  val timeout : identity:string -> t -> unit
+  val delete : identity:string -> t -> unit
   val process_packet : t -> identity:string ->
    ('a, 'b) dst -> ('a, 'b) packet ->
    [> `Continue | `Agreement of string * string ]

@@ -170,7 +170,7 @@ let relay ?(timeout= 5.) socket ~stop =
       ( match Hashtbl.find_opt fds identity with
       | None ->
         Log.err (fun m -> m "%s does not exists as an active peer."
-          identity) ; write ()
+          identity) ; Bob.Relay.rem_peer t ~identity ; write ()
       | Some (fd, _) ->
         Log.debug (fun m -> m "to   [%20s] <- @[<hov>%a@]"
           identity (Hxd_string.pp Hxd.default) str) ;
@@ -194,8 +194,11 @@ let relay ?(timeout= 5.) socket ~stop =
           | false -> Fiber.return `Delete
           | true  ->
           Fiber.read fd >>| map_read >>= function
-          | `Error _errno -> Fiber.return `Delete
-          | `Read `End -> Fiber.return `Delete
+          | `Error (`Read errno) -> Log.err (fun m -> m "Got an error from %s: %s"
+            identity (Unix.error_message errno)) ; Fiber.return `Delete
+          | `Read `End ->
+            Log.debug (fun m -> m "Got end of input from %s" identity) ;
+            Fiber.return `Delete
           | `Read (`Data _ as data) ->
             Log.debug (fun m -> m "from [%20s] -> %a" identity pp_data data) ;
             match Bob.Relay.receive_from t ~identity data with
