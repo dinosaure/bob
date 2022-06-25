@@ -30,5 +30,5 @@ depends: [
 ]
 
 pin-depends: [
-  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#3b2cd8b1db4d9fdb0895c948a43a855f2a0508b1" ]
+  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#2f40097c543139e4cf12bfecd6645a5ce49f29f8" ]
 ]
