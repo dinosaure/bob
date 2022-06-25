@@ -9,8 +9,9 @@ let rec full_write fd str off len =
 
 let rec cat () =
   Fiber.read Unix.stdin >>= function
-  | `End -> Fiber.return ()
-  | `Data str ->
+  | Error _err -> exit 1
+  | Ok `End -> Fiber.return ()
+  | Ok (`Data str) ->
     full_write Unix.stdout str 0 (String.length str) >>= cat
 
 let () = Fiber.run (cat ())

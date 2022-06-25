@@ -120,12 +120,12 @@ let fork_and_join f g =
 let prd = Hashtbl.create 0x100
 let pwr = Hashtbl.create 0x100
 
-let read fd : [ `Data of string | `End ] t =
+let read fd : ([ `Data of string | `End ], Unix.error) result t =
   match Hashtbl.find_opt prd fd with
   | Some (`Read ivar) -> Ivar.read ivar
   | _ ->
     Log.debug (fun m -> m "Start to read something into %d." (Obj.magic fd)) ;
-    let ivar : [ `Data of string | `End ] Ivar.t = Ivar.create () in
+    let ivar : ([ `Data of string | `End ], Unix.error) result Ivar.t = Ivar.create () in
     Hashtbl.add prd fd (`Read ivar) ;
     Ivar.read ivar
 
@@ -156,20 +156,6 @@ let write fd ~off ~len str
     Hashtbl.add pwr fd ((str, off, len), ivar) ;
     Ivar.read ivar
 
-let close fd =
-  Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd)) ;
-  begin try Unix.close fd
-        with Unix.Unix_error (errno, f, arg) ->
-          Log.err (fun m -> m "%s(%s): %s"
-            f arg (Unix.error_message errno)) end ;
-  ( match Hashtbl.find_opt prd fd with
-  | Some (`Read ivar) -> Hashtbl.remove prd fd ; Ivar.fill ivar `End
-  | Some _ -> () | None -> () ) ;
-  ( match Hashtbl.find_opt pwr fd with
-  | Some (_, ivar) -> Hashtbl.remove pwr fd ; Ivar.fill ivar (Error `Closed)
-  | None -> () ) ;
-  return ()
-
 let line_of_queue queue =
   let blit src src_off dst dst_off len =
     Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len in
@@ -190,6 +176,22 @@ let line_of_queue queue =
     | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
     | _ -> Some (Bytes.unsafe_to_string tmp)
 
+let close fd =
+  Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd)) ;
+  begin try Unix.close fd
+        with Unix.Unix_error (errno, f, arg) ->
+          Log.err (fun m -> m "%s(%s): %s"
+            f arg (Unix.error_message errno)) end ;
+  ( match Hashtbl.find_opt prd fd with
+  | Some (`Read ivar) -> Hashtbl.remove prd fd ; Ivar.fill ivar (Ok `End)
+  | Some (`Accept _) -> Hashtbl.remove prd fd
+  | Some (`Getline (queue, ivar)) -> Hashtbl.remove prd fd ; Ivar.fill ivar (line_of_queue queue)
+  | None -> () ) ;
+  ( match Hashtbl.find_opt pwr fd with
+  | Some (_, ivar) -> Hashtbl.remove pwr fd ; Ivar.fill ivar (Error `Closed)
+  | None -> () ) ;
+  return ()
+
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
@@ -197,9 +199,9 @@ let sigrd fd =
     let buf = Bytes.create 0x100 in
     Hashtbl.remove prd fd ;
     ( match Unix.read fd buf 0 0x100 with
-    | 0 -> Ivar.fill ivar `End
-    | len -> Ivar.fill ivar (`Data (Bytes.sub_string buf 0 len))
-    | exception _ -> Ivar.fill ivar `End )
+    | 0 -> Ivar.fill ivar (Ok `End)
+    | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len)))
+    | exception Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno) )
   | Some (`Accept ivar) ->
     let peer, sockaddr = Unix.accept ~cloexec:true fd in
     Hashtbl.remove prd fd ;
@@ -269,6 +271,7 @@ end
 let sleep = Time.sleep
 
 let run fiber =
+  let exception Stop in
   let result = ref None in
   fiber (fun x -> result := Some x) ;
   let rec loop () =
@@ -280,10 +283,11 @@ let run fiber =
 
     let ready_rds, ready_wrs, _ =
       try Unix.select rds wrs [] 0.1
-      with exn ->
-        Log.err (fun m -> m "Got an exception with rds:@[<hov>%a@] and wrs:@[<hov>%a@]"
-          Fmt.(Dump.list (using Obj.magic int)) rds
-          Fmt.(Dump.list (using Obj.magic int)) wrs) ; raise exn in
+      with Unix.Unix_error (Unix.EINTR, _, _) -> raise Stop
+         | exn ->
+           Log.err (fun m -> m "Got an exception with rds:@[<hov>%a@] and wrs:@[<hov>%a@]"
+             Fmt.(Dump.list (using Obj.magic int)) rds
+             Fmt.(Dump.list (using Obj.magic int)) wrs) ; raise_notrace exn in
 
     List.iter (fun (Fiber (k, ivar)) -> try k ivar (fun () -> ()) with exn ->
       Log.err (fun m -> m "Got an unexpected exception: %s" (Printexc.to_string exn))) fbs ;
@@ -294,6 +298,7 @@ let run fiber =
 
     if !result = None
     then loop () in
-  loop () ; match !result with
+  ( try loop () with Stop -> failwith "Fiber.run: stopped" ) ;
+  match !result with
   | Some x -> x
   | None -> failwith "Fiber.run"

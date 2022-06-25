@@ -185,7 +185,6 @@ module Relay = struct
   let exists t ~identity = State.Relay.exists ~identity t.state
 
   let receive_from t ~identity data =
-    Log.debug (fun m -> m "Current state: %a" pp t) ;
     match Hashtbl.find_opt t.ics identity,
           Hashtbl.find_opt t.ctxs identity with
     | None,    None   ->

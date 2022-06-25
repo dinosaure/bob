@@ -13,27 +13,20 @@ let rec full_write fd str ~off ~len =
 type error =
   [ `Connection_closed_by_relay
   | `Write of [ `Closed | `Unix of Unix.error ]
+  | `Read of Unix.error
   | Bob.Protocol.error ]
 
 let pp_error ppf = function
   | `Connection_closed_by_relay -> Fmt.string ppf "Connection closed by relay"
   | `Write `Closed -> Fmt.pf ppf "Connection closed"
   | `Write (`Unix err) -> Fmt.pf ppf "write(): %s" (Unix.error_message err)
+  | `Read err -> Fmt.pf ppf "read(): %s" (Unix.error_message err)
   | #Bob.Protocol.error as err -> Bob.Protocol.pp_error ppf err
 
 let map_read = function
-  | `Data str -> `Read (`Data (str, 0, String.length str))
-  | `End -> `Read `End
-
-type outcome =
-  [ `Error of error
-  | `Done
-  | `Write of string
-  | `Continue ]
-
-type income =
-  [ `Read of [ `Data of (string * int * int) | `End ]
-  | `Error of error ]
+  | Ok (`Data str) -> `Read (`Data (str, 0, String.length str))
+  | Ok `End -> `Read `End
+  | Error errno -> `Error (`Read errno)
 
 let pp_data ppf = function
   | `End -> Fmt.pf ppf "<end>"
@@ -41,14 +34,23 @@ let pp_data ppf = function
     Fmt.pf ppf "@[<hov>%a@]" (Hxd_string.pp Hxd.default)
       (String.sub str off len)
 
+type income =
+  [ `Read of [ `End | `Data of string * int * int ]
+  | `Error of error ]
+
+type outcome =
+  [ `Write of string
+  | `Error of error
+  | `Done
+  | `Continue ]
+
 let run ~choose ~agreement ~receive ~send socket t =
   let handshake_is_done : [ `Done ] Fiber.Ivar.t = Fiber.Ivar.create () in
-  let errored : [ `Error of error ] Fiber.Ivar.t = Fiber.Ivar.create () in
+  let errored           : [ `Error of error ] Fiber.Ivar.t = Fiber.Ivar.create () in
   let rec read () =
     Fiber.npick
       [ begin fun () -> Fiber.read socket >>| map_read end
-      ; begin fun () -> Fiber.wait errored >>| fun v ->
-                        (v :> income) end ]
+      ; begin fun () -> (Fiber.wait errored :> income Fiber.t) end ]
     >>= function
     | `Error err ->
       Log.err (fun m -> m "Got a global error: %a" pp_error err) ;
@@ -68,18 +70,15 @@ let run ~choose ~agreement ~receive ~send socket t =
         Fiber.Ivar.fill errored (`Error `Connection_closed_by_relay) ;
         Fiber.return (Error `Connection_closed_by_relay)
       | `Error (#Bob.Protocol.error as err) ->
-        Log.err (fun m -> m "Got a recv error: %a" Bob.Protocol.pp_error err) ;
+        Log.err (fun m -> m "Got a recv error: %a" pp_error err) ;
         Fiber.Ivar.fill errored (`Error (err :> error)) ;
         Fiber.return (Error err) in
   let rec write () =
     let send () = Fiber.return (send t) in
     Fiber.npick
-      [ begin fun () -> Fiber.wait handshake_is_done >>| fun v ->
-                        (v :> outcome) end
-      ; begin fun () -> Fiber.wait errored >>| fun v ->
-                        (v :> outcome) end
-      ; begin fun () -> send () >>| fun v ->
-                        (v :> outcome) end ] >>= function
+      [ begin fun () -> (Fiber.wait handshake_is_done :> outcome Fiber.t) end
+      ; begin fun () -> (Fiber.wait errored :> outcome Fiber.t) end
+      ; begin fun () -> (send () :> outcome Fiber.t) end ] >>= function
     | `Done ->
       Log.debug (fun m -> m "Finish the write fiber.") ;
       Fiber.return (Ok ())
@@ -87,7 +86,7 @@ let run ~choose ~agreement ~receive ~send socket t =
     | `Error err ->
       Log.err (fun m -> m "Got an error: %a" pp_error err) ;
       if Fiber.Ivar.is_empty errored
-      then Fiber.Ivar.fill errored (`Error (err :> error)) ;
+      then Fiber.Ivar.fill errored (`Error err) ;
       Fiber.return (Error err)
     | `Write str ->
       Log.debug (fun m -> m "send -> @[<hov>%a@]"
@@ -195,6 +194,7 @@ let relay ?(timeout= 5.) socket ~stop =
           | false -> Fiber.return `Delete
           | true  ->
           Fiber.read fd >>| map_read >>= function
+          | `Error _errno -> Fiber.return `Delete
           | `Read `End -> Fiber.return `Delete
           | `Read (`Data _ as data) ->
             Log.debug (fun m -> m "from [%20s] -> %a" identity pp_data data) ;
@@ -204,7 +204,6 @@ let relay ?(timeout= 5.) socket ~stop =
         Some (fd, ivar) end fds ; 
       Fiber.pause () >>= read in
   let handler fd sockaddr =
-    Log.debug (fun m -> m "Current state: %a" Bob.Relay.pp t) ;
     let identity = Fmt.str "%a" pp_sockaddr sockaddr in
     Log.debug (fun m -> m "Add %s as an active connection." identity) ;
     Hashtbl.add fds identity (fd, Fiber.Ivar.full `Continue) ;
