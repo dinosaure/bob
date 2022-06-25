@@ -20,9 +20,9 @@ type raw =
   | `Client_validator of string
   | `Y_and_server_validator of string * string
   | `X_and_client_identity of string * string
-  | `Agreement of string
+  | `Agreement
   | `Closed of int
-  | `Accepted of string
+  | `Accepted
   | `Refused
   | `Relay_failure of [ `Invalid_client of int
                       | `Invalid_server of int

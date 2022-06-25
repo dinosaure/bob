@@ -148,9 +148,9 @@ let uid_of_packet = function
   | `Client_validator _       -> 05
   | `Y_and_server_validator _ -> 06
   | `X_and_client_identity _  -> 07
-  | `Agreement _              -> 08
+  | `Agreement                -> 08
   | `Closed _                 -> 09
-  | `Accepted _               -> 10
+  | `Accepted                 -> 10
   | `Refused                  -> 11
   | `Relay_failure _          -> 12
   | `Spoke_failure _          -> 13
@@ -171,9 +171,9 @@ let pp_packet ppf = function
     Fmt.pf ppf "%s%s" _Y server_validator
   | `X_and_client_identity (_X, client_identity) ->
     Fmt.pf ppf "%s%s\000" _X client_identity
-  | `Agreement identity -> Fmt.pf ppf "%s\000" identity
+  | `Agreement -> ()
   | `Closed uid -> Fmt.pf ppf "%04x" uid
-  | `Accepted identity -> Fmt.pf ppf "%s\000" identity
+  | `Accepted -> ()
   | `Refused -> ()
   | `Done -> ()
   | `Timeout -> ()
@@ -203,9 +203,9 @@ let len_of_packet = function
   | 05 -> `Fixed 64
   | 06 -> `Fixed 96
   | 07 -> `Until (32, '\000')
-  | 08 -> `Until (0, '\000')
+  | 08 -> `Fixed 0
   | 09 -> `Fixed 4
-  | 10 -> `Until (0, '\000')
+  | 10 -> `Fixed 0
   | 11 -> `Fixed 0
   | 12 -> `Fixed 5
   | 13 -> `Fixed 1
@@ -345,20 +345,12 @@ let packet_of_bytes ~pkt ~off buf = match pkt with
     let _X = Bytes.sub_string buf off 32 in
     let client_identity = Bytes.sub_string buf (off + 32) len in
     Ok (32 + len + 1, `X_and_client_identity (_X, client_identity))
-  | 08 ->
-    let len = Bytes.index_from buf off '\000' in
-    let len = len - off in
-    let str = Bytes.sub_string buf off len in
-    Ok (len + 1, `Agreement str)
+  | 08 -> Ok (0, `Agreement)
   | 09 ->
     ( match of_hex ~off ~len:4 buf with
     | Ok uid -> Ok (4, `Closed uid)
     | Error _ -> Error `Invalid_uid )
-  | 10 ->
-    let len = Bytes.index_from buf off '\000' in
-    let len = len - off in
-    let str = Bytes.sub_string buf off len in
-    Ok (len + 1, `Accepted str)
+  | 10 -> Ok (0, `Accepted)
   | 11 -> Ok (0, `Refused)
   | 12 ->
     ( match Bytes.get buf off, of_hex ~off:(off + 1) ~len:4 buf with

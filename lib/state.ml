@@ -152,9 +152,9 @@ type ('f, 't) packet =
   | X_and_client_identity
     : { _X : string
       ; identity : string; } -> (client, server) packet
-  | Agreement         : string -> (server, client) packet
+  | Agreement         : (server, client) packet
   | Closed            : ('f, 't) src -> (relay, 't) packet
-  | Accepted          : string -> (client, server) packet
+  | Accepted          : (client, server) packet
   | Refused           : (client, server) packet
   | Relay_failure     : ('f, 't) peer * [ `Invalid_client of int
                                         | `Invalid_server of int
@@ -173,9 +173,9 @@ type raw =
   | `Client_validator of string
   | `Y_and_server_validator of string * string
   | `X_and_client_identity of string * string
-  | `Agreement of string
+  | `Agreement
   | `Closed of int
-  | `Accepted of string
+  | `Accepted
   | `Refused
   | `Relay_failure of [ `Invalid_client of int
                       | `Invalid_server of int
@@ -212,9 +212,9 @@ let pp_raw ppf = function
   | `Client_validator _ -> Fmt.pf ppf "Client_validator"
   | `Y_and_server_validator _ -> Fmt.pf ppf "Y_and_server_validator"
   | `X_and_client_identity _ -> Fmt.pf ppf "X_and_client_identity"
-  | `Agreement identity -> Fmt.pf ppf "@[<1>(Agreement@ %s)@]" identity
+  | `Agreement -> Fmt.pf ppf "Agreement"
   | `Closed uid -> Fmt.pf ppf "@[<1>(Closed@ %04x)@]" uid
-  | `Accepted identity -> Fmt.pf ppf "@[<1>(Accepted@ %s)@]" identity
+  | `Accepted -> Fmt.pf ppf "Accepted"
   | `Refused -> Fmt.pf ppf "Refused"
   | `Relay_failure _ -> Fmt.pf ppf "Relay_failure"
   | `Spoke_failure _ -> Fmt.pf ppf "Spoke_failure"
@@ -235,10 +235,10 @@ let packet_to_raw
     `Y_and_server_validator (_Y, server_validator)
   | X_and_client_identity { _X; identity; } ->
     `X_and_client_identity (_X, identity)
-  | Agreement identity -> `Agreement identity
+  | Agreement -> `Agreement
   | Closed (Peer (Client, uid))
   | Closed (Peer (Server, uid)) -> `Closed uid
-  | Accepted identity -> `Accepted identity
+  | Accepted -> `Accepted
   | Refused -> `Refused
   | Relay_failure (Client, err)
   | Relay_failure (Server, err) -> `Relay_failure err
@@ -293,10 +293,10 @@ let src_and_packet ~peer uid packet = match uid, packet with
   | uid, `X_and_client_identity (_X, identity) ->
     Server_packet (Peer (Client, uid),
                    X_and_client_identity { _X; identity; })
-  | uid, `Agreement identity ->
-    Client_packet (Peer (Server, uid), Agreement identity)
-  | uid, `Accepted identity ->
-    Server_packet (Peer (Client, uid), Accepted identity)
+  | uid, `Agreement ->
+    Client_packet (Peer (Server, uid), Agreement)
+  | uid, `Accepted ->
+    Server_packet (Peer (Client, uid), Accepted)
   | uid, `Refused ->
     Server_packet (Peer (Client, uid), Refused)
   | uid, `Spoke_failure err ->
@@ -313,7 +313,7 @@ module Server = struct
   type t =
     { secret : Spoke.secret
     ; mutable identity : string
-    ; clients : (int, Spoke.server) Hashtbl.t
+    ; clients : (int, Spoke.server * string) Hashtbl.t
     ; g : Random.State.t
     ; mutable shared_keys : (int * Spoke.shared_keys) option
     ; queue : server send Queue.t }
@@ -360,7 +360,7 @@ module Server = struct
       ( match Spoke.server_compute ~g:t.g ~secret:t.secret
           ~identity:(identity, t.identity) _X with
       | Ok (state, (_Y, server_validator)) ->
-        Hashtbl.add t.clients uid state ;
+        Hashtbl.add t.clients uid (state, identity) ;
         let packet = Y_and_server_validator { _Y; server_validator; } in
         send_to (to_client ~uid) packet t.queue ;
         `Continue
@@ -373,19 +373,21 @@ module Server = struct
         let err = Relay_failure (Server, `Invalid_client uid) in
         send_to to_relay err t.queue ;
         `Continue
-      | Some server ->
+      | Some (server, _client_identity) ->
         match Spoke.server_finalize ~server client_validator with
         | Ok sk ->
-          send_to (to_client ~uid) (Agreement t.identity) t.queue ;
+          send_to (to_client ~uid) Agreement t.queue ;
           t.shared_keys <- Some (uid, sk) ;
           `Continue
         | Error err ->
           Hashtbl.remove t.clients uid ;
           send_to (to_client ~uid) (Spoke_failure (Server, err)) t.queue ;
           `Continue )
-    | Peer (Client, uid), Accepted client_identity ->
+    | Peer (Client, uid), Accepted ->
       ( match t.shared_keys with
-      | Some (uid', sk) when uid = uid' -> `Done (client_identity, sk)
+      | Some (uid', sk) when uid = uid' ->
+        let _, client_identity = Hashtbl.find t.clients uid in
+        `Done (client_identity, sk)
       | Some _ | None ->
         let err = Relay_failure (Server, `No_handshake_with uid) in
         send_to to_relay err t.queue ;
@@ -436,7 +438,7 @@ module Client = struct
     ; queue }
 
   let accept t = match t.shared_keys with
-    | Some (uid, _) -> send_to (to_server ~uid) (Accepted t.identity) t.queue
+    | Some (uid, _) -> send_to (to_server ~uid) Accepted t.queue
     | None -> Fmt.invalid_arg "Impossible to accept nothing"
 
   let refuse t = match t.shared_keys with
@@ -467,7 +469,7 @@ module Client = struct
     | Relay, New_server { uid; public; identity; } ->
       Log.debug (fun m -> m "A new server (%04x, %s) is available."
         uid identity) ;
-      ( match Spoke.hello ~g:t.g ~public t.password with
+      ( match Spoke.hello ~g:t.g ~public:(Spoke.public_to_string public) t.password with
       | Ok (state, _X) ->
         Hashtbl.add t.servers uid (state, identity) ;
         let packet = X_and_client_identity { _X; identity= t.identity } in
@@ -476,14 +478,15 @@ module Client = struct
       | Error err ->
         send_to (to_server ~uid) (Spoke_failure (Client, err)) t.queue ;
         `Continue )
-    | Peer (Server, uid), Agreement identity ->
+    | Peer (Server, uid), Agreement ->
       ( match t.shared_keys with
       | Some (uid', _sk) when uid = uid' ->
-        Log.debug (fun m -> m "An agreement was found with %s" identity) ;
-        t.server_identity <- Some identity ; `Agreement identity
+        let _, server_identity = Hashtbl.find t.servers uid in
+        Log.debug (fun m -> m "An agreement was found with %s" server_identity) ;
+        t.server_identity <- Some server_identity; `Agreement server_identity
       | Some _ | None ->
-        Log.err (fun m -> m "An agreement is expected with %s but unique ID \
-          mismatches or no shared keys are available" identity) ;
+        Log.err (fun m -> m "An agreement is expected but unique ID \
+          mismatches or no shared keys are available") ;
         let err = Relay_failure (Client, `No_handshake_with uid) in
         send_to to_relay err t.queue ;
         `Continue )
@@ -570,7 +573,7 @@ module Relay = struct
         Log.debug (fun m -> m "Transmit a packet from %04x to %04x."
           from_uid to_uid) ;
         ( match Hashtbl.find_opt t.identities to_uid, packet with
-        | Some identity, Accepted _ ->
+        | Some identity, Accepted ->
           Hashtbl.remove t.identities to_uid ;
           Some (identity, from_uid, packet_to_raw packet)
         | Some identity, _ ->
@@ -619,10 +622,10 @@ module Relay = struct
     | uid, `X_and_client_identity (_X, identity) ->
       Relay_packet (Peer (Server, uid),
                     X_and_client_identity { _X; identity; })
-    | uid, `Agreement identity ->
-      Relay_packet (Peer (Client, uid), Agreement identity)
-    | uid, `Accepted identity ->
-      Relay_packet (Peer (Server, uid), Accepted identity)
+    | uid, `Agreement ->
+      Relay_packet (Peer (Client, uid), Agreement)
+    | uid, `Accepted ->
+      Relay_packet (Peer (Server, uid), Accepted)
     | uid, `Refused ->
       Relay_packet (Peer (Server, uid), Refused)
     | uid, `Spoke_failure err ->
@@ -796,12 +799,11 @@ module Relay = struct
       transmit ~src ~dst packet t.queue ;
       `Continue
     | Peer (Client, from_uid), Blind, Peer (Server, to_uid),
-      Accepted client_identity' ->
+      Accepted ->
       ( match Hashtbl.find_opt t.clients from_uid,
               Hashtbl.find_opt t.servers to_uid with
       | Some (client_identity, servers),
-        Some (server_identity, _, clients)
-          when client_identity = client_identity' ->
+        Some (server_identity, _, clients) ->
         let inter = Set.elements (Set.inter servers clients) in
         Log.debug (fun m -> m "[%04x] agreed with [%04x] to exchange"
           from_uid to_uid) ;
@@ -813,10 +815,6 @@ module Relay = struct
         transmit ~src ~dst packet t.queue ;
         respond (to_client ~uid:from_uid) Done t.queue ;
         `Agreement (client_identity, server_identity)
-      | Some _, Some _ ->
-        Log.err (fun m -> m "An agreement with a bad identity was done.") ;
-        (* transmit ~src ~dst packet t.queue ; *)
-        `Continue
       | None, Some _ | Some _, None | None, None ->
         Log.err (fun m -> m "An agreement exists between a peer and nothing.") ;
         (* transmit ~src ~dst packet t.queue ; *)

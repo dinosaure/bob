@@ -36,7 +36,7 @@ let process_packet data =
 let test01 =
   Alcotest.test_case "2 packets larger than internal buffer" `Quick @@ fun () ->
   let payload =
-    [ "\x30\x30\x64\x33\x30\x38\x31\x32\x37\x2e\x30\x2e\x30\x2e\x31\x3a"   (* 00d308127.0.0.1: *)
+    [ "\x30\x30\x64\x33\x30\x33\x31\x32\x37\x2e\x30\x2e\x30\x2e\x31\x3a"   (* 00d303127.0.0.1: *)
     ; "\x34\x37\x39\x32\x32\x00\x30\x30\x64\x35\x30\x36\x99\xc9\x6c\x87"   (* 47922.00d506..l. *)
     ; "\x79\x45\x36\xd3\x28\x0d\x3d\x19\xeb\x73\xc8\x3d\x90\x30\xde\xac"   (* yE6.(.=..s.=.0.. *)
     ; "\xbe\x3b\x55\x6d\x10\xa8\xf9\x89\xe6\x29\xde\x57\xbc\x9e\x31\xba"   (* .;Um.....).W..1. *)
@@ -46,7 +46,7 @@ let test01 =
     ; "\x5e\xa0\x34\xc8\xaa\x7f\x64\x13\xcb\xfe\x35\x3e" ]                 (* ^.4...d...5>     *) in
   let data = let str = String.concat "" payload in `Data (str, 0, String.length str) in
   match process_packet data with
-  | Ok [ (0x00d3, `Agreement "127.0.0.1:47922")
+  | Ok [ (0x00d3, `Client_identity "127.0.0.1:47922")
        ; 0x00d5, `Y_and_server_validator (_, _) ] -> ()
   | Ok _ -> Alcotest.fail "Unexpected packets"
   | Error err -> Alcotest.failf "%a" Bob.Protocol.pp_error err

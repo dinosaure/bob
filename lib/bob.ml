@@ -254,7 +254,7 @@ module Relay = struct
     | Protocol.Done `Continue ->
       match State.Relay.next_packet t.state with
       | Some (identity, uid, (`Done as packet))
-      | Some (identity, uid, (`Accepted _ as packet))
+      | Some (identity, uid, (`Accepted as packet))
       | Some (identity, uid, (`Timeout as packet)) ->
         ( match Hashtbl.find_opt t.ctxs identity with
         | None -> `Close identity
