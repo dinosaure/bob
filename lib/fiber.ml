@@ -271,7 +271,6 @@ end
 let sleep = Time.sleep
 
 let run fiber =
-  let exception Stop in
   let result = ref None in
   fiber (fun x -> result := Some x) ;
   let rec loop () =
@@ -283,7 +282,7 @@ let run fiber =
 
     let ready_rds, ready_wrs, _ =
       try Unix.select rds wrs [] 0.1
-      with Unix.Unix_error (Unix.EINTR, _, _) -> raise Stop
+      with Unix.Unix_error (Unix.EINTR, _, _) -> [], [], []
          | exn ->
            Log.err (fun m -> m "Got an exception with rds:@[<hov>%a@] and wrs:@[<hov>%a@]"
              Fmt.(Dump.list (using Obj.magic int)) rds
@@ -298,7 +297,6 @@ let run fiber =
 
     if !result = None
     then loop () in
-  ( try loop () with Stop -> failwith "Fiber.run: stopped" ) ;
-  match !result with
+  loop () ; match !result with
   | Some x -> x
   | None -> failwith "Fiber.run"

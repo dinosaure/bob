@@ -8,12 +8,12 @@ let run_server g sockaddr password =
     Fmt.epr "%s: %a.\n%!" Sys.executable_name Connect.pp_error err ;
     Fiber.return 1
   | Ok () ->
-    Bob_unix.server socket ~g ~secret >>= function
+    Bob_clear.server socket ~g ~secret >>= function
     | Ok (identity, _shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
       Fiber.return 0
     | Error err ->
-      Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_unix.pp_error err ;
+      Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err ;
       Fiber.return 1
 
 let run _quiet g sockaddr password =

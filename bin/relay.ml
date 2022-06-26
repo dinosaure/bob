@@ -8,7 +8,7 @@ let run _quiet timeout inet_addr port backlog () =
   Sys.set_signal Sys.sigint (Signal_handle begin fun _sigint ->
   Logs.debug (fun m -> m "The user wants to stop the relay.") ;
   if Fiber.Ivar.is_empty stop then Fiber.Ivar.fill stop () end) ;
-  Fiber.run (Bob_unix.relay ~timeout socket ~stop) ;
+  Fiber.run (Bob_clear.relay ~timeout socket ~stop) ;
   Unix.close socket ; `Ok 0
 
 open Cmdliner
