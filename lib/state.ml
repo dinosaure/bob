@@ -338,7 +338,8 @@ module Server = struct
   let process_packet
     : type a. t ->
       (a, server) src -> (a, server) packet ->
-      [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
+      [> `Continue
+      |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
     = fun t source packet -> match source, packet with
     (* XXX(dinosaure): impossible cases
        - the relay sent a [spoke] error
@@ -387,7 +388,7 @@ module Server = struct
       ( match t.shared_keys with
       | Some (uid', sk) when uid = uid' ->
         let _, client_identity = Hashtbl.find t.clients uid in
-        `Done (client_identity, sk)
+        `Done (client_identity, Spoke.ciphers_of_secret t.secret, sk)
       | Some _ | None ->
         let err = Relay_failure (Server, `No_handshake_with uid) in
         send_to to_relay err t.queue ;
@@ -446,7 +447,8 @@ module Client = struct
   let process_packet
     : type a.
       t -> (a, client) src -> (a, client) packet ->
-      [> `Continue | `Agreement of string | `Done of string * Spoke.shared_keys | `Close ]
+      [> `Continue | `Agreement of string
+      |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
     = fun t source packet ->
     Log.debug (fun m -> m "Process a new packet from %04x: %a"
       (uid_of_src source) pp_raw (packet_to_raw packet)) ;
@@ -490,9 +492,10 @@ module Client = struct
         `Continue )
     | Relay, Done ->
       ( match t.shared_keys, t.server_identity with
-      | Some (_uid, sk), Some server_identity ->
+      | Some (uid, sk), Some server_identity ->
+        let client, _ = Hashtbl.find t.servers uid in
         Log.debug (fun m -> m "Agreement completed with %s" server_identity) ;
-        `Done (server_identity, sk)
+        `Done (server_identity, Spoke.ciphers_of_client client, sk)
       | Some _, None | None, Some _ | None, None ->
         let err = Relay_failure (Client, `No_agreement) in
         send_to to_relay err t.queue ;

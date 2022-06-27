@@ -18,7 +18,10 @@
            |     with B -> ...
            '       |
                  Exception A appear at line: try do something
-    ]} *)
+    ]}
+
+    The best advise is to limit as possible as we can leak of exception.
+*)
 
 type +'a t
 

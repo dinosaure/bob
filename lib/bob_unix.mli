@@ -41,14 +41,14 @@ module Make (IO : IO) : sig
   
   val server :
     IO.fd -> g:Random.State.t -> secret:Spoke.secret ->
-    (string * Spoke.shared_keys, error) result Fiber.t
+    (string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys, error) result Fiber.t
   (** [server socket ~g ~secret] tries to find {i via} a relay (represented by
       the given [socket]), a peer which shares the same password as you. *)
   
   val client :
     IO.fd -> choose:(string -> [ `Accept | `Refuse ] Fiber.t) ->
     g:Random.State.t -> password:string ->
-    (string * Spoke.shared_keys, error) result Fiber.t
+    (string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys, error) result Fiber.t
   (** [client socket ~choose ~g ~password] tries to find {i via} a relay
       (represented by the given [socket]), a peer which shares the same password
       as you. When the client found it, the user must fill [choose] to accept
@@ -56,9 +56,12 @@ module Make (IO : IO) : sig
   
  
   val relay :
-    ?timeout:float -> Unix.file_descr -> stop:unit Fiber.Ivar.t -> unit Fiber.t
+    ?timeout:float -> Unix.file_descr -> Bob.Secured.t -> stop:unit Fiber.Ivar.t -> unit Fiber.t
   (** [relay ?timeout socket ~stop] launch a relay which can accept connections
       from [socket]. The user can specify a [timeout] value (how long the relay
       can keep an active connection with a peer). If [stop] is filled, the relay
       terminates. *)
 end
+
+val create_secure_room : unit -> Bob.Secured.t
+val secure_room : ?timeout:float -> Unix.file_descr -> Bob.Secured.t -> stop:unit Fiber.Ivar.t -> unit Fiber.t

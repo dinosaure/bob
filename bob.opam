@@ -24,11 +24,12 @@ depends: [
   "cmdliner"
   "fpath"
   "ipaddr"
+  "mirage-crypto"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"
 ]
 
 pin-depends: [
-  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#2f40097c543139e4cf12bfecd6645a5ce49f29f8" ]
+  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#61f4e785d22d6002fd396862f75f515355197002" ]
 ]

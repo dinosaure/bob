@@ -164,7 +164,7 @@ module Make (IO : IO) = struct
     run ~choose ~agreement:Bob.Client.agreement
       ~receive:Bob.Client.receive ~send:Bob.Client.send socket t
 
-  let relay ?(timeout= 3600.) socket ~stop =
+  let relay ?(timeout= 3600.) socket rooms ~stop =
     let t = Bob.Relay.make () in
     let fds = Hashtbl.create 0x100 in
     let rec write () =
@@ -219,7 +219,9 @@ module Make (IO : IO) = struct
               Log.debug (fun m -> m "from [%20s] -> %a" identity pp_data data) ;
               match Bob.Relay.receive_from t ~identity data with
               | `Close -> Fiber.return `Delete
-              | `Agreement _ | `Read | `Continue -> Fiber.return `Continue end in
+              | `Agreement (peer0, peer1) ->
+                Bob.Secured.add_peers rooms peer0 peer1 ; Fiber.return `Continue
+              | `Read | `Continue -> Fiber.return `Continue end in
           Some (fd, ivar) end fds ; 
         Fiber.pause () >>= read in
     let handler fd sockaddr =
@@ -247,4 +249,73 @@ module Make (IO : IO) = struct
       begin fun () -> fork_and_join read write >>= fun ((), ()) ->
             Fiber.return () end
     >>= fun ((), ()) -> Fiber.return ()
+
 end
+
+type outcome =
+  [ `Closed
+  | `Error of [ `Rd of Unix.error ]
+  | `Continue of Bob.Secured.reader
+  | `Invalid_peer
+  | `Peer of string * string ]
+
+let rec loop ready queue closed fd k =
+  Fiber.npick
+    [ begin fun () -> (Fiber.wait closed :> outcome Fiber.t) end
+    ; begin fun () -> Fiber.read fd >>| map_read >>| function
+      | `Error _ as err -> err
+      | `Read data -> (k data :> outcome) end ]
+  >>= function
+  | `Closed -> Fiber.return ()
+  | `Continue k -> loop ready queue closed fd k
+  | `Error _ | `Invalid_peer ->
+    if Fiber.Ivar.is_empty closed
+    then ( Fiber.Ivar.fill closed `Closed ; Fiber.close fd )
+    else Fiber.return ()
+  | `Peer ((peer0, _) as peers) ->
+    Queue.push peers queue ;
+    Hashtbl.add ready peer0 fd ;
+    Fiber.return ()
+
+let create_secure_room () = Bob.Secured.make ()
+
+let secure_room ?(timeout= 3600.) socket t ~stop =
+  let queue = Queue.create () in
+  let ready = Hashtbl.create 0x100 in
+  let rec create_room () =
+    Fiber.npick
+      [ begin fun () -> Fiber.wait stop >>= fun () -> Fiber.return `Stop end
+      ; begin fun () -> Fiber.return (`Pop (Queue.take_opt queue)) end ]
+    >>= function
+    | `Stop -> Fiber.return ()
+    | `Pop None -> Fiber.pause () >>= create_room
+    | `Pop (Some (peer0, peer1)) ->
+      let fd0 = Hashtbl.find ready peer0 in
+      let fd1 = Hashtbl.find ready peer1 in
+      Hashtbl.remove ready peer0 ;
+      Hashtbl.remove ready peer1 ;
+      Bob.Secured.rem_peers t peer0 peer1 ;
+      Fiber.close fd0 >>= fun () ->
+      Fiber.close fd1 >>= fun () ->
+      Fiber.return () in
+  let handler fd _sockaddr =
+    let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
+
+    Fiber.async begin fun () ->
+    loop ready queue closed fd (Bob.Secured.reader t) end ;
+    Fiber.async begin fun () ->
+    Fiber.npick
+      [ begin fun () -> (Fiber.wait closed :> [ `Closed | `Timeout ] Fiber.t) end
+      ; begin fun () -> Fiber.sleep timeout >>= fun () -> Fiber.return `Timeout end ]
+    >>= function
+    | `Timeout ->
+      if Fiber.Ivar.is_empty closed
+      then ( Fiber.Ivar.fill closed `Closed ; Fiber.close fd)
+      else Fiber.return ()
+    | `Closed -> Fiber.return () end ;
+
+    Fiber.return () in
+  fork_and_join
+    begin fun () -> serve_when_ready ~stop ~handler socket end
+    begin create_room end >>= fun ((), ()) ->
+  Fiber.return ()

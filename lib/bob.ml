@@ -14,7 +14,8 @@ module type PEER = sig
   val peer : [ `Client | `Server ]
   val src_and_packet : State.src_rel -> peer income option
   val process_packet : t -> ('a, peer) State.src -> ('a, peer) State.packet ->
-    [> `Continue | `Agreement of string | `Done of string * Spoke.shared_keys | `Close ]
+    [> `Continue | `Agreement of string
+    |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * State.raw) option
 end
 
@@ -274,4 +275,42 @@ module Relay = struct
                            return `Continue) ;
           send_to t )
       | None -> `Continue
+end
+
+module Secured = struct
+  type t = (string, string) Hashtbl.t
+
+  let make () = Hashtbl.create 0x100
+
+  let add_peers t peer0 peer1 =
+    Hashtbl.add t peer0 peer1 ;
+    Hashtbl.add t peer1 peer0
+
+  let rem_peers t peer0 peer1 =
+    Hashtbl.remove t peer0 ;
+    Hashtbl.remove t peer1
+
+  type reader =
+    [ `Data of string * int * int | `End ] ->
+    [ `Continue of 'k
+    | `Invalid_peer
+    | `Peer of string * string ] as 'k
+
+  let rec reader t = () ;
+    let tmp = Bytes.make 100 '\000' in
+    let pos = ref 0 in
+    go t tmp pos
+  and go t tmp pos = function
+    | `End -> `Invalid_peer
+    | `Data (str, off, len) ->
+      if !pos + len > Bytes.length tmp
+      then `Invalid_peer
+      else ( Bytes.blit_string str off tmp !pos len
+           ; pos := !pos + len
+           ; match Bytes.index_opt tmp '\n' with
+           | None -> `Continue (go t tmp pos)
+           | Some pos -> let peer0 = Bytes.sub_string tmp 0 pos in
+             match Hashtbl.find_opt t peer0 with
+             | Some peer1 -> `Peer (peer0, peer1)
+             | None -> `Invalid_peer )
 end

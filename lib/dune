@@ -13,5 +13,5 @@
 (library
  (name bob_unix)
  (public_name bob.unix)
- (modules bob_unix)
- (libraries hxd.core hxd.string bob bob.fiber))
+ (modules bob_unix crypto)
+ (libraries mirage-crypto hxd.core hxd.string bob bob.fiber))

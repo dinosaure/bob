@@ -43,6 +43,15 @@ agreement, they notif the relay so that it can allocate a secure channel
 between the two peers.
 
 The relay is therefore _blind_ to the algorithm used to reach an agreement.
+This feature ensures that there is no compromise between peers via the relay.
+
+#### OCaml & GADTs
+
+The state machine defined to ensure the exchange uses an aspect of the OCaml
+language: GADT. From this we can encore at type level that a client cannot
+talk to another client and a server cannot talk to another server. In this way,
+we can prune problematic cases as errors upstream, outside the implementation
+of the so-called state machine.
 
 [spoke]: https://github.com/dinosaure/spoke
 [article]: https://blog.osau.re/articles/spoke.html

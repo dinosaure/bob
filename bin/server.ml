@@ -9,7 +9,7 @@ let run_server g sockaddr password =
     Fiber.return 1
   | Ok () ->
     Bob_clear.server socket ~g ~secret >>= function
-    | Ok (identity, _shared_keys) ->
+    | Ok (identity, _ciphers, _shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
       Fiber.return 0
     | Error err ->

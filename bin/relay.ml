@@ -1,15 +1,22 @@
 let run _quiet timeout inet_addr port backlog () =
-  let sockaddr = Unix.ADDR_INET (inet_addr, port) in
-  let domain   = Unix.domain_of_sockaddr sockaddr in
-  let socket   = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
-  Unix.bind socket sockaddr ;
-  Unix.listen socket backlog ;
+  let sockaddr01 = Unix.ADDR_INET (inet_addr, port) in
+  let sockaddr02 = Unix.ADDR_INET (inet_addr, port + 1) in
+  let socket01   = Unix.socket ~cloexec:true (Unix.domain_of_sockaddr sockaddr01) Unix.SOCK_STREAM 0 in
+  let socket02   = Unix.socket ~cloexec:true (Unix.domain_of_sockaddr sockaddr02) Unix.SOCK_STREAM 0 in
+  let secured    = Bob_unix.create_secure_room () in
+  Unix.bind socket01 sockaddr01 ;
+  Unix.bind socket02 sockaddr02 ;
+  Unix.listen socket01 backlog ;
+  Unix.listen socket02 backlog ;
   let stop = Fiber.Ivar.create () in
   Sys.set_signal Sys.sigint (Signal_handle begin fun _sigint ->
   Logs.debug (fun m -> m "The user wants to stop the relay.") ;
   if Fiber.Ivar.is_empty stop then Fiber.Ivar.fill stop () end) ;
-  Fiber.run (Bob_clear.relay ~timeout socket ~stop) ;
-  Unix.close socket ; `Ok 0
+  Fiber.run Fiber.(fork_and_join
+    begin fun () -> Bob_clear.relay ~timeout socket01 secured ~stop end
+    begin fun () -> Bob_unix.secure_room ~timeout socket02 secured ~stop end
+    >>= fun ((), ()) -> Fiber.return ()) ;
+  Unix.close socket01 ; Unix.close socket02 ; `Ok 0
 
 open Cmdliner
 open Args

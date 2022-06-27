@@ -8,7 +8,7 @@ module Server : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done      of string * Spoke.shared_keys
+    |  `Done      of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     |  `Agreement of string
     |  `Error     of Protocol.error ]
 
@@ -25,7 +25,7 @@ module Client : sig
 
   val receive : t -> [ `End | `Data of (string * int * int) ] ->
     [> `Continue | `Read | `Close
-    |  `Done      of string * Spoke.shared_keys
+    |  `Done      of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     |  `Agreement of string
     |  `Error     of Protocol.error ]
 
@@ -54,4 +54,20 @@ module Relay : sig
     [> `Continue 
     |  `Close of string
     |  `Write of string * string ]
+end
+
+module Secured : sig
+  type t
+
+  val make : unit -> t
+  val add_peers : t -> string -> string -> unit
+  val rem_peers : t -> string -> string -> unit
+
+  type reader =
+    [ `Data of string * int * int | `End ] ->
+    [ `Continue of 'k
+    | `Invalid_peer
+    | `Peer of string * string ] as 'k
+
+  val reader : t -> reader
 end

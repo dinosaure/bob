@@ -48,7 +48,8 @@ module Server : sig
 
   val hello : g:Random.State.t -> secret:Spoke.secret -> t
   val process_packet : t -> ('a, server) src -> ('a, server) packet ->
-    [> `Continue | `Done of string * Spoke.shared_keys | `Close ]
+    [> `Continue
+    |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
@@ -59,7 +60,8 @@ module Client : sig
   val accept : t -> unit
   val refuse : t -> unit
   val process_packet : t -> ('a, client) src -> ('a, client) packet ->
-    [> `Continue | `Agreement of string | `Done of string * Spoke.shared_keys | `Close ]
+    [> `Continue | `Agreement of string
+    |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
   val next_packet : t -> (int * raw) option
 end
 
