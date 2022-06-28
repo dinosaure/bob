@@ -30,6 +30,12 @@ Accept from <server-identity> [Y/n]: Y
 Handshake is done with <server-identity>
 ```
 
+The current state allow you to talk to with your peer through the relay. Of
+course, the communication is encrypted and the relay is not able to decrypt
+anything. Only peers have shared keys. That mostly means that from a shared
+weak password, we are able to initiate a truly secured communication with
+a peer. The next step will be file transferring.
+
 ### Avantage of `bob`
 
 #### The relay implementation
