@@ -7,7 +7,7 @@
 (executable
  (name bob)
  (public_name bob)
- (modules bob clear bob_clear client server relay connect args)
+ (modules chat bob clear bob_clear client server relay connect args)
  (libraries base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli logs.cli fmt.tty
    logs.fmt bob.unix))
 

@@ -1,6 +1,6 @@
-let run _quiet timeout inet_addr port backlog () =
+let run _quiet timeout inet_addr port secure_port backlog () =
   let sockaddr01 = Unix.ADDR_INET (inet_addr, port) in
-  let sockaddr02 = Unix.ADDR_INET (inet_addr, port + 1) in
+  let sockaddr02 = Unix.ADDR_INET (inet_addr, secure_port) in
   let socket01   = Unix.socket ~cloexec:true (Unix.domain_of_sockaddr sockaddr01) Unix.SOCK_STREAM 0 in
   let socket02   = Unix.socket ~cloexec:true (Unix.domain_of_sockaddr sockaddr02) Unix.SOCK_STREAM 0 in
   let secured    = Bob_unix.create_secure_room () in
@@ -60,4 +60,4 @@ let cmd =
           them to do handshakes and transfer files. The relay can be safely \
           killed by a $(b,SIGINT) (^C) signal." ] in
   Cmd.v (Cmd.info "relay" ~doc ~man)
-    Term.(ret (const run $ setup_logs $ timeout $ inet_addr $ port $ backlog $ setup_pid))
+    Term.(ret (const run $ setup_logs $ timeout $ inet_addr $ port $ secure_port $ backlog $ setup_pid))

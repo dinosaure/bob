@@ -100,3 +100,7 @@ let setup_random = function
   | Some seed -> Random.State.make seed
 
 let setup_random = Term.(const setup_random $ seed)
+
+let secure_port =
+  let doc = "The port of the relay where secured rooms are available." in
+  Arg.(value & opt int 9001 & info ["secure-port"] ~doc)

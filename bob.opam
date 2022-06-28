@@ -25,6 +25,7 @@ depends: [
   "fpath"
   "ipaddr"
   "mirage-crypto"
+  "psq"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"

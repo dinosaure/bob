@@ -129,6 +129,17 @@ let read fd : ([ `Data of string | `End ], Unix.error) result t =
     Hashtbl.add prd fd (`Read ivar) ;
     Ivar.read ivar
 
+let really_read fd len : (string, [ `End | `Unix of Unix.error ]) result t =
+  if len = 0 then invalid_arg "Impossible to really read 0 byte." ;
+  match Hashtbl.find_opt prd fd with
+  | Some (`Really_read (ivar, _, _, _)) -> Ivar.read ivar
+  | _ ->
+    Log.debug (fun m -> m "Start to really read something into %d." (Obj.magic fd)) ;
+    let ivar : (string, [ `End | `Unix of Unix.error ]) result Ivar.t = Ivar.create () in
+    let buf = Bytes.create len in
+    Hashtbl.add prd fd (`Really_read (ivar, buf, 0, len)) ;
+    Ivar.read ivar
+
 let getline fd : string option t =
   match Hashtbl.find_opt prd fd with
   | Some (`Getline (_, ivar)) -> Ivar.read ivar
@@ -184,6 +195,7 @@ let close fd =
             f arg (Unix.error_message errno)) end ;
   ( match Hashtbl.find_opt prd fd with
   | Some (`Read ivar) -> Hashtbl.remove prd fd ; Ivar.fill ivar (Ok `End)
+  | Some (`Really_read (ivar, _, _, _)) -> Hashtbl.remove prd fd ; Ivar.fill ivar (Error `End)
   | Some (`Accept _) -> Hashtbl.remove prd fd
   | Some (`Getline (queue, ivar)) -> Hashtbl.remove prd fd ; Ivar.fill ivar (line_of_queue queue)
   | None -> () ) ;
@@ -202,6 +214,14 @@ let sigrd fd =
     | 0 -> Ivar.fill ivar (Ok `End)
     | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len)))
     | exception Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno) )
+  | Some (`Really_read (ivar, buf, off, len)) ->
+    Hashtbl.remove prd fd ;
+    ( match Unix.read fd buf off len with
+    | 0 -> Ivar.fill ivar (Error `End)
+    | len' when len = len' -> Ivar.fill ivar (Ok (Bytes.unsafe_to_string buf))
+    | len' ->
+      Hashtbl.add prd fd (`Really_read (ivar, buf, off + len', len - len'))
+    | exception Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error (`Unix errno)) )
   | Some (`Accept ivar) ->
     let peer, sockaddr = Unix.accept ~cloexec:true fd in
     Hashtbl.remove prd fd ;
@@ -214,7 +234,7 @@ let sigrd fd =
     Ke.Rke.N.push queue ~blit ~length:Bytes.length ~off:0 ~len buf ;
     match len, line_of_queue queue with
     | 0, None -> Hashtbl.remove prd fd ; Ivar.fill ivar None
-    | _, None -> ()
+    | _, None -> Hashtbl.add prd fd (`Getline (queue, ivar))
     | _, Some line ->
       Hashtbl.remove prd fd ; Ivar.fill ivar (Some line)
 

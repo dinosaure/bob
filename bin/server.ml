@@ -1,4 +1,6 @@
-let run_server g sockaddr password =
+let flip (a, b) = (b, a)
+
+let run_server g sockaddr secure_port password =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
@@ -9,15 +11,16 @@ let run_server g sockaddr password =
     Fiber.return 1
   | Ok () ->
     Bob_clear.server socket ~g ~secret >>= function
-    | Ok (identity, _ciphers, _shared_keys) ->
+    | Ok (identity, ciphers, shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
-      Fiber.return 0
+      Chat.chat (Chat.sockaddr_with_secure_port sockaddr secure_port)
+        ~identity ~ciphers:(flip ciphers) ~shared_keys:(flip shared_keys)
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err ;
       Fiber.return 1
 
-let run _quiet g sockaddr password =
-  let code = Fiber.run (run_server g sockaddr password) in
+let run _quiet g sockaddr secure_port password =
+  let code = Fiber.run (run_server g sockaddr secure_port password) in
   `Ok code
 
 open Cmdliner
@@ -41,4 +44,4 @@ let cmd =
           relay and the given password. Once found, it sends the file to the
           peer." ] in
   Cmd.v (Cmd.info "send" ~doc ~man)
-    Term.(ret (const run $ setup_logs $ setup_random $ relay $ password))
+    Term.(ret (const run $ setup_logs $ setup_random $ relay $ secure_port $ password))

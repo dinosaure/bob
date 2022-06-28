@@ -252,70 +252,189 @@ module Make (IO : IO) = struct
 
 end
 
+module Crypto = Crypto
+
+let rec full_write fd str ~off ~len =
+  Fiber.write fd str ~off ~len >>= function
+  | Error _ as err -> Fiber.return err
+  | Ok len' ->
+    if len - len' > 0 then full_write fd str ~off:(off + len') ~len:(len - len')
+    else Fiber.return (Ok ())
+
 type outcome =
-  [ `Closed
+  [ `Closed | `Piped
   | `Error of [ `Rd of Unix.error ]
   | `Continue of Bob.Secured.reader
   | `Invalid_peer
   | `Peer of string * string ]
 
-let rec loop ready queue closed fd k =
+module Psq = Psq.Make (String) (struct
+  type t = [ `Bound of string | `Ready ]
+
+  let compare a b = match a, b with
+    | `Bound _, `Ready -> -1
+    | `Ready, `Bound _ ->  1
+    | `Bound _, `Bound _ | `Ready, `Ready -> 0
+end)
+
+let rec loop ready queue state fd k =
   Fiber.npick
-    [ begin fun () -> (Fiber.wait closed :> outcome Fiber.t) end
+    [ begin fun () -> (Fiber.wait state :> outcome Fiber.t) end
     ; begin fun () -> Fiber.read fd >>| map_read >>| function
       | `Error _ as err -> err
       | `Read data -> (k data :> outcome) end ]
   >>= function
-  | `Closed -> Fiber.return ()
-  | `Continue k -> loop ready queue closed fd k
+  | `Closed | `Piped -> Fiber.return ()
+  | `Continue k -> loop ready queue state fd k
   | `Error _ | `Invalid_peer ->
-    if Fiber.Ivar.is_empty closed
-    then ( Fiber.Ivar.fill closed `Closed ; Fiber.close fd )
+    Log.err (fun m -> m "Got an error from %a." pp_sockaddr (Unix.getpeername fd)) ;
+    if Fiber.Ivar.is_empty state
+    then ( Fiber.Ivar.fill state `Closed
+         ; full_write fd "02" ~off:0 ~len:2 >>= fun _ ->
+           Fiber.close fd )
     else Fiber.return ()
-  | `Peer ((peer0, _) as peers) ->
-    Queue.push peers queue ;
-    Hashtbl.add ready peer0 fd ;
-    Fiber.return ()
+  | `Peer (peer0, peer1) ->
+    Log.debug (fun m -> m "Allocate a secure room for %s and %s." peer0 peer1) ;
+    if Psq.mem peer1 !queue
+    then ( queue := Psq.remove peer1 !queue
+         ; queue := Psq.add peer0 (`Bound peer1) !queue
+                 |> Psq.add peer1 (`Bound peer0) )
+    else queue := Psq.add peer0 `Ready !queue ;
+    if Fiber.Ivar.is_empty state
+    then ( Fiber.Ivar.fill state `Piped
+         ; Hashtbl.add ready peer0 (fd, state)
+         ; Fiber.return () )
+    else (* Fiber.Ivar.get state = Some `Closed *) Fiber.return ()
 
 let create_secure_room () = Bob.Secured.make ()
 
+type income =
+  [ `Closed | `Error of [ `Rd of Unix.error ]
+  | `Read of [ `End | `Data of string * int * int ] ]
+
+let pipe fd0 fd1 =
+  let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
+  let rec transmit fd0 fd1 () =
+    let peer0 = Unix.getpeername fd0 in
+    let peer1 = Unix.getpeername fd1 in
+
+    Fiber.npick
+      [ begin fun () -> (Fiber.wait closed :> income Fiber.t) end
+      ; begin fun () -> ((Fiber.read fd0 >>| map_read) :> income Fiber.t) end ]
+    >>= function
+    | `Closed -> Fiber.return ()
+    | `Read `End | `Error _ ->
+      Log.err (fun m -> m "Got an error while reading into %a."
+        pp_sockaddr peer0) ;
+      if Fiber.Ivar.is_empty closed
+      then Fiber.Ivar.fill closed `Closed ;
+      Fiber.return ()
+    | `Read (`Data (str, off, len)) ->
+      Log.debug (fun m -> m "[%10s -> %10s]: @[<hov>%a@]"
+        (Fmt.str "%a" pp_sockaddr peer0)
+        (Fmt.str "%a" pp_sockaddr peer1)
+        (Hxd_string.pp Hxd.default) (String.sub str off len)) ;
+      full_write fd1 str ~off ~len >>= function
+      | Ok () -> transmit fd0 fd1 ()
+      | Error _ ->
+        Log.err (fun m -> m "Got an error while writing into %a."
+          pp_sockaddr peer1);
+        if Fiber.Ivar.is_empty closed
+        then Fiber.Ivar.fill closed `Closed ;
+        Fiber.return () in
+  let close () = Fiber.wait closed >>= fun `Closed ->
+    Fiber.close fd0 >>= fun () ->
+    Fiber.close fd1 >>= fun () ->
+    Fiber.return () in
+  fork_and_join
+    begin fun () -> fork_and_join (transmit fd0 fd1) (transmit fd1 fd0) end
+    close >>= fun (((), ()), ()) ->
+  Fiber.return ()
+
+let only_if_not_closed ivar fn =
+  match Fiber.Ivar.get ivar with
+  | Some `Closed -> Fiber.return ()
+  | Some `Piped | None -> fn ()
+
 let secure_room ?(timeout= 3600.) socket t ~stop =
-  let queue = Queue.create () in
+  let queue = ref Psq.empty in
   let ready = Hashtbl.create 0x100 in
   let rec create_room () =
     Fiber.npick
       [ begin fun () -> Fiber.wait stop >>= fun () -> Fiber.return `Stop end
-      ; begin fun () -> Fiber.return (`Pop (Queue.take_opt queue)) end ]
+      ; begin fun () -> Fiber.return (`Pop (Psq.pop !queue)) end ]
     >>= function
     | `Stop -> Fiber.return ()
     | `Pop None -> Fiber.pause () >>= create_room
-    | `Pop (Some (peer0, peer1)) ->
-      let fd0 = Hashtbl.find ready peer0 in
-      let fd1 = Hashtbl.find ready peer1 in
+    | `Pop (Some ((_, `Ready), _)) -> Fiber.pause () >>= create_room
+    | `Pop (Some ((peer0, `Bound peer1), queue')) ->
+      queue := Psq.remove peer1 queue' ;
+      Log.debug (fun m -> m "Start to allocate a secure room for %s and %s." peer0 peer1) ;
+      let fd0, state0 = Hashtbl.find ready peer0 in
+      let fd1, state1 = Hashtbl.find ready peer1 in
       Hashtbl.remove ready peer0 ;
       Hashtbl.remove ready peer1 ;
       Bob.Secured.rem_peers t peer0 peer1 ;
-      Fiber.close fd0 >>= fun () ->
-      Fiber.close fd1 >>= fun () ->
-      Fiber.return () in
+      full_write fd0 "00" ~off:0 ~len:2 >>= fun res0 ->
+      full_write fd1 "00" ~off:0 ~len:2 >>= fun res1 ->
+      match res0, res1 with
+      | Ok (), Ok () ->
+        Fiber.async begin fun () -> pipe fd0 fd1 end ;
+        Fiber.return ()
+      | _ ->
+        only_if_not_closed state0 begin fun () -> Fiber.close fd0 end >>= fun () ->
+        only_if_not_closed state1 begin fun () -> Fiber.close fd1 end >>= fun () ->
+        Fiber.return () in
+
   let handler fd _sockaddr =
-    let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
+    Log.debug (fun m -> m "Got a new connection into the secure room.") ;
+    let state : [ `Closed | `Piped ] Fiber.Ivar.t = Fiber.Ivar.create () in
 
     Fiber.async begin fun () ->
-    loop ready queue closed fd (Bob.Secured.reader t) end ;
+    loop ready queue state fd (Bob.Secured.reader t) end ;
     Fiber.async begin fun () ->
     Fiber.npick
-      [ begin fun () -> (Fiber.wait closed :> [ `Closed | `Timeout ] Fiber.t) end
+      [ begin fun () -> (Fiber.wait state :> [ `Closed | `Piped | `Timeout ] Fiber.t) end
       ; begin fun () -> Fiber.sleep timeout >>= fun () -> Fiber.return `Timeout end ]
     >>= function
     | `Timeout ->
-      if Fiber.Ivar.is_empty closed
-      then ( Fiber.Ivar.fill closed `Closed ; Fiber.close fd)
+      if Fiber.Ivar.is_empty state
+      then ( Fiber.Ivar.fill state `Closed
+           ; full_write fd "01" ~off:0 ~len:2 >>= fun _ ->
+             Fiber.close fd)
       else Fiber.return ()
-    | `Closed -> Fiber.return () end ;
+    | `Closed | `Piped -> Fiber.return () end ;
 
     Fiber.return () in
   fork_and_join
     begin fun () -> serve_when_ready ~stop ~handler socket end
     begin create_room end >>= fun ((), ()) ->
   Fiber.return ()
+
+type error =
+  [ `Closed
+  | `End
+  | `Timeout
+  | `Invalid_peer
+  | `Unix of Unix.error
+  | `Invalid_response ]
+
+let pp_error ppf = function
+  | `Closed | `End -> Fmt.string ppf "Connection closed by peer"
+  | `Timeout -> Fmt.string ppf "Timeout"
+  | `Invalid_peer -> Fmt.string ppf "Invalid peer"
+  | `Unix errno -> Fmt.pf ppf "%s" (Unix.error_message errno)
+  | `Invalid_response -> Fmt.string ppf "Invalid response from relay"
+
+let init_peer socket ~identity : (unit, [> error ]) result Fiber.t =
+  let packet = Fmt.str "%s\n" identity in
+  full_write socket packet ~off:0 ~len:(String.length packet) >>= function
+  | Error err ->
+    Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
+  | Ok () ->
+    Fiber.really_read socket 2 >>= function
+    | Error err -> Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
+    | Ok "01" -> Fiber.close socket >>= fun () -> Fiber.return (Error `Timeout)
+    | Ok "02" -> Fiber.close socket >>= fun () -> Fiber.return (Error `Invalid_peer)
+    | Ok "00" -> Fiber.return (Ok ()) 
+    | Ok _    -> Fiber.close socket >>= fun () -> Fiber.return (Error `Invalid_response)

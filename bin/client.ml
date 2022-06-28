@@ -12,7 +12,7 @@ let choose = function
         asking () in
     Fmt.pr "Accept from %s [Y/n]: %!" identity ; asking () end
 
-let run_client g sockaddr password yes =
+let run_client g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
@@ -24,15 +24,16 @@ let run_client g sockaddr password yes =
     Logs.debug (fun m -> m "The client is connected to the relay.") ;
     let choose = choose yes in
     Bob_clear.client socket ~choose ~g ~password >>= function
-    | Ok (identity, _ciphers, _shared_keys) ->
+    | Ok (identity, ciphers, shared_keys) ->
       Fmt.pr "Handshake done with %s.\n%!" identity ;
-      Fiber.return 0
+      Chat.chat (Chat.sockaddr_with_secure_port sockaddr secure_port)
+        ~identity ~ciphers ~shared_keys
     | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err ;
       Fiber.return 1
 
-let run _quiet g sockaddr password yes =
-  let code = Fiber.run (run_client g sockaddr password yes) in
+let run _quiet g sockaddr secure_port password yes =
+  let code = Fiber.run (run_client g sockaddr secure_port password yes) in
   `Ok code
 
 open Cmdliner
@@ -62,4 +63,4 @@ let cmd =
           receive the desired file. Otherwise, $(tname) waits for another \
           peer." ] in
   Cmd.v (Cmd.info "recv" ~doc ~man)
-    Term.(ret (const run $ setup_logs $ setup_random $ relay $ password $ yes)) 
+    Term.(ret (const run $ setup_logs $ setup_random $ relay $ secure_port $ password $ yes)) 

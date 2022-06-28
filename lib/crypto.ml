@@ -1,3 +1,6 @@
+let src = Logs.Src.create "bob.crypto"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module type CIPHER_BLOCK = sig
   type key
 
@@ -70,6 +73,22 @@ let decrypt (Symmetric { key; nonce; impl= (module Cipher_block); }) seq buf =
 
 open Fiber
 
+type error =
+  [ `Rd of Unix.error
+  | `Corrupted ]
+
+let pp_error ppf = function
+  | `Rd errno -> Fmt.pf ppf "read(): %s" (Unix.error_message errno)
+  | `Corrupted -> Fmt.pf ppf "Encrypted data corrupted"
+
+type write_error =
+  [ `Closed
+  | `Unix of Unix.error ]
+
+let pp_write_error ppf = function
+  | `Closed -> Fmt.pf ppf "Connection closed by peer"
+  | `Unix errno -> Fmt.pf ppf "write(): %s" (Unix.error_message errno)
+
 type t =
   { fd : Unix.file_descr
   ; recv : symmetric
@@ -91,8 +110,8 @@ let symmetric_of_key_nonce_and_cipher key_nonce (Spoke.AEAD aead) =
   Symmetric { key; nonce; impl= (module Cipher_block) }
 
 let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
-  let recv = symmetric_of_key_nonce_and_cipher k1 cipher1 in
-  let send = symmetric_of_key_nonce_and_cipher k0 cipher0 in
+  let recv = symmetric_of_key_nonce_and_cipher k0 cipher0 in
+  let send = symmetric_of_key_nonce_and_cipher k1 cipher1 in
   let recv_queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
   let send_queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
   let recv_record =
@@ -190,3 +209,37 @@ let send flow str ~off ~len =
   flush flow >>? fun () -> Fiber.return (Ok len)
 
 let close { fd; _ } = Fiber.close fd
+
+let line_of_queue queue =
+  let blit src src_off dst dst_off len =
+    Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len in
+  let exists ~p queue =
+    let pos = ref 0 and res = ref (-1) in
+    Ke.Rke.iter begin fun chr ->
+    if p chr && !res = -1 then res := !pos ;
+    incr pos end queue ;
+    if !res = -1 then None else Some !res in
+  match exists ~p:((=) '\n') queue with
+  | None -> None
+  | Some 0 -> Ke.Rke.N.shift_exn queue 1 ; Some ""
+  | Some pos ->
+    let tmp = Bytes.create pos in
+    Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp ;
+    Ke.Rke.N.shift_exn queue (pos + 1) ;
+    match Bytes.get tmp (pos - 1) with
+    | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
+    | _ -> Some (Bytes.unsafe_to_string tmp)
+
+let rec getline queue flow = match line_of_queue queue with
+  | Some line -> Fiber.return (Some line)
+  | None ->
+    recv flow >>= function
+    | Ok `End -> Fiber.return None
+    | Ok (`Data str) ->
+      let blit src src_off dst dst_off len =
+        Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len in
+      Ke.Rke.N.push queue ~blit ~length:String.length str ;
+      getline queue flow
+    | Error err ->
+      Log.err (fun m -> m "Error while reading a line: %a" pp_error err) ;
+      Fiber.return None

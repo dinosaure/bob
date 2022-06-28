@@ -61,6 +61,7 @@ val detach : (unit -> 'a t) -> 'a Ivar.t
 
 val read    : Unix.file_descr -> ([ `Data of string | `End ], Unix.error) result t
 val write   : Unix.file_descr -> off:int -> len:int -> string -> (int, [ `Closed | `Unix of Unix.error ]) result t
+val really_read : Unix.file_descr -> int -> (string, [ `End | `Unix of Unix.error ]) result t
 val close   : Unix.file_descr -> unit t
 val accept  : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t
 val sleep   : float -> unit t
