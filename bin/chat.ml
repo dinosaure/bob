@@ -32,8 +32,11 @@ let chat sockaddr ~identity ~ciphers ~shared_keys =
             | Error _ as err -> Bob_unix.Crypto.close flow >>= fun () ->
               Fiber.return err )
         | `Recv (Some line) ->
+          Fmt.pr "\n%!" ;
+          List.iter (Fmt.pr "<~ %s\n%!") (line :: lines) ;
+          Fmt.pr "~> %!" ;
           Fiber.fork begin fun () -> Bob_unix.Crypto.getline queue flow end >>=
-          go (line :: lines)
+          go [] 
         | `Recv None | `Send None ->
           Bob_unix.Crypto.close flow >>= fun () -> Fiber.return (Ok ()) in
       Fmt.pr "~> %!" ;
