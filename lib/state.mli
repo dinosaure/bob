@@ -1,10 +1,13 @@
-type client and server and relay
+type client
+and server
+and relay
 
 type ('a, 'b) peer =
   | Server : (server, client) peer
   | Client : (client, server) peer
 
-type ('f, 't) src and ('f, 't) dst
+type ('f, 't) src
+and ('f, 't) dst
 
 val uid_of_src : ('f, 't) src -> int
 val uid_of_dst : ('f, 't) dst -> int
@@ -24,10 +27,11 @@ type raw =
   | `Closed of int
   | `Accepted
   | `Refused
-  | `Relay_failure of [ `Invalid_client of int
-                      | `Invalid_server of int
-                      | `No_handshake_with of int
-                      | `No_agreement ]
+  | `Relay_failure of
+    [ `Invalid_client of int
+    | `Invalid_server of int
+    | `No_handshake_with of int
+    | `No_agreement ]
   | `Spoke_failure of Spoke.error
   | `Done
   | `Timeout ]
@@ -40,16 +44,21 @@ type src_rel =
   | Client_packet : ('a, client) src * ('a, client) packet -> src_rel
   | Invalid_packet of int * raw
 
-val src_and_packet :
-  peer:[ `Server | `Client ] -> int -> raw -> src_rel
+val src_and_packet : peer:[ `Server | `Client ] -> int -> raw -> src_rel
 
 module Server : sig
   type t
 
   val hello : g:Random.State.t -> secret:Spoke.secret -> t
-  val process_packet : t -> ('a, server) src -> ('a, server) packet ->
+
+  val process_packet :
+    t ->
+    ('a, server) src ->
+    ('a, server) packet ->
     [> `Continue
-    |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
+    | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Close ]
+
   val next_packet : t -> (int * raw) option
 end
 
@@ -59,9 +68,16 @@ module Client : sig
   val hello : g:Random.State.t -> password:string -> identity:string -> t
   val accept : t -> unit
   val refuse : t -> unit
-  val process_packet : t -> ('a, client) src -> ('a, client) packet ->
-    [> `Continue | `Agreement of string
-    |  `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys | `Close ]
+
+  val process_packet :
+    t ->
+    ('a, client) src ->
+    ('a, client) packet ->
+    [> `Continue
+    | `Agreement of string
+    | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Close ]
+
   val next_packet : t -> (int * raw) option
 end
 
@@ -76,11 +92,15 @@ module Relay : sig
     | Invalid_packet of int * raw
 
   val dst_and_packet : identity:string -> t -> int -> raw -> dst_rel
-
   val exists : identity:string -> t -> bool
   val delete : identity:string -> t -> unit
-  val process_packet : t -> identity:string ->
-   ('a, 'b) dst -> ('a, 'b) packet ->
-   [> `Continue | `Agreement of string * string ]
+
+  val process_packet :
+    t ->
+    identity:string ->
+    ('a, 'b) dst ->
+    ('a, 'b) packet ->
+    [> `Continue | `Agreement of string * string ]
+
   val next_packet : t -> (string * int * raw) option
 end

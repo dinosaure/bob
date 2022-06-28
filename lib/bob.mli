@@ -6,16 +6,17 @@ module Server : sig
 
   val hello : g:Random.State.t -> secret:Spoke.secret -> t
 
-  val receive : t -> [ `End | `Data of (string * int * int) ] ->
-    [> `Continue | `Read | `Close
-    |  `Done      of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
-    |  `Agreement of string
-    |  `Error     of Protocol.error ]
-
-  val send : t ->
+  val receive :
+    t ->
+    [ `End | `Data of string * int * int ] ->
     [> `Continue
-    |  `Write of string
-    |  `Error of Protocol.error ]
+    | `Read
+    | `Close
+    | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Agreement of string
+    | `Error of Protocol.error ]
+
+  val send : t -> [> `Continue | `Write of string | `Error of Protocol.error ]
 end
 
 module Client : sig
@@ -23,17 +24,17 @@ module Client : sig
 
   val make : g:Random.State.t -> password:string -> identity:string -> t
 
-  val receive : t -> [ `End | `Data of (string * int * int) ] ->
-    [> `Continue | `Read | `Close
-    |  `Done      of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
-    |  `Agreement of string
-    |  `Error     of Protocol.error ]
-
-  val send : t ->
+  val receive :
+    t ->
+    [ `End | `Data of string * int * int ] ->
     [> `Continue
-    |  `Write of string
-    |  `Error of Protocol.error ]
+    | `Read
+    | `Close
+    | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Agreement of string
+    | `Error of Protocol.error ]
 
+  val send : t -> [> `Continue | `Write of string | `Error of Protocol.error ]
   val agreement : t -> [ `Accept | `Refuse ] -> unit
 end
 
@@ -46,14 +47,14 @@ module Relay : sig
   val exists : t -> identity:string -> bool
   val pp : t Fmt.t
 
-  val receive_from : t -> identity:string ->
-    [ `End | `Data of (string * int * int) ] ->
+  val receive_from :
+    t ->
+    identity:string ->
+    [ `End | `Data of string * int * int ] ->
     [> `Continue | `Close | `Agreement of string * string | `Read ]
 
-  val send_to : t ->
-    [> `Continue 
-    |  `Close of string
-    |  `Write of string * string ]
+  val send_to :
+    t -> [> `Continue | `Close of string | `Write of string * string ]
 end
 
 module Secured : sig
@@ -65,9 +66,9 @@ module Secured : sig
 
   type reader =
     [ `Data of string * int * int | `End ] ->
-    [ `Continue of 'k
-    | `Invalid_peer
-    | `Peer of string * string ] as 'k
+    [ `Continue of 'k | `Invalid_peer | `Peer of string * string ]
+    as
+    'k
 
   val reader : t -> reader
 end
