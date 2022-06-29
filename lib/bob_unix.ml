@@ -438,11 +438,11 @@ let secure_room ?(timeout = 3600.) socket t ~stop =
         match (res0, res1) with
         | Ok (), Ok () ->
             Fiber.async (fun () -> pipe fd0 fd1);
-            Fiber.return ()
+            create_room ()
         | _ ->
             only_if_not_closed state0 (fun () -> Fiber.close fd0) >>= fun () ->
             only_if_not_closed state1 (fun () -> Fiber.close fd1) >>= fun () ->
-            Fiber.return ())
+            create_room ())
   in
 
   let handler fd _sockaddr =

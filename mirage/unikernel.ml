@@ -256,11 +256,11 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           match res0, res1 with
           | Ok (), Ok () ->
             Lwt.async (fun () -> pipe fd0 fd1) ;
-            Lwt.return_unit
+            create_room ()
           | _ ->
             only_if_not_closed state0 begin fun () -> Stack.TCP.close fd0 end >>= fun () ->
             only_if_not_closed state1 begin fun () -> Stack.TCP.close fd1 end >>= fun () ->
-            Lwt.return_unit in
+            create_room () in
 
       let handler fd =
         let state : [ `Closed | `Piped ] Lwt_mvar.t = Lwt_mvar.create_empty () in

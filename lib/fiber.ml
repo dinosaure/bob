@@ -329,10 +329,10 @@ let run fiber =
     let fbs = to_list root in
     let slp = Time.sleepers [] in
 
-    Log.debug (fun m -> m "rds:%d, wrs:%d, fibers:%d, sleepers:%d"
-      (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ;
+    (* Log.debug (fun m -> m "rds:%d, wrs:%d, fibers:%d, sleepers:%d"
+      (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ; *)
 
-    let ready_rds, ready_wrs, others =
+    let ready_rds, ready_wrs, _others =
       try Unix.select rds wrs [] 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->
@@ -345,8 +345,8 @@ let run fiber =
           raise_notrace exn
     in
 
-    Log.debug (fun m -> m "ready rds:%d, ready wrs:%d, ready others:%d"
-      (List.length ready_rds) (List.length ready_wrs) (List.length others)) ;
+    (* Log.debug (fun m -> m "ready rds:%d, ready wrs:%d, ready others:%d"
+      (List.length ready_rds) (List.length ready_wrs) (List.length others)) ; *)
 
     List.iter
       (fun (Fiber (k, ivar)) ->
