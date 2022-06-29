@@ -1,8 +1,8 @@
 (library
  (name bob)
  (public_name bob)
- (modules state protocol bob)
- (libraries hxd.core hxd.string logs spoke.core))
+ (modules crypto state protocol bob)
+ (libraries ke mirage-crypto hxd.core hxd.string logs spoke.core))
 
 (library
  (name fiber)
@@ -13,5 +13,5 @@
 (library
  (name bob_unix)
  (public_name bob.unix)
- (modules bob_unix crypto)
- (libraries mirage-crypto psq hxd.core hxd.string bob bob.fiber))
+ (modules bob_unix)
+ (libraries psq hxd.core hxd.string bob bob.fiber))

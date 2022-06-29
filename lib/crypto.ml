@@ -95,22 +95,8 @@ let decrypt (Symmetric { key; nonce; impl = (module Cipher_block) }) seq buf =
   let adata = make_adata (Cstruct.length buf - Cipher_block.tag_size) in
   Cipher_block.authenticate_decrypt ~key ~adata ~nonce buf
 
-open Fiber
-
-type error = [ `Rd of Unix.error | `Corrupted ]
-
-let pp_error ppf = function
-  | `Rd errno -> Fmt.pf ppf "read(): %s" (Unix.error_message errno)
-  | `Corrupted -> Fmt.pf ppf "Encrypted data corrupted"
-
-type write_error = [ `Closed | `Unix of Unix.error ]
-
-let pp_write_error ppf = function
-  | `Closed -> Fmt.pf ppf "Connection closed by peer"
-  | `Unix errno -> Fmt.pf ppf "write(): %s" (Unix.error_message errno)
-
-type t = {
-  fd : Unix.file_descr;
+type 'fd t = {
+  fd : 'fd;
   recv : symmetric;
   send : symmetric;
   recv_record : Cstruct.t;
@@ -173,28 +159,6 @@ let get_record record queue symmetric =
         `Record (Cstruct.sub record 2 (len - 2)))
       else `Await_rec (len - Ke.Rke.length queue)
 
-let rec recv flow =
-  match get_record flow.recv_record flow.recv_queue flow.recv with
-  | `Record buf -> (
-      match decrypt flow.recv flow.recv_seq buf with
-      | Some buf ->
-          flow.recv_seq <- Int64.succ flow.recv_seq;
-          Fiber.return (Ok (`Data (Cstruct.to_string buf)))
-      | None -> Fiber.return (Error `Corrupted))
-  | (`Await_hdr | `Await_rec _) as await -> (
-      Fiber.read flow.fd >>= function
-      | Error errno -> Fiber.return (Error (`Rd errno))
-      | Ok `End ->
-          if await = `Await_hdr then Fiber.return (Ok `End)
-          else Fiber.return (Error `Corrupted)
-      | Ok (`Data str) ->
-          let blit src src_off dst dst_off len =
-            let dst = Cstruct.of_bigarray dst ~off:dst_off ~len in
-            Cstruct.blit_from_string src src_off dst 0 len
-          in
-          Ke.Rke.N.push flow.recv_queue ~blit ~length:String.length str;
-          recv flow)
-
 let record ~dst ~seq queue symmetric =
   let len = min 0xffff (Ke.Rke.length queue) in
   let blit src src_off dst dst_off len =
@@ -209,76 +173,125 @@ let record ~dst ~seq queue symmetric =
   Cstruct.blit buf 0 dst 2 (Cstruct.length buf);
   Cstruct.sub dst 0 len
 
-let full_write fd cs =
-  let str = Cstruct.to_string cs in
-  let rec go str off len =
-    Fiber.write fd ~off ~len str >>= function
-    | Error _ as err -> Fiber.return err
-    | Ok len' ->
-        if len - len' > 0 then go str (off + len') (len - len')
-        else Fiber.return (Ok ())
-  in
-  go str 0 (String.length str)
+module type FLOW = sig
+  type +'a t
 
-let ( >>? ) x f =
-  x >>= function Ok x -> f x | Error _ as err -> Fiber.return err
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
+  val return : 'a -> 'a t
 
-let rec flush flow =
-  if not (Ke.Rke.is_empty flow.send_queue) then (
-    let record =
-      record ~dst:flow.send_record ~seq:flow.send_seq flow.send_queue flow.send
+  type flow
+
+  type error
+  type write_error = private [> `Closed ]
+
+  val pp_error : error Fmt.t
+  val pp_write_error : write_error Fmt.t
+
+  val read : flow -> ([ `Data of Cstruct.t | `Eof ], error) result t
+  val write : flow -> Cstruct.t -> (unit, write_error) result t
+  val close : flow -> unit t
+end
+
+module Make (Flow : FLOW) = struct
+  type error = [ `Rd of Flow.error | `Corrupted ]
+  
+  let pp_error ppf = function
+    | `Rd err -> Fmt.pf ppf "read(): %a" Flow.pp_error err
+    | `Corrupted -> Fmt.pf ppf "Encrypted data corrupted"
+  
+  type write_error = [ `Closed | `Wr of Flow.write_error ]
+  
+  let pp_write_error ppf = function
+    | `Closed | `Wr `Closed -> Fmt.pf ppf "Connection closed by peer"
+    | `Wr err -> Fmt.pf ppf "write(): %a" Flow.pp_write_error err
+
+  let ( >>= ) = Flow.bind
+
+  let rec recv flow =
+    match get_record flow.recv_record flow.recv_queue flow.recv with
+    | `Record buf -> (
+        match decrypt flow.recv flow.recv_seq buf with
+        | Some buf ->
+            flow.recv_seq <- Int64.succ flow.recv_seq;
+            Flow.return (Ok (`Data (Cstruct.to_string buf)))
+        | None -> Flow.return (Error `Corrupted))
+    | (`Await_hdr | `Await_rec _) as await -> (
+        Flow.read flow.fd >>= function
+        | Error err -> Flow.return (Error (`Rd err))
+        | Ok `Eof ->
+            if await = `Await_hdr then Flow.return (Ok `End)
+            else Flow.return (Error `Corrupted)
+        | Ok (`Data cs) ->
+            let blit src src_off dst dst_off len =
+              let dst = Cstruct.of_bigarray dst ~off:dst_off ~len in
+              Cstruct.blit src src_off dst 0 len
+            in
+            Ke.Rke.N.push flow.recv_queue ~blit ~length:Cstruct.length cs;
+            recv flow)
+  
+  let ( >>? ) x f =
+    x >>= function Ok x -> f x | Error _ as err -> Flow.return err
+  let ( >>| ) x f = x >>= fun x -> Flow.return (f x)
+  let reword_error f = function Ok _ as v -> v | Error err -> Error (f err)
+  
+  let rec flush flow =
+    if not (Ke.Rke.is_empty flow.send_queue) then (
+      let record =
+        record ~dst:flow.send_record ~seq:flow.send_seq flow.send_queue flow.send
+      in
+      flow.send_seq <- Int64.succ flow.send_seq;
+      Flow.write flow.fd record >>| reword_error (fun err -> `Wr err)
+      >>? fun () -> flush flow)
+    else Flow.return (Ok ())
+  
+  let send flow str ~off ~len =
+    let blit src src_off dst dst_off len =
+      Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
     in
-    flow.send_seq <- Int64.succ flow.send_seq;
-    full_write flow.fd record >>? fun () -> flush flow)
-  else Fiber.return (Ok ())
-
-let send flow str ~off ~len =
-  let blit src src_off dst dst_off len =
-    Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
-  in
-  Ke.Rke.N.push flow.send_queue ~blit ~length:String.length ~off ~len str;
-  flush flow >>? fun () -> Fiber.return (Ok len)
-
-let close { fd; _ } = Fiber.close fd
-
-let line_of_queue queue =
-  let blit src src_off dst dst_off len =
-    Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len
-  in
-  let exists ~p queue =
-    let pos = ref 0 and res = ref (-1) in
-    Ke.Rke.iter
-      (fun chr ->
-        if p chr && !res = -1 then res := !pos;
-        incr pos)
-      queue;
-    if !res = -1 then None else Some !res
-  in
-  match exists ~p:(( = ) '\n') queue with
-  | None -> None
-  | Some 0 ->
-      Ke.Rke.N.shift_exn queue 1;
-      Some ""
-  | Some pos -> (
-      let tmp = Bytes.create pos in
-      Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp;
-      Ke.Rke.N.shift_exn queue (pos + 1);
-      match Bytes.get tmp (pos - 1) with
-      | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
-      | _ -> Some (Bytes.unsafe_to_string tmp))
-
-let rec getline queue flow =
-  match line_of_queue queue with
-  | Some line -> Fiber.return (Some line)
-  | None -> (
-      recv flow >>= function
-      | Ok `End -> Fiber.return None
-      | Ok (`Data str) ->
-          let blit src src_off dst dst_off len =
-            Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
-          in
-          Ke.Rke.N.push queue ~blit ~length:String.length str;
-          getline queue flow
-      | Error err ->
-          Log.err (fun m -> m "Error while reading a line: %a" pp_error err);
-          Fiber.return None)
+    Ke.Rke.N.push flow.send_queue ~blit ~length:String.length ~off ~len str;
+    flush flow >>? fun () -> Flow.return (Ok len)
+  
+  let close { fd; _ } = Flow.close fd
+  
+  let line_of_queue queue =
+    let blit src src_off dst dst_off len =
+      Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len
+    in
+    let exists ~p queue =
+      let pos = ref 0 and res = ref (-1) in
+      Ke.Rke.iter
+        (fun chr ->
+          if p chr && !res = -1 then res := !pos;
+          incr pos)
+        queue;
+      if !res = -1 then None else Some !res
+    in
+    match exists ~p:(( = ) '\n') queue with
+    | None -> None
+    | Some 0 ->
+        Ke.Rke.N.shift_exn queue 1;
+        Some ""
+    | Some pos -> (
+        let tmp = Bytes.create pos in
+        Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp;
+        Ke.Rke.N.shift_exn queue (pos + 1);
+        match Bytes.get tmp (pos - 1) with
+        | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
+        | _ -> Some (Bytes.unsafe_to_string tmp))
+  
+  let rec getline queue flow =
+    match line_of_queue queue with
+    | Some line -> Flow.return (Some line)
+    | None -> (
+        recv flow >>= function
+        | Ok `End -> Flow.return None
+        | Ok (`Data str) ->
+            let blit src src_off dst dst_off len =
+              Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
+            in
+            Ke.Rke.N.push queue ~blit ~length:String.length str;
+            getline queue flow
+        | Error err ->
+            Log.err (fun m -> m "Error while reading a line: %a" pp_error err);
+            Flow.return None)
+end

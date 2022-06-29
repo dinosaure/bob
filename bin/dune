@@ -7,12 +7,14 @@
 (executable
  (name bob)
  (public_name bob)
- (modules chat bob clear bob_clear client server relay connect args)
+ (modules chat daemon bob clear bob_clear client server relay connect args)
  (libraries base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli logs.cli fmt.tty
    logs.fmt bob.unix))
 
-(rule
- (target bob.com)
- (mode promote)
- (action
-  (copy %{bin:bob} %{target})))
+; (rule
+;  (target bob.com)
+;  (enabled_if
+;   (= %{context_name} esperanto))
+;  (mode promote)
+;  (deps bob.exe)
+;  (action (run objcopy -S -O binary %{deps} %{target})))

@@ -232,7 +232,9 @@ let sigrd fd =
       match Unix.read fd buf 0 0x100 with
       | 0 -> Ivar.fill ivar (Ok `End)
       | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len)))
-      | exception Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
+      | exception Unix.Unix_error (errno, _, _) ->
+        Log.err (fun m -> m "Got an error while reading: %s" (Unix.error_message errno)) ;
+        Ivar.fill ivar (Error errno))
   | Some (`Really_read (ivar, buf, off, len)) -> (
       Hashtbl.remove prd fd;
       match Unix.read fd buf off len with
@@ -327,7 +329,10 @@ let run fiber =
     let fbs = to_list root in
     let slp = Time.sleepers [] in
 
-    let ready_rds, ready_wrs, _ =
+    Log.debug (fun m -> m "rds:%d, wrs:%d, fibers:%d, sleepers:%d"
+      (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ;
+
+    let ready_rds, ready_wrs, others =
       try Unix.select rds wrs [] 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->
@@ -339,6 +344,9 @@ let run fiber =
                 wrs);
           raise_notrace exn
     in
+
+    Log.debug (fun m -> m "ready rds:%d, ready wrs:%d, ready others:%d"
+      (List.length ready_rds) (List.length ready_wrs) (List.length others)) ;
 
     List.iter
       (fun (Fiber (k, ivar)) ->

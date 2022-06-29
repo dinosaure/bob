@@ -18,6 +18,7 @@ module type IO = sig
   val close : fd -> unit Fiber.t
 end
 
+module Fiber = Fiber
 open Fiber
 
 let map_read = function
@@ -289,7 +290,7 @@ module Make (IO : IO) = struct
     >>= fun ((), ()) -> Fiber.return ()
 end
 
-module Crypto = Crypto
+module Crypto = Bob.Crypto
 
 let rec full_write fd str ~off ~len =
   Fiber.write fd str ~off ~len >>= function
@@ -371,8 +372,11 @@ let pipe fd0 fd1 =
         (fun () -> (Fiber.read fd0 >>| map_read :> income Fiber.t));
       ]
     >>= function
-    | `Closed -> Fiber.return ()
-    | `Read `End | `Error _ ->
+    | `Closed | `Read `End ->
+      if Fiber.Ivar.is_empty closed
+      then Fiber.Ivar.fill closed `Closed ;
+      Fiber.return ()
+    | `Error _ ->
         Log.err (fun m ->
             m "Got an error while reading into %a." pp_sockaddr peer0);
         if Fiber.Ivar.is_empty closed then Fiber.Ivar.fill closed `Closed;

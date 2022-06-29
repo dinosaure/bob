@@ -372,3 +372,5 @@ module Secured = struct
               | Some peer1 -> `Peer (peer0, peer1)
               | None -> `Invalid_peer))
 end
+
+module Crypto = Crypto

@@ -72,3 +72,5 @@ module Secured : sig
 
   val reader : t -> reader
 end
+
+module Crypto = Crypto

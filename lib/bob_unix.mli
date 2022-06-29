@@ -26,6 +26,8 @@ module type IO = sig
   val close : fd -> unit Fiber.t
 end
 
+module Fiber = Fiber
+
 val serve_when_ready :
   ?stop:unit Fiber.Ivar.t ->
   handler:(Unix.file_descr -> Unix.sockaddr -> unit Fiber.t) ->
@@ -75,7 +77,7 @@ module Make (IO : IO) : sig
       found an agreement. *)
 end
 
-module Crypto = Crypto
+module Crypto = Bob.Crypto
 
 val create_secure_room : unit -> Bob.Secured.t
 (** [create_secure_room ()] creates a secured room allocator. *)

@@ -1,4 +1,4 @@
-let run _quiet timeout inet_addr port secure_port backlog () =
+let run timeout inet_addr port secure_port backlog =
   let sockaddr01 = Unix.ADDR_INET (inet_addr, port) in
   let sockaddr02 = Unix.ADDR_INET (inet_addr, secure_port) in
   let socket01 =
@@ -32,8 +32,20 @@ let run _quiet timeout inet_addr port secure_port backlog () =
   Unix.close socket02;
   `Ok 0
 
+let run _quiet daemonize timeout inet_addr port secure_port backlog () =
+  match daemonize with
+  | Some path ->
+    Daemon.daemonize ~path begin fun () ->
+    run timeout inet_addr port secure_port backlog end
+  | None ->
+    run timeout inet_addr port secure_port backlog
+
 open Cmdliner
 open Args
+
+let daemonize =
+  let doc = "Daemonize the process and show the PID." in
+  Arg.(value & opt (some string) None & info [ "daemonize" ] ~doc)
 
 let timeout =
   let doc = "How long the relay can keep an active connection (in seconds)." in
@@ -90,5 +102,5 @@ let cmd =
     (Cmd.info "relay" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ timeout $ inet_addr $ port $ secure_port
+        (const run $ setup_logs $ daemonize $ timeout $ inet_addr $ port $ secure_port
        $ backlog $ setup_pid))
