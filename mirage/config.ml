@@ -9,7 +9,9 @@ let secure_port =
   Key.(create "secure_port" Arg.(opt int 9001 doc))
 
 let bob = foreign "Unikernel.Make"
-  ~packages:[ package "bob"; package "psq" ]
+  ~packages:[ package "bob" ~pin:"git+https://github.com/dinosaure/bob.git#e879a611cfaf1e80f1f7bf6ee7a2d56fd517ea90"
+            ; package "spoke" ~pin:"git+https://github.com/dinosaure/spoke.git#61f4e785d22d6002fd396862f75f515355197002"
+            ; package "psq" ]
   ~keys:[ Key.v port; Key.v secure_port ]
   (time @-> stackv4v6 @-> job)
 
