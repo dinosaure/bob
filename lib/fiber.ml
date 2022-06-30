@@ -283,6 +283,25 @@ let sigwr fd =
           Hashtbl.remove pwr fd;
           Ivar.fill ivar (Error (`Unix errno)))
 
+let sigexcept fd =
+  match Hashtbl.find_opt prd fd with
+  | None -> ()
+  | Some (`Read ivar) ->
+      Hashtbl.remove prd fd;
+      Ivar.fill ivar (Ok `End)
+  | Some (`Really_read (ivar, _, _, _)) ->
+      Hashtbl.remove prd fd;
+      Ivar.fill ivar (Error `End)
+  | Some (`Accept _) -> Hashtbl.remove prd fd
+  | Some (`Getline (queue, ivar)) -> (
+      match line_of_queue queue with
+      | None ->
+          Hashtbl.remove prd fd;
+          Ivar.fill ivar None
+      | Some line ->
+          Hashtbl.remove prd fd;
+          Ivar.fill ivar (Some line))
+
 module Time = struct
   type t = float
   type sleep = { time : t; ivar : unit Ivar.t }
@@ -361,10 +380,16 @@ let run fiber =
     let fbs = to_list root in
     let slp = Time.sleepers [] in
 
-    (* Log.debug (fun m -> m "rds:%d, wrs:%d, fibers:%d, sleepers:%d"
-       (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ; *)
-    let ready_rds, ready_wrs, _others =
-      try Unix.select rds wrs [] 0.1 with
+    Log.debug (fun m ->
+        m "rds:%d, wrs:%d, fibers:%d, sleepers:%d" (List.length rds)
+          (List.length wrs) (List.length fbs) (List.length slp));
+
+    (* XXX(dinosaure): it seems that, on Windows, the EOF is signaled
+       via the [except] list of file-descriptors - on Linux, only the
+       [rds] list is enough. *)
+
+    let ready_rds, ready_wrs, ready_excepts =
+      try Unix.select rds wrs rds 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->
           Log.err (fun m ->
@@ -376,8 +401,10 @@ let run fiber =
           raise_notrace exn
     in
 
-    (* Log.debug (fun m -> m "ready rds:%d, ready wrs:%d, ready others:%d"
-       (List.length ready_rds) (List.length ready_wrs) (List.length others)) ; *)
+    Log.debug (fun m ->
+        m "ready rds:%d, ready wrs:%d, ready excepts:%d" (List.length ready_rds)
+          (List.length ready_wrs)
+          (List.length ready_excepts));
     List.iter
       (fun (Fiber (k, ivar)) ->
         try k ivar (fun () -> ())
@@ -389,6 +416,7 @@ let run fiber =
     List.iter (fun ivar -> Ivar.fill ivar ()) slp;
     List.iter sigrd ready_rds;
     List.iter sigwr ready_wrs;
+    List.iter sigexcept ready_excepts;
 
     if !result = None then loop ()
   in

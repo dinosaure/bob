@@ -21,17 +21,17 @@ let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 open Fiber
 
-let rec full_write fd str off len =
-  Fiber.write Unix.stdout ~off ~len str >>= function
-  | Error _err -> exit 1
-  | Ok len' ->
-      if len - len' > 0 then full_write fd str (off + len') (len - len')
-      else Fiber.return ()
+let stdin = Unix.descr_of_in_channel Stdlib.stdin
+(* Windows compatibility. *)
 
-let rec cat () =
-  Fiber.read Unix.stdin >>= function
-  | Error _err -> exit 1
-  | Ok `End -> Fiber.return ()
-  | Ok (`Data str) -> full_write Unix.stdout str 0 (String.length str) >>= cat
+let rec getline () =
+  Fmt.pr ">>> %!" ; Fiber.getline stdin >>= function
+  | Some line ->
+    Fmt.pr "# %s\n%!" line ; getline ()
+  | None -> Fiber.return ()
 
-let () = Fiber.run (cat ())
+let () =
+  let rec go () = Fmt.pr ">>> %!" ; match input_line Stdlib.stdin with
+    | line -> Fmt.pr "# %s\n%!" line ; go ()
+    | exception End_of_file -> () in
+  go ()

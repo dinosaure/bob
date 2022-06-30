@@ -195,7 +195,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       | `Continue of Bob.Secured.reader
       | `Peer of string * string ]
 
-    let rec loop ~timeout t ready queue (state : [ `Closed | `Bounded of string * string ] Lwt_mvar.t) fd k =
+    let rec loop ~timeout t ready queue
+        (state : [ `Closed | `Bounded of string * string ] Lwt_mvar.t) fd k =
       Lwt.pick
         [
           (Lwt_mvar.take state :> income00 Lwt.t);
@@ -222,23 +223,31 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
               |> Psq.add peer1 (`Bound peer0))
           else queue := Psq.add peer0 `Ready !queue;
           if Lwt_mvar.is_empty state then (
-            let state' : [ `Closed | `Piped ] Lwt_mvar.t = Lwt_mvar.create_empty () in
+            let state' : [ `Closed | `Piped ] Lwt_mvar.t =
+              Lwt_mvar.create_empty ()
+            in
             Hashtbl.add ready peer0 (fd, state');
             Lwt_mvar.put state (`Bounded (peer0, peer1)) >>= fun () ->
-            Lwt.async begin fun () ->
-            Lwt.pick [ (Lwt_mvar.take state' :> [ `Timeout | `Closed | `Piped ] Lwt.t)
-                     ; Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout ]
-            >>= function
-            | `Piped | `Closed -> Lwt.return_unit
-            | `Timeout ->
-              queue := Psq.remove peer0 !queue ;
-              queue := Psq.remove peer1 !queue ;
-              Hashtbl.remove ready peer0 ;
-              Hashtbl.remove ready peer1 ;
-              Bob.Secured.rem_peers t peer0 peer1 ;
-              if Lwt_mvar.is_empty state'
-              then Lwt_mvar.put state' `Closed >>= fun () -> Stack.TCP.close fd
-              else Lwt.return_unit end ; Lwt.return_unit )
+            Lwt.async (fun () ->
+                Lwt.pick
+                  [
+                    (Lwt_mvar.take state'
+                      :> [ `Timeout | `Closed | `Piped ] Lwt.t);
+                    (Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout);
+                  ]
+                >>= function
+                | `Piped | `Closed -> Lwt.return_unit
+                | `Timeout ->
+                    queue := Psq.remove peer0 !queue;
+                    queue := Psq.remove peer1 !queue;
+                    Hashtbl.remove ready peer0;
+                    Hashtbl.remove ready peer1;
+                    Bob.Secured.rem_peers t peer0 peer1;
+                    if Lwt_mvar.is_empty state' then
+                      Lwt_mvar.put state' `Closed >>= fun () ->
+                      Stack.TCP.close fd
+                    else Lwt.return_unit);
+            Lwt.return_unit)
           else Lwt.return_unit
 
     type income01 =
@@ -307,7 +316,12 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             Bob.Secured.rem_peers rooms peer0 peer1;
             Stack.TCP.write fd0 cs_00 >>= fun res0 ->
             Stack.TCP.write fd1 cs_00 >>= fun res1 ->
-            match (res0, res1, Lwt_mvar.take_available state0, Lwt_mvar.take_available state1) with
+            match
+              ( res0,
+                res1,
+                Lwt_mvar.take_available state0,
+                Lwt_mvar.take_available state1 )
+            with
             | Ok (), Ok (), None, None ->
                 Lwt.async (fun () -> pipe fd0 fd1);
                 create_room ()
@@ -327,7 +341,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         Lwt.async (fun () ->
             Lwt.pick
               [
-                (Lwt_mvar.take state :> [ `Closed | `Bounded of string * string | `Timeout ] Lwt.t);
+                (Lwt_mvar.take state
+                  :> [ `Closed | `Bounded of string * string | `Timeout ] Lwt.t);
                 (Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout);
               ]
             >>= function

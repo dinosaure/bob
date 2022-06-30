@@ -2,7 +2,13 @@
  (name cat)
  (public_name bob.cat)
  (modules cat)
- (libraries bob.fiber))
+ (libraries fmt.tty logs.fmt bob.fiber))
+
+(executable
+ (name getline)
+ (public_name bob.getline)
+ (modules getline)
+ (libraries fmt.tty logs.fmt bob.fiber))
 
 (executable
  (name bob)
@@ -17,4 +23,23 @@
 ;   (= %{context_name} esperanto))
 ;  (mode promote)
 ;  (deps bob.exe)
-;  (action (run objcopy -S -O binary %{deps} %{target})))
+;  (action
+;   (run objcopy -S -O binary %{deps} %{target})))
+; 
+; (rule
+;  (target cat.com)
+;  (enabled_if
+;   (= %{context_name} esperanto))
+;  (mode promote)
+;  (deps cat.exe)
+;  (action
+;   (run objcopy -S -O binary %{deps} %{target})))
+; 
+; (rule
+;  (target getline.com)
+;  (enabled_if
+;   (= %{context_name} esperanto))
+;  (mode promote)
+;  (deps getline.exe)
+;  (action
+;   (run objcopy -S -O binary %{deps} %{target})))
