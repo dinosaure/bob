@@ -180,13 +180,11 @@ module type FLOW = sig
   val return : 'a -> 'a t
 
   type flow
-
   type error
   type write_error = private [> `Closed ]
 
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
-
   val read : flow -> ([ `Data of Cstruct.t | `Eof ], error) result t
   val write : flow -> Cstruct.t -> (unit, write_error) result t
   val close : flow -> unit t
@@ -194,13 +192,13 @@ end
 
 module Make (Flow : FLOW) = struct
   type error = [ `Rd of Flow.error | `Corrupted ]
-  
+
   let pp_error ppf = function
     | `Rd err -> Fmt.pf ppf "read(): %a" Flow.pp_error err
     | `Corrupted -> Fmt.pf ppf "Encrypted data corrupted"
-  
+
   type write_error = [ `Closed | `Wr of Flow.write_error ]
-  
+
   let pp_write_error ppf = function
     | `Closed | `Wr `Closed -> Fmt.pf ppf "Connection closed by peer"
     | `Wr err -> Fmt.pf ppf "write(): %a" Flow.pp_write_error err
@@ -228,31 +226,33 @@ module Make (Flow : FLOW) = struct
             in
             Ke.Rke.N.push flow.recv_queue ~blit ~length:Cstruct.length cs;
             recv flow)
-  
+
   let ( >>? ) x f =
     x >>= function Ok x -> f x | Error _ as err -> Flow.return err
+
   let ( >>| ) x f = x >>= fun x -> Flow.return (f x)
   let reword_error f = function Ok _ as v -> v | Error err -> Error (f err)
-  
+
   let rec flush flow =
     if not (Ke.Rke.is_empty flow.send_queue) then (
       let record =
-        record ~dst:flow.send_record ~seq:flow.send_seq flow.send_queue flow.send
+        record ~dst:flow.send_record ~seq:flow.send_seq flow.send_queue
+          flow.send
       in
       flow.send_seq <- Int64.succ flow.send_seq;
       Flow.write flow.fd record >>| reword_error (fun err -> `Wr err)
       >>? fun () -> flush flow)
     else Flow.return (Ok ())
-  
+
   let send flow str ~off ~len =
     let blit src src_off dst dst_off len =
       Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
     in
     Ke.Rke.N.push flow.send_queue ~blit ~length:String.length ~off ~len str;
     flush flow >>? fun () -> Flow.return (Ok len)
-  
+
   let close { fd; _ } = Flow.close fd
-  
+
   let line_of_queue queue =
     let blit src src_off dst dst_off len =
       Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len
@@ -278,7 +278,7 @@ module Make (Flow : FLOW) = struct
         match Bytes.get tmp (pos - 1) with
         | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
         | _ -> Some (Bytes.unsafe_to_string tmp))
-  
+
   let rec getline queue flow =
     match line_of_queue queue with
     | Some line -> Flow.return (Some line)

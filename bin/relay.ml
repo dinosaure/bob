@@ -6,11 +6,13 @@ let run timeout inet_addr port secure_port backlog =
       (Unix.domain_of_sockaddr sockaddr01)
       Unix.SOCK_STREAM 0
   in
+  Unix.setsockopt socket01 Unix.SO_REUSEADDR true;
   let socket02 =
     Unix.socket ~cloexec:true
       (Unix.domain_of_sockaddr sockaddr02)
       Unix.SOCK_STREAM 0
   in
+  Unix.setsockopt socket02 Unix.SO_REUSEADDR true;
   let secured = Bob_unix.create_secure_room () in
   Unix.bind socket01 sockaddr01;
   Unix.bind socket02 sockaddr02;
@@ -35,10 +37,9 @@ let run timeout inet_addr port secure_port backlog =
 let run _quiet daemonize timeout inet_addr port secure_port backlog () =
   match daemonize with
   | Some path ->
-    Daemon.daemonize ~path begin fun () ->
-    run timeout inet_addr port secure_port backlog end
-  | None ->
-    run timeout inet_addr port secure_port backlog
+      Daemon.daemonize ~path (fun () ->
+          run timeout inet_addr port secure_port backlog)
+  | None -> run timeout inet_addr port secure_port backlog
 
 open Cmdliner
 open Args
@@ -102,5 +103,5 @@ let cmd =
     (Cmd.info "relay" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ daemonize $ timeout $ inet_addr $ port $ secure_port
-       $ backlog $ setup_pid))
+        (const run $ setup_logs $ daemonize $ timeout $ inet_addr $ port
+       $ secure_port $ backlog $ setup_pid))

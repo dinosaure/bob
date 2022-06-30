@@ -7,11 +7,11 @@ module Crypto = Bob_unix.Crypto.Make (struct
   include Bob_unix.Fiber
 
   type flow = Unix.file_descr
-
   type error = Unix.error
   type write_error = [ `Closed | `Unix of Unix.error ]
 
   let pp_error ppf errno = Fmt.string ppf (Unix.error_message errno)
+
   let pp_write_error ppf = function
     | `Closed -> Fmt.string ppf "Connection closed by peer"
     | `Unix errno -> Fmt.string ppf (Unix.error_message errno)
@@ -27,7 +27,8 @@ module Crypto = Bob_unix.Crypto.Make (struct
       Fiber.write fd ~off ~len str >>= function
       | Error _ as err -> Fiber.return err
       | Ok len' when len' = len -> Fiber.return (Ok ())
-      | Ok len' -> go str (off + len') (len - len') in
+      | Ok len' -> go str (off + len') (len - len')
+    in
     go (Cstruct.to_string cs) 0 (Cstruct.length cs)
 end)
 
@@ -68,8 +69,7 @@ let chat sockaddr ~identity ~ciphers ~shared_keys =
                 Fmt.pr "\n%!";
                 List.iter (Fmt.pr "<~ %s\n%!") (line :: lines);
                 Fmt.pr "~> %!";
-                Fiber.fork (fun () -> Crypto.getline queue flow)
-                >>= go []
+                Fiber.fork (fun () -> Crypto.getline queue flow) >>= go []
             | `Recv None | `Send None ->
                 Crypto.close flow >>= fun () -> Fiber.return (Ok ())
           in

@@ -4,6 +4,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type +'a t = ('a -> unit) -> unit
 
+let identity x = x
 let return x k = k x
 let bind t f k = t (fun x -> f x k)
 let both a b = bind a (fun a -> bind b (fun b -> return (a, b)))
@@ -233,8 +234,9 @@ let sigrd fd =
       | 0 -> Ivar.fill ivar (Ok `End)
       | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len)))
       | exception Unix.Unix_error (errno, _, _) ->
-        Log.err (fun m -> m "Got an error while reading: %s" (Unix.error_message errno)) ;
-        Ivar.fill ivar (Error errno))
+          Log.err (fun m ->
+              m "Got an error while reading: %s" (Unix.error_message errno));
+          Ivar.fill ivar (Error errno))
   | Some (`Really_read (ivar, buf, off, len)) -> (
       Hashtbl.remove prd fd;
       match Unix.read fd buf off len with
@@ -319,6 +321,36 @@ end
 
 let sleep = Time.sleep
 
+module Set = Set.Make (struct
+  type t = Unix.file_descr
+
+  let compare a b = Obj.magic a - Obj.magic b
+end)
+
+let () =
+  at_exit (fun () ->
+      let fds = Set.empty in
+      let fds =
+        Hashtbl.fold
+          (fun socket -> function
+            | `Accept _ ->
+                identity
+                (* XXX(dinosaure): [`Accept] are closed by the relay properly at the end of its process. *)
+            | _ -> Set.add socket)
+          prd fds
+      in
+      let fds = Hashtbl.fold (fun socket _ fds -> Set.add socket fds) pwr fds in
+      Log.debug (fun m ->
+          m "Close remaining file-descriptions: %a"
+            Fmt.(Dump.list (using Obj.magic int))
+            (Set.elements fds));
+      Set.iter
+        (fun fd ->
+          if fd <> Unix.stdin && fd <> Unix.stdout && fd <> Unix.stderr then (
+            Log.debug (fun m -> m "Close %d file-descriptor." (Obj.magic fd));
+            Unix.close fd))
+        fds)
+
 let run fiber =
   let result = ref None in
   fiber (fun x -> result := Some x);
@@ -330,8 +362,7 @@ let run fiber =
     let slp = Time.sleepers [] in
 
     (* Log.debug (fun m -> m "rds:%d, wrs:%d, fibers:%d, sleepers:%d"
-      (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ; *)
-
+       (List.length rds) (List.length wrs) (List.length fbs) (List.length slp)) ; *)
     let ready_rds, ready_wrs, _others =
       try Unix.select rds wrs [] 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
@@ -346,8 +377,7 @@ let run fiber =
     in
 
     (* Log.debug (fun m -> m "ready rds:%d, ready wrs:%d, ready others:%d"
-      (List.length ready_rds) (List.length ready_wrs) (List.length others)) ; *)
-
+       (List.length ready_rds) (List.length ready_wrs) (List.length others)) ; *)
     List.iter
       (fun (Fiber (k, ivar)) ->
         try k ivar (fun () -> ())

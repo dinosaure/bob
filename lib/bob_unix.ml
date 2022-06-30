@@ -159,8 +159,11 @@ module Make (IO : IO) = struct
     | Ok (), Ok shared_keys ->
         Log.debug (fun m -> m "The peer finished correctly.");
         Fiber.return (Ok shared_keys)
-    | Error err, _ -> Fiber.return (Error err)
-    | _, Error err -> Fiber.return (Error err)
+    (* XXX(dinosaure): only the [`Done] case in the loop is able
+       to close the socket. For errors, we must properly close
+       the connection. *)
+    | Error err, _ -> IO.close socket >>= fun () -> Fiber.return (Error err)
+    | _, Error err -> IO.close socket >>= fun () -> Fiber.return (Error err)
 
   let server socket ~g ~secret =
     let t = Bob.Server.hello ~g ~secret in
@@ -302,7 +305,7 @@ let rec full_write fd str ~off ~len =
 
 type outcome =
   [ `Closed
-  | `Piped
+  | `Bounded of string * string
   | `Error of [ `Rd of Unix.error ]
   | `Continue of Bob.Secured.reader
   | `Invalid_peer
@@ -321,7 +324,7 @@ module Psq =
         | `Bound _, `Bound _ | `Ready, `Ready -> 0
     end)
 
-let rec loop ready queue state fd k =
+let rec loop ~timeout t ready queue state fd k =
   Fiber.npick
     [
       (fun () -> (Fiber.wait state :> outcome Fiber.t));
@@ -331,8 +334,8 @@ let rec loop ready queue state fd k =
         | `Read data -> (k data :> outcome));
     ]
   >>= function
-  | `Closed | `Piped -> Fiber.return ()
-  | `Continue k -> loop ready queue state fd k
+  | `Closed | `Bounded _ -> Fiber.return ()
+  | `Continue k -> loop t ~timeout ready queue state fd k
   | `Error _ | `Invalid_peer ->
       Log.err (fun m ->
           m "Got an error from %a." pp_sockaddr (Unix.getpeername fd));
@@ -348,7 +351,27 @@ let rec loop ready queue state fd k =
           Psq.add peer0 (`Bound peer1) !queue |> Psq.add peer1 (`Bound peer0))
       else queue := Psq.add peer0 `Ready !queue;
       if Fiber.Ivar.is_empty state then (
-        Fiber.Ivar.fill state `Piped;
+        Fiber.Ivar.fill state (`Bounded (peer0, peer1));
+        let state : [ `Closed | `Piped ] Fiber.Ivar.t = Fiber.Ivar.create () in
+        Fiber.async (fun () ->
+            Fiber.npick
+              [
+                (fun () ->
+                  (Fiber.wait state :> [ `Piped | `Closed | `Timeout ] Fiber.t));
+                (fun () ->
+                  Fiber.sleep timeout >>= fun () -> Fiber.return `Timeout);
+              ]
+            >>= function
+            | `Piped | `Closed -> Fiber.return ()
+            | `Timeout ->
+                Log.warn (fun m -> m "%s timeout" peer0);
+                queue := Psq.remove peer0 !queue;
+                queue := Psq.remove peer1 !queue;
+                Hashtbl.remove ready peer0;
+                Hashtbl.remove ready peer1;
+                Bob.Secured.rem_peers t peer0 peer1;
+                if Fiber.Ivar.is_empty state then Fiber.Ivar.fill state `Closed;
+                Fiber.close fd);
         Hashtbl.add ready peer0 (fd, state);
         Fiber.return ())
       else (* Fiber.Ivar.get state = Some `Closed *) Fiber.return ()
@@ -373,9 +396,8 @@ let pipe fd0 fd1 =
       ]
     >>= function
     | `Closed | `Read `End ->
-      if Fiber.Ivar.is_empty closed
-      then Fiber.Ivar.fill closed `Closed ;
-      Fiber.return ()
+        if Fiber.Ivar.is_empty closed then Fiber.Ivar.fill closed `Closed;
+        Fiber.return ()
     | `Error _ ->
         Log.err (fun m ->
             m "Got an error while reading into %a." pp_sockaddr peer0);
@@ -435,8 +457,10 @@ let secure_room ?(timeout = 3600.) socket t ~stop =
         Bob.Secured.rem_peers t peer0 peer1;
         full_write fd0 "00" ~off:0 ~len:2 >>= fun res0 ->
         full_write fd1 "00" ~off:0 ~len:2 >>= fun res1 ->
-        match (res0, res1) with
-        | Ok (), Ok () ->
+        match (res0, res1, Fiber.Ivar.get state0, Fiber.Ivar.get state1) with
+        | Ok (), Ok (), None, None ->
+            Fiber.Ivar.fill state0 `Piped;
+            Fiber.Ivar.fill state1 `Piped;
             Fiber.async (fun () -> pipe fd0 fd1);
             create_room ()
         | _ ->
@@ -445,25 +469,33 @@ let secure_room ?(timeout = 3600.) socket t ~stop =
             create_room ())
   in
 
-  let handler fd _sockaddr =
+  let handler fd sockaddr =
     Log.debug (fun m -> m "Got a new connection into the secure room.");
-    let state : [ `Closed | `Piped ] Fiber.Ivar.t = Fiber.Ivar.create () in
+    let state : [ `Closed | `Bounded of string * string ] Fiber.Ivar.t =
+      Fiber.Ivar.create ()
+    in
 
-    Fiber.async (fun () -> loop ready queue state fd (Bob.Secured.reader t));
+    Fiber.async (fun () ->
+        loop ~timeout t ready queue state fd (Bob.Secured.reader t));
     Fiber.async (fun () ->
         Fiber.npick
           [
             (fun () ->
-              (Fiber.wait state :> [ `Closed | `Piped | `Timeout ] Fiber.t));
+              (Fiber.wait state
+                :> [ `Closed | `Bounded of string * string | `Timeout ] Fiber.t));
             (fun () -> Fiber.sleep timeout >>= fun () -> Fiber.return `Timeout);
           ]
         >>= function
         | `Timeout ->
             if Fiber.Ivar.is_empty state then (
+              Log.warn (fun m -> m "Timeout for %a" pp_sockaddr sockaddr);
               Fiber.Ivar.fill state `Closed;
               full_write fd "01" ~off:0 ~len:2 >>= fun _ -> Fiber.close fd)
             else Fiber.return ()
-        | `Closed | `Piped -> Fiber.return ());
+        | `Bounded _ -> Fiber.return ()
+        | `Closed ->
+            Log.debug (fun m -> m "%a was closed." pp_sockaddr sockaddr);
+            Fiber.return ());
 
     Fiber.return ()
   in
