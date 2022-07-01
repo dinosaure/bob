@@ -5,6 +5,12 @@
  (libraries ke mirage-crypto hxd.core hxd.string logs spoke.core))
 
 (library
+ (name password)
+ (public_name bob.password)
+ (modules password)
+ (libraries bob.dict))
+
+(library
  (name fiber)
  (public_name bob.fiber)
  (modules fiber)

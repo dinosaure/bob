@@ -53,4 +53,5 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ setup_random $ relay $ secure_port $ password))
+        (const run $ setup_logs $ setup_random $ relay $ secure_port
+       $ setup_password))

@@ -15,7 +15,7 @@ let () =
     ]
   in
   let cmd =
-    Cmd.group ~default
+    Cmd.group ~default:Client.term
       (Cmd.info "bob" ~version:"%%VERSION%%" ~doc ~man)
       [ Relay.cmd; Client.cmd; Server.cmd ]
   in

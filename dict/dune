@@ -1,0 +1,15 @@
+(executable
+ (name generate)
+ (modules generate)
+ (libraries fmt))
+
+(rule
+ (target en.ml)
+ (deps en.dict)
+ (action
+  (run ./generate.exe %{deps} %{target})))
+
+(library
+ (name dict)
+ (public_name bob.dict)
+ (modules dict en))

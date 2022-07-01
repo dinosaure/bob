@@ -125,3 +125,24 @@ let setup_random = Term.(const setup_random $ seed)
 let secure_port =
   let doc = "The port of the relay where secured rooms are available." in
   Arg.(value & opt int 9001 & info [ "secure-port" ] ~doc)
+
+let password =
+  let doc = "The password to share." in
+  Arg.(
+    value & pos ~rev:true 0 (some string) None & info [] ~doc ~docv:"<password>")
+
+let setup_password g password =
+  match password with
+  | Some password -> password
+  | None ->
+      let t = Password.compile Dict.En.words in
+      let ps =
+        Array.init 2 (fun _ ->
+            let len = Random.State.int g 5 in
+            Password.generate ~g t len)
+      in
+      let password = Fmt.str "%s-%s" ps.(0) ps.(1) in
+      Fmt.pr "Password: %s\n%!" password;
+      password
+
+let setup_password = Term.(const setup_password $ setup_random $ password)

@@ -25,13 +25,20 @@ let stdin = Unix.descr_of_in_channel Stdlib.stdin
 (* Windows compatibility. *)
 
 let rec getline () =
-  Fmt.pr ">>> %!" ; Fiber.getline stdin >>= function
+  Fmt.pr ">>> %!";
+  Fiber.getline stdin >>= function
   | Some line ->
-    Fmt.pr "# %s\n%!" line ; getline ()
+      Fmt.pr "# %s\n%!" line;
+      getline ()
   | None -> Fiber.return ()
 
 let () =
-  let rec go () = Fmt.pr ">>> %!" ; match input_line Stdlib.stdin with
-    | line -> Fmt.pr "# %s\n%!" line ; go ()
-    | exception End_of_file -> () in
+  let rec go () =
+    Fmt.pr ">>> %!";
+    match input_line Stdlib.stdin with
+    | line ->
+        Fmt.pr "# %s\n%!" line;
+        go ()
+    | exception End_of_file -> ()
+  in
   go ()

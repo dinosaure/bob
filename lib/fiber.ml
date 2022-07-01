@@ -387,7 +387,6 @@ let run fiber =
     (* XXX(dinosaure): it seems that, on Windows, the EOF is signaled
        via the [except] list of file-descriptors - on Linux, only the
        [rds] list is enough. *)
-
     let ready_rds, ready_wrs, ready_excepts =
       try Unix.select rds wrs rds 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])

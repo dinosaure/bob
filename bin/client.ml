@@ -61,6 +61,12 @@ let yes =
   let doc = "Answer yes to all bob questions without prompting." in
   Arg.(value & flag & info [ "y"; "yes" ] ~doc)
 
+let term =
+  Term.(
+    ret
+      (const run $ setup_logs $ setup_random $ relay $ secure_port $ password
+     $ yes))
+
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in
   let man =
@@ -73,9 +79,4 @@ let cmd =
          receive the desired file. Otherwise, $(tname) waits for another peer.";
     ]
   in
-  Cmd.v
-    (Cmd.info "recv" ~doc ~man)
-    Term.(
-      ret
-        (const run $ setup_logs $ setup_random $ relay $ secure_port $ password
-       $ yes))
+  Cmd.v (Cmd.info "recv" ~doc ~man) term
