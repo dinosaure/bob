@@ -52,10 +52,7 @@ let relay =
 
 let password =
   let doc = "The password to share." in
-  Arg.(
-    required
-    & pos ~rev:true 0 (some string) None
-    & info [] ~doc ~docv:"<password>")
+  Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"<password>")
 
 let yes =
   let doc = "Answer yes to all bob questions without prompting." in

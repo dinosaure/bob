@@ -231,33 +231,32 @@ module Make (IO : IO) = struct
                   Log.debug (fun m -> m "Delete %s from the reader" identity);
                   None
               | Some `Continue ->
-                  let ivar =
-                    Fiber.detach (fun () ->
-                        match Hashtbl.mem fds identity with
-                        | false -> Fiber.return `Delete
-                        | true -> (
-                            IO.recv fd >>| map_read >>= function
-                            | `Error (`Rd err) ->
-                                Log.err (fun m ->
-                                    m "Got an error from %s: %a" identity
-                                      IO.pp_error err);
-                                Fiber.return `Delete
-                            | `Read `End ->
-                                Log.debug (fun m ->
-                                    m "Got end of input from %s" identity);
-                                Fiber.return `Delete
-                            | `Read (`Data _ as data) -> (
-                                Log.debug (fun m ->
-                                    m "from [%20s] -> %a" identity pp_data data);
-                                match
-                                  Bob.Relay.receive_from t ~identity data
-                                with
-                                | `Close -> Fiber.return `Delete
-                                | `Agreement (peer0, peer1) ->
-                                    Bob.Secured.add_peers rooms peer0 peer1;
-                                    Fiber.return `Continue
-                                | `Read | `Continue -> Fiber.return `Continue)))
+                  let ivar = Fiber.Ivar.create () in
+                  let thread () =
+                    match Hashtbl.mem fds identity with
+                    | false -> Fiber.return `Delete
+                    | true -> (
+                        IO.recv fd >>| map_read >>= function
+                        | `Error (`Rd err) ->
+                            Log.err (fun m ->
+                                m "Got an error from %s: %a" identity
+                                  IO.pp_error err);
+                            Fiber.return `Delete
+                        | `Read `End ->
+                            Log.debug (fun m ->
+                                m "Got end of input from %s" identity);
+                            Fiber.return `Delete
+                        | `Read (`Data _ as data) -> (
+                            Log.debug (fun m ->
+                                m "from [%20s] -> %a" identity pp_data data);
+                            match Bob.Relay.receive_from t ~identity data with
+                            | `Close -> Fiber.return `Delete
+                            | `Agreement (peer0, peer1) ->
+                                Bob.Secured.add_peers rooms peer0 peer1;
+                                Fiber.return `Continue
+                            | `Read | `Continue -> Fiber.return `Continue))
                   in
+                  Fiber.async (fun () -> thread () >>| Fiber.Ivar.fill ivar);
                   Some (fd, ivar))
             fds;
           Fiber.pause () >>= read

@@ -1,10 +1,28 @@
 let flip (a, b) = (b, a)
 
-let run_server g sockaddr secure_port password =
+let make_progress_bar ~total =
+  let open Progress.Line in
+  list [ bar total; count_to total ]
+
+let pack ~g store hashes reporter =
+  let reporter n =
+    Fmt.epr ">>> reporter %d.\n%!" n;
+    reporter n;
+    Fiber.return ()
+  in
+  Pack.make ~g ~reporter store hashes
+
+let run_server g sockaddr secure_port password path =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
   let open Fiber in
+  let hashes, store = Pack.store path in
+  let config = Progress.Config.v ~ppf:Fmt.stdout () in
+  Progress.with_reporter ~config
+    (make_progress_bar ~total:(List.length hashes))
+    (pack ~g store hashes)
+  >>= fun () ->
   Connect.connect socket sockaddr |> function
   | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name Connect.pp_error err;
@@ -20,8 +38,8 @@ let run_server g sockaddr secure_port password =
           Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err;
           Fiber.return 1)
 
-let run _quiet g sockaddr secure_port password =
-  let code = Fiber.run (run_server g sockaddr secure_port password) in
+let run _quiet g () sockaddr secure_port password path =
+  let code = Fiber.run (run_server g sockaddr secure_port password path) in
   `Ok code
 
 open Cmdliner
@@ -32,11 +50,28 @@ let relay =
   Arg.(
     value
     & opt (addr_inet ~default:9000) Unix.(ADDR_INET (inet_addr_loopback, 9000))
-    & info [ "r"; "relay" ] ~doc)
+    & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
 
 let password =
   let doc = "The password to share." in
-  Arg.(required & pos ~rev:true 0 (some string) None & info [] ~doc)
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "p"; "password" ] ~doc ~docv:"<password>")
+
+let path =
+  let doc = "Document to archive." in
+  let existing_object =
+    let parser str =
+      match Fpath.of_string str with
+      | Ok v when Sys.file_exists str -> Ok v
+      | Ok v -> Error (`Msg (Fmt.str "%a does not exist" Fpath.pp v))
+      | Error _ as err -> err
+    in
+    Arg.conv (parser, Fpath.pp)
+  in
+  Arg.(
+    required & pos 0 (some existing_object) None & info [] ~doc ~docv:"<path>")
 
 let cmd =
   let doc = "Send a file to a peer who share the given password." in
@@ -53,5 +88,5 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ setup_random $ relay $ secure_port
-       $ setup_password))
+        (const run $ setup_logs $ setup_random $ setup_temp $ relay
+       $ secure_port $ setup_password password $ path))

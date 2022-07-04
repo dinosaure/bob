@@ -58,7 +58,8 @@ let reporter ppf =
 let setup_logs style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer ();
   Logs.set_level level;
-  Logs.set_reporter (reporter Fmt.stderr);
+  let reporter = reporter Fmt.stderr in
+  Logs.set_reporter reporter;
   Option.is_none level
 
 let setup_logs = Term.(const setup_logs $ renderer $ verbosity)
@@ -124,12 +125,7 @@ let setup_random = Term.(const setup_random $ seed)
 
 let secure_port =
   let doc = "The port of the relay where secured rooms are available." in
-  Arg.(value & opt int 9001 & info [ "secure-port" ] ~doc)
-
-let password =
-  let doc = "The password to share." in
-  Arg.(
-    value & pos ~rev:true 0 (some string) None & info [] ~doc ~docv:"<password>")
+  Arg.(value & opt int 9001 & info [ "secure-port" ] ~doc ~docv:"<port>")
 
 let setup_password g password =
   match password with
@@ -145,4 +141,30 @@ let setup_password g password =
       Fmt.pr "Password: %s\n%!" password;
       password
 
-let setup_password = Term.(const setup_password $ setup_random $ password)
+let setup_password password =
+  Term.(const setup_password $ setup_random $ password)
+
+let setup_temp = Option.iter Pack.Temp.set_default_directory
+
+let temp =
+  let doc = "The temporary directory used to generate the archive." in
+  let env = Cmd.Env.info "BOB_TMP" in
+  let directory =
+    let parser str =
+      match Fpath.of_string str with
+      | Ok v ->
+          if not (Sys.file_exists str) then
+            Error (msgf "%a does not exist" Fpath.pp v)
+          else if not (Sys.is_directory str) then
+            Error (msgf "%a is not a directory" Fpath.pp v)
+          else Ok (Fpath.to_dir_path v)
+      | Error _ as err -> err
+    in
+    Arg.conv (parser, Fpath.pp)
+  in
+  Arg.(
+    value
+    & opt (some directory) None
+    & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env)
+
+let setup_temp = Term.(const setup_temp $ temp)

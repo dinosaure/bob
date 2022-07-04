@@ -42,6 +42,26 @@ module Ivar : sig
   val full : 'a -> 'a t
 end
 
+module Mutex : sig
+  type +'a fiber = 'a t
+  type t
+
+  val create : unit -> t
+  val lock : t -> unit fiber
+  val unlock : t -> unit
+end
+
+module Condition : sig
+  type +'a fiber = 'a t
+  type t
+  type mutex = Mutex.t
+
+  val create : unit -> t
+  val signal : t -> unit
+  val broadcast : t -> unit
+  val wait : t -> mutex -> unit fiber
+end
+
 val fork : (unit -> 'a t) -> 'a Ivar.t t
 val pure : (unit -> 'a) -> 'a t
 val wait : 'a Ivar.t -> 'a t
@@ -50,9 +70,17 @@ val never : 'a t
 val npick : (unit -> 'a t) list -> 'a t
 val pause : unit -> unit t
 val async : (unit -> 'a t) -> unit
-val detach : (unit -> 'a t) -> 'a Ivar.t
+val detach : (unit -> 'a) -> 'a t
+val parallel_map : f:('a -> 'b t) -> 'a list -> 'b list t
+val parallel_iter : f:('a -> unit t) -> 'a list -> unit t
 
 (* {2: Unix operations.} *)
+
+val openfile :
+  Fpath.t ->
+  Unix.open_flag list ->
+  int ->
+  (Unix.file_descr, Unix.error * string * string) result t
 
 val read : Unix.file_descr -> ([ `Data of string | `End ], Unix.error) result t
 

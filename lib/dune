@@ -14,7 +14,13 @@
  (name fiber)
  (public_name bob.fiber)
  (modules fiber)
- (libraries bigstringaf ke bheap logs unix))
+ (libraries fpath bigstringaf ke bheap logs unix))
+
+(library
+ (name pack)
+ (public_name bob.pack)
+ (modules pack temp)
+ (libraries bob.fiber unix digestif carton))
 
 (library
  (name bob_unix)

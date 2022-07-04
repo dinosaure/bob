@@ -11,6 +11,8 @@ let both a b = bind a (fun a -> bind b (fun b -> return (a, b)))
 let ( >>= ) = bind
 let ( >>| ) t f k = t (fun x -> k (f x))
 
+(* Fibers *)
+
 type fiber = Fiber : ('a -> unit t) * 'a -> fiber
 type seq = { mutable prev : seq; mutable next : seq }
 
@@ -53,6 +55,12 @@ let add seq fiber =
   seq.prev.next <- seq_of_node node;
   seq.prev <- seq_of_node node
 
+let root =
+  let rec seq = { prev = seq; next = seq } in
+  seq
+
+(* Ivar *)
+
 module Ivar = struct
   type 'a state = Full of 'a | Empty of ('a -> unit) Queue.t
   type 'a t = 'a state ref
@@ -72,9 +80,38 @@ module Ivar = struct
   let full v = ref (Full v)
 end
 
-let root =
-  let rec seq = { prev = seq; next = seq } in
-  seq
+module Mutex = struct
+  type +'a fiber = 'a t
+  type state = Locked of (unit -> unit) Queue.t | Free
+  type t = state ref
+
+  let create () = ref Free
+
+  let lock t k =
+    match !t with
+    | Locked q -> Queue.push k q
+    | Free ->
+        t := Locked (Queue.create ());
+        k ()
+
+  let unlock t =
+    match !t with
+    | Free -> ()
+    | Locked q ->
+        Queue.iter (fun f -> f ()) q;
+        t := Free
+end
+
+module Condition = struct
+  type +'a fiber = 'a t
+  type t = (unit -> unit) Queue.t
+  type mutex = Mutex.t
+
+  let create () = Queue.create ()
+  let signal q = match Queue.take_opt q with Some f -> f () | None -> ()
+  let broadcast q = Queue.iter (fun f -> f ()) q
+  let wait q _mutex k = Queue.push k q
+end
 
 let never _k = ()
 let wait = Ivar.read
@@ -84,15 +121,15 @@ let detach k =
   let fiber =
     Fiber
       ( (fun ivar ->
-          k () >>= fun v ->
+          let v = k () in
           Ivar.fill ivar v;
           return ()),
         ivar )
   in
   add root fiber;
-  ivar
+  wait ivar
 
-let pause () = detach (fun () -> return ()) |> wait
+let pause () = detach ignore
 let async k = (k ()) ignore
 
 let fork f k =
@@ -119,8 +156,28 @@ let fork_and_join f g =
   fork f >>= fun a ->
   fork g >>= fun b -> both (Ivar.read a) (Ivar.read b)
 
+let rec parallel_iter ~f = function
+  | [] -> return ()
+  | x :: r ->
+      fork (fun () -> f x) >>= fun ivar ->
+      parallel_iter ~f r >>= fun () -> wait ivar
+
+let rec parallel_map ~f = function
+  | [] -> return []
+  | x :: r ->
+      fork (fun () -> f x) >>= fun ivar ->
+      parallel_map ~f r >>= fun r ->
+      wait ivar >>= fun x -> return (x :: r)
+
+(* Unix syscalls *)
+
+let openfile fpath flags mode =
+  fork (fun () ->
+      try return (Ok (Unix.openfile (Fpath.to_string fpath) flags mode))
+      with Unix.Unix_error (errno, f, args) -> return (Error (errno, f, args)))
+  >>= wait
+
 let prd = Hashtbl.create 0x100
-let pwr = Hashtbl.create 0x100
 
 let read fd : ([ `Data of string | `End ], Unix.error) result t =
   match Hashtbl.find_opt prd fd with
@@ -163,6 +220,8 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
       let ivar : (Unix.file_descr * Unix.sockaddr) Ivar.t = Ivar.create () in
       Hashtbl.add prd fd (`Accept ivar);
       Ivar.read ivar
+
+let pwr = Hashtbl.create 0x100
 
 let write fd ~off ~len str : (int, [ `Closed | `Unix of Unix.error ]) result t =
   match Hashtbl.find_opt pwr fd with
@@ -223,6 +282,8 @@ let close fd =
       Ivar.fill ivar (Error `Closed)
   | None -> ());
   return ()
+
+(* Unblocked Unix syscalls *)
 
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
@@ -302,6 +363,8 @@ let sigexcept fd =
           Hashtbl.remove prd fd;
           Ivar.fill ivar (Some line))
 
+(* Sleepers *)
+
 module Time = struct
   type t = float
   type sleep = { time : t; ivar : unit Ivar.t }
@@ -340,35 +403,7 @@ end
 
 let sleep = Time.sleep
 
-module Set = Set.Make (struct
-  type t = Unix.file_descr
-
-  let compare a b = Obj.magic a - Obj.magic b
-end)
-
-let () =
-  at_exit (fun () ->
-      let fds = Set.empty in
-      let fds =
-        Hashtbl.fold
-          (fun socket -> function
-            | `Accept _ ->
-                identity
-                (* XXX(dinosaure): [`Accept] are closed by the relay properly at the end of its process. *)
-            | _ -> Set.add socket)
-          prd fds
-      in
-      let fds = Hashtbl.fold (fun socket _ fds -> Set.add socket fds) pwr fds in
-      Log.debug (fun m ->
-          m "Close remaining file-descriptions: %a"
-            Fmt.(Dump.list (using Obj.magic int))
-            (Set.elements fds));
-      Set.iter
-        (fun fd ->
-          if fd <> Unix.stdin && fd <> Unix.stdout && fd <> Unix.stderr then (
-            Log.debug (fun m -> m "Close %d file-descriptor." (Obj.magic fd));
-            Unix.close fd))
-        fds)
+(* First entry point of Fiber *)
 
 let run fiber =
   let result = ref None in
@@ -421,3 +456,35 @@ let run fiber =
   in
   loop ();
   match !result with Some x -> x | None -> failwith "Fiber.run"
+
+(* Cleaner *)
+
+module Set = Set.Make (struct
+  type t = Unix.file_descr
+
+  let compare a b = Obj.magic a - Obj.magic b
+end)
+
+let () =
+  at_exit (fun () ->
+      let fds = Set.empty in
+      let fds =
+        Hashtbl.fold
+          (fun socket -> function
+            | `Accept _ ->
+                identity
+                (* XXX(dinosaure): [`Accept] are closed by the relay properly at the end of its process. *)
+            | _ -> Set.add socket)
+          prd fds
+      in
+      let fds = Hashtbl.fold (fun socket _ fds -> Set.add socket fds) pwr fds in
+      Log.debug (fun m ->
+          m "Close remaining file-descriptions: %a"
+            Fmt.(Dump.list (using Obj.magic int))
+            (Set.elements fds));
+      Set.iter
+        (fun fd ->
+          if fd <> Unix.stdin && fd <> Unix.stdout && fd <> Unix.stderr then (
+            Log.debug (fun m -> m "Close %d file-descriptor." (Obj.magic fd));
+            Unix.close fd))
+        fds)

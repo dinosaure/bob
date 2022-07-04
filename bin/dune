@@ -14,8 +14,8 @@
  (name bob)
  (public_name bob)
  (modules chat daemon bob clear bob_clear client server relay connect args)
- (libraries base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli logs.cli fmt.tty
-   logs.fmt bob.password bob.unix))
+ (libraries progress base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli
+   logs.cli fmt.tty logs.fmt bob.password bob.unix bob.pack))
 
 ; (rule
 ;  (target bob.com)

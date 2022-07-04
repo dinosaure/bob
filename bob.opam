@@ -26,6 +26,7 @@ depends: [
   "ipaddr"
   "mirage-crypto"
   "psq"
+  "carton"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"
