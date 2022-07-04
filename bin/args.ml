@@ -12,6 +12,11 @@ let renderer =
   let env = Cmd.Env.info "BOB_FMT" in
   Fmt_cli.style_renderer ~docs:common_options ~env ()
 
+let utf_8 =
+  let doc = "Allow us to emit UTF-8 characters." in
+  let env = Cmd.Env.info "BOB_UTF_8" in
+  Arg.(value & opt bool true & info [ "with-utf-8" ] ~doc ~env)
+
 let app_style = `Cyan
 let err_style = `Red
 let warn_style = `Yellow
@@ -55,14 +60,14 @@ let reporter ppf =
   in
   { Logs.report }
 
-let setup_logs style_renderer level =
-  Fmt_tty.setup_std_outputs ?style_renderer ();
+let setup_logs utf_8 style_renderer level =
+  Fmt_tty.setup_std_outputs ~utf_8 ?style_renderer ();
   Logs.set_level level;
   let reporter = reporter Fmt.stderr in
   Logs.set_reporter reporter;
   Option.is_none level
 
-let setup_logs = Term.(const setup_logs $ renderer $ verbosity)
+let setup_logs = Term.(const setup_logs $ utf_8 $ renderer $ verbosity)
 
 let inet_addr =
   let parser str =
@@ -127,7 +132,7 @@ let secure_port =
   let doc = "The port of the relay where secured rooms are available." in
   Arg.(value & opt int 9001 & info [ "secure-port" ] ~doc ~docv:"<port>")
 
-let setup_password g password =
+let setup_password quiet g password =
   match password with
   | Some password -> password
   | None ->
@@ -138,11 +143,11 @@ let setup_password g password =
             Password.generate ~g t len)
       in
       let password = Fmt.str "%s-%s" ps.(0) ps.(1) in
-      Fmt.pr "Password: %s\n%!" password;
+      if not quiet then Fmt.pr "Password: %s\n%!" password;
       password
 
 let setup_password password =
-  Term.(const setup_password $ setup_random $ password)
+  Term.(const setup_password $ setup_logs $ setup_random $ password)
 
 let setup_temp = Option.iter Pack.Temp.set_default_directory
 

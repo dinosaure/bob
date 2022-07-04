@@ -131,9 +131,7 @@ let deltify ~reporter store hashes =
 
     let print () =
       let open Fiber in
-      reporter !counter >>| fun () ->
-      Fmt.pr "*%!";
-      counter := 0
+      reporter !counter >>| fun () -> counter := 0
   end in
   let module Delta = Carton.Enc.Delta (Scheduler) (Fiber) (SHA256) (Verbose) in
   let open Fiber in
@@ -152,7 +150,7 @@ let deltify ~reporter store hashes =
     ~weight:10 ~uid_ln:SHA256.length entries
   >>= fun targets -> Fiber.return (entries, targets)
 
-let pack store targets stream =
+let pack ~reporter store targets stream =
   let header = Bigstringaf.create 12 in
   let offsets = Hashtbl.create (Array.length targets) in
   let crcs = Hashtbl.create (Array.length targets) in
@@ -183,6 +181,7 @@ let pack store targets stream =
   cursor := Int64.add !cursor 12L;
   let encode_target idx =
     let open Fiber in
+    reporter () >>= fun () ->
     Hashtbl.add offsets (Carton.Enc.target_uid targets.(idx)) !cursor;
     Carton.Enc.encode_target scheduler ~b ~find:(Scheduler.inj <.> find)
       ~load:(load store) ~uid targets.(idx) ~cursor:(Int64.to_int !cursor)
@@ -286,18 +285,17 @@ let store path =
   Hashtbl.iter (fun v (k, _) -> Hashtbl.add store k v) rstore;
   (hashes, { store; rstore })
 
-let fiber_ignore _ = Fiber.return ()
+let deltify ~reporter store hashes =
+  let open Fiber in
+  deltify ~reporter store hashes >>= fun (_entries, targets) ->
+  Fiber.return targets
 
-let make ?(tmp : Temp.pattern = "pack-%s.pack") ?g ?(reporter = fiber_ignore)
-    store hashes =
+let make ?(tmp : Temp.pattern = "pack-%s.pack") ?g ~reporter store targets =
   let open Fiber in
   let tmp = Temp.random_temporary_path ?g tmp in
   let stream =
     let oc = open_out_bin (Fpath.to_string tmp) in
     function Some str -> output_string oc str | None -> close_out oc
   in
-  deltify ~reporter store hashes >>= fun (_entries, targets) ->
-  pack store targets stream >>= fun (hash, _offsets, _crcs) ->
-  Fmt.pr ">>> %a\n%!" Fpath.pp tmp;
-  Fmt.pr ">>> %a\n%!" SHA256.pp hash;
-  Fiber.return ()
+  pack ~reporter store targets stream >>= fun (_hash, _offsets, _crcs) ->
+  Fiber.return tmp
