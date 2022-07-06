@@ -11,6 +11,12 @@ val deltify :
   Digestif.SHA256.t list ->
   Digestif.SHA256.t Carton.Enc.q array Fiber.t
 
+val undeltify :
+  reporter:(int -> unit Fiber.t) ->
+  store ->
+  Digestif.SHA256.t list ->
+  Digestif.SHA256.t Carton.Enc.q array Fiber.t
+
 val make :
   ?tmp:pattern ->
   ?g:Random.State.t ->

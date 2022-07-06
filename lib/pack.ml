@@ -159,6 +159,25 @@ let deltify ~reporter store hashes =
     ~weight:10 ~uid_ln:SHA256.length entries
   >>= fun targets -> Fiber.return (entries, targets)
 
+let undeltify ~reporter store hashes =
+  let open Fiber in
+  let rec go targets = function
+    | [] -> Fiber.return targets
+    | hash :: hashes ->
+        load store hash |> Scheduler.prj >>= fun v ->
+        let kind = Carton.Dec.kind v in
+        let length = Carton.Dec.len v in
+        let entry = Carton.Enc.make_entry ~kind ~length hash in
+        Carton.Enc.entry_to_target scheduler
+          ~load:(fun _ -> Scheduler.inj (Fiber.return v))
+          entry
+        (* XXX(dinosaure): [load] is safe. *)
+        |> Scheduler.prj
+        >>= fun target ->
+        reporter 0 >>= fun () -> go (target :: targets) hashes
+  in
+  go [] hashes >>= fun targets -> Fiber.return (Array.of_list targets)
+
 let pack ~reporter ?level store targets stream =
   let header = Bigstringaf.create 12 in
   let offsets = Hashtbl.create (Array.length targets) in

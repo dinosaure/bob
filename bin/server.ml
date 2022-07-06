@@ -19,7 +19,7 @@ let make_tranfer_bar ~total =
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list [ brackets @@ bar ~style ~width:(`Fixed 30) total; percentage_of total ]
 
-let compress_with_reporter quiet ~config store hashes =
+let compress_with_reporter quiet ~compression ~config store hashes =
   let reporter, finalise =
     match quiet with
     | true -> ((fun _ -> Fiber.return ()), ignore)
@@ -39,7 +39,10 @@ let compress_with_reporter quiet ~config store hashes =
           fun () -> Progress.Display.finalise display )
   in
   let open Fiber in
-  Pack.deltify ~reporter store hashes >>| fun res ->
+  (match compression with
+  | true -> Pack.deltify ~reporter store hashes
+  | false -> Pack.undeltify ~reporter store hashes)
+  >>| fun res ->
   finalise ();
   res
 
@@ -127,7 +130,8 @@ let run_server quiet g compression sockaddr secure_port password path =
   let open Fiber in
   let hashes, store = Pack.store path in
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
-  compress_with_reporter quiet ~config store hashes >>= fun compressed ->
+  compress_with_reporter quiet ~config ~compression store hashes
+  >>= fun compressed ->
   emit_with_reporter quiet ~g
     ~level:(if compression then 4 else 0)
     ~config store compressed
