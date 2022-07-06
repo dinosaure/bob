@@ -27,6 +27,7 @@ depends: [
   "mirage-crypto"
   "psq"
   "carton"
+  "progress"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"
@@ -34,4 +35,5 @@ depends: [
 
 pin-depends: [
   [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#61f4e785d22d6002fd396862f75f515355197002" ]
+  [ "carton.dev" "git+https://github.com/mirage/ocaml-git.git#82f4217e63fd20cd9d3ff892fb5b87bd96c01f73" ]
 ]

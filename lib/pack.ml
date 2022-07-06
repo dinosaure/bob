@@ -7,6 +7,9 @@ module SHA256 = struct
 
   let hash x = Hashtbl.hash x
   let length = digest_size
+  let feed = feed_bigstring
+  let null = digest_string ""
+  let compare a b = String.compare (to_raw_string a) (to_raw_string b)
 end
 
 module Crc32 = Checkseum.Crc32
@@ -60,6 +63,12 @@ module Filesystem = struct
   let fold ?dotfiles ~f acc d = fold ?dotfiles ~f acc [ d ]
 end
 
+let bigstring_input ic buf off len =
+  let tmp = Bytes.create len in
+  let len' = input ic tmp 0 len in
+  Bigstringaf.blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:len';
+  len'
+
 let load_file fpath =
   let fd = Unix.openfile (Fpath.to_string fpath) Unix.[ O_RDONLY ] 0o644 in
   let ln = Unix.lseek fd 0 Unix.SEEK_END in
@@ -69,7 +78,7 @@ let load_file fpath =
   Unix.close fd;
   let rs = Bigstringaf.create ln in
   Bigstringaf.blit_from_bytes bf ~src_off:0 rs ~dst_off:0 ~len:ln;
-  Carton.Dec.v ~kind:`A rs
+  Carton.Dec.v ~kind:`C rs
 
 let serialize_directory entries =
   (* XXX(dinosaure): à la Git. *)
@@ -150,7 +159,7 @@ let deltify ~reporter store hashes =
     ~weight:10 ~uid_ln:SHA256.length entries
   >>= fun targets -> Fiber.return (entries, targets)
 
-let pack ~reporter store targets stream =
+let pack ~reporter ?level store targets stream =
   let header = Bigstringaf.create 12 in
   let offsets = Hashtbl.create (Array.length targets) in
   let crcs = Hashtbl.create (Array.length targets) in
@@ -183,7 +192,7 @@ let pack ~reporter store targets stream =
     let open Fiber in
     reporter () >>= fun () ->
     Hashtbl.add offsets (Carton.Enc.target_uid targets.(idx)) !cursor;
-    Carton.Enc.encode_target scheduler ~b ~find:(Scheduler.inj <.> find)
+    Carton.Enc.encode_target ?level scheduler ~b ~find:(Scheduler.inj <.> find)
       ~load:(load store) ~uid targets.(idx) ~cursor:(Int64.to_int !cursor)
     |> Scheduler.prj
     >>= fun (len, encoder) ->
@@ -290,12 +299,143 @@ let deltify ~reporter store hashes =
   deltify ~reporter store hashes >>= fun (_entries, targets) ->
   Fiber.return targets
 
-let make ?(tmp : Temp.pattern = "pack-%s.pack") ?g ~reporter store targets =
+let make ?(tmp : Temp.pattern = "pack-%s.pack") ?g ?level ~reporter store
+    targets =
   let open Fiber in
   let tmp = Temp.random_temporary_path ?g tmp in
   let stream =
     let oc = open_out_bin (Fpath.to_string tmp) in
     function Some str -> output_string oc str | None -> close_out oc
   in
-  pack ~reporter store targets stream >>= fun (_hash, _offsets, _crcs) ->
+  pack ~reporter ?level store targets stream >>= fun (_hash, _offsets, _crcs) ->
   Fiber.return tmp
+
+module First_pass = Carton.Dec.Fp (SHA256)
+module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)
+
+type status = Verify.status
+
+let replace tbl k v =
+  try
+    let v' = Hashtbl.find tbl k in
+    if v < v' then Hashtbl.replace tbl k v'
+  with Not_found -> Hashtbl.add tbl k v
+
+let digest ~kind ?(off = 0) ?len buf =
+  let len =
+    match len with Some len -> len | None -> Bigstringaf.length buf - off
+  in
+  let ctx = SHA256.empty in
+  let ctx =
+    match kind with
+    | `A -> SHA256.feed_string ctx (Fmt.str "root %d\000" len)
+    | `B -> SHA256.feed_string ctx (Fmt.str "tree %d\000" len)
+    | `C -> SHA256.feed_string ctx (Fmt.str "blob %d\000" len)
+    | `D -> SHA256.feed_string ctx (Fmt.str "mesg %d\000" len)
+  in
+  let ctx = SHA256.feed_bigstring ctx ~off ~len buf in
+  SHA256.get ctx
+
+let first_pass ic ~reporter =
+  let open Fiber in
+  let oc = De.bigstring_create De.io_buffer_size in
+  let zw = De.make_window ~bits:15 in
+  let tp = Bigstringaf.create De.io_buffer_size in
+  let allocate _ = zw in
+  First_pass.check_header scheduler
+    (fun ic buf ~off ~len ->
+      (Scheduler.inj <.> Fiber.return) (input ic buf off len))
+    ic
+  |> Scheduler.prj
+  >>= fun (max, _, _) ->
+  seek_in ic 0;
+  let decoder = First_pass.decoder ~o:oc ~allocate `Manual in
+  let children = Hashtbl.create 0x100 in
+  let where = Hashtbl.create 0x100 in
+  let weight = Hashtbl.create 0x100 in
+  let length = Hashtbl.create 0x100 in
+  let carbon = Hashtbl.create 0x100 in
+  let crcs = Hashtbl.create 0x100 in
+  let matrix = Array.make max Verify.unresolved_node in
+
+  let rec go decoder =
+    match First_pass.decode decoder with
+    | `Await decoder ->
+        let len = bigstring_input ic tp 0 (Bigstringaf.length tp) in
+        go (First_pass.src decoder tp 0 len)
+    | `Peek decoder ->
+        let keep = First_pass.src_rem decoder in
+        let len = bigstring_input ic tp keep (Bigstringaf.length tp - keep) in
+        go (First_pass.src decoder tp 0 (keep + len))
+    | `Entry
+        ({ First_pass.kind = Base _; offset; size; consumed; crc; _ }, decoder)
+      ->
+        let n = First_pass.count decoder - 1 in
+        Hashtbl.add crcs offset crc;
+        Hashtbl.add weight offset size;
+        Hashtbl.add length offset size;
+        Hashtbl.add carbon offset consumed;
+        Hashtbl.add where offset n;
+        matrix.(n) <- Verify.unresolved_base ~cursor:offset;
+        reporter 1 >>= fun () -> go decoder
+    | `Entry
+        ( {
+            First_pass.kind = Ofs { sub = s; source; target };
+            offset;
+            size;
+            consumed;
+            crc;
+            _;
+          },
+          decoder ) ->
+        let n = First_pass.count decoder - 1 in
+        let rel = Int64.(sub offset (of_int s)) in
+        replace weight rel source;
+        replace weight offset target;
+        Hashtbl.add crcs offset crc;
+        Hashtbl.add length offset size;
+        Hashtbl.add carbon offset consumed;
+        Hashtbl.add where offset n;
+        (try
+           let vs = Hashtbl.find children (`Ofs rel) in
+           Hashtbl.replace children (`Ofs rel) (offset :: vs)
+         with Not_found -> Hashtbl.add children (`Ofs rel) [ offset ]);
+        reporter 1 >>= fun () -> go decoder
+    | `Entry
+        ( {
+            First_pass.kind = Ref { ptr; target; source };
+            offset;
+            size;
+            consumed;
+            crc;
+            _;
+          },
+          decoder ) ->
+        let n = First_pass.count decoder - 1 in
+        replace weight offset (Stdlib.max target source);
+        Hashtbl.add crcs offset crc;
+        Hashtbl.add length offset size;
+        Hashtbl.add carbon offset consumed;
+        Hashtbl.add where offset n;
+        (try
+           let vs = Hashtbl.find children (`Ref ptr) in
+           Hashtbl.replace children (`Ref ptr) (offset :: vs)
+         with Not_found -> Hashtbl.add children (`Ref ptr) [ offset ]);
+        reporter 1 >>= fun () -> go decoder
+    | `End hash ->
+        let where ~cursor = Hashtbl.find where cursor in
+        let children ~cursor ~uid =
+          match
+            ( Hashtbl.find_opt children (`Ofs cursor),
+              Hashtbl.find_opt children (`Ref uid) )
+          with
+          | Some a, Some b -> List.sort_uniq compare (a @ b)
+          | Some x, None | None, Some x -> x
+          | None, None -> []
+        in
+        let weight ~cursor = Hashtbl.find weight cursor in
+        let oracle = { Carton.Dec.where; children; digest; weight } in
+        Fiber.return (Ok (hash, matrix, oracle, crcs))
+    | `Malformed err -> Fiber.return (Error (`Msg err))
+  in
+  go decoder

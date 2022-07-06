@@ -16,6 +16,16 @@ let rec connect fd sockaddr =
   | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> Error `Timeout
   | Unix.Unix_error (errno, f, arg) -> Error (`Unix (errno, f, arg))
 
+type error =
+  [ `Permission_denied
+  | `Access_denied
+  | `Local_address_already_in_use
+  | `Address_not_available
+  | `Connection_refused
+  | `Network_unreachable
+  | `Timeout
+  | `Unix of Unix.error * string * string ]
+
 let pp_error ppf = function
   | `Permission_denied -> Fmt.string ppf "Permission denied"
   | `Access_denied -> Fmt.string ppf "Access denied"
