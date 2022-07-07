@@ -12,7 +12,7 @@ val sockaddr_with_secure_port : Unix.sockaddr -> int -> Unix.sockaddr
 
 val transfer :
   ?chunk:int ->
-  ?reporter:(int -> unit) ->
+  ?reporter:(int -> unit Fiber.t) ->
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
@@ -23,7 +23,7 @@ val transfer :
 val save :
   ?g:Random.State.t ->
   ?tmp:Pack.pattern ->
-  ?reporter:(int -> unit) ->
+  ?reporter:(int -> unit Fiber.t) ->
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->

@@ -26,6 +26,7 @@
 type +'a t
 
 val return : 'a -> 'a t
+val ignore : 'a -> unit t
 val bind : 'a t -> ('a -> 'b t) -> 'b t
 val both : 'a t -> 'b t -> ('a * 'b) t
 val fork_and_join : (unit -> 'a t) -> (unit -> 'b t) -> ('a * 'b) t

@@ -1,43 +1,10 @@
-let flip (a, b) = (b, a)
-
-let make_compression_progress ~total =
-  let open Progress.Line in
-  list [ spacer 32; count_to total; const "delta-ified object(s)" ]
-
-let make_progress_bar ~total =
-  let open Progress.Line in
-  let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
-  list
-    [
-      brackets @@ bar ~style ~width:(`Fixed 30) total;
-      count_to total;
-      const "compressed object(s)";
-    ]
-
-let make_tranfer_bar ~total =
-  let open Progress.Line in
-  let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
-  list [ brackets @@ bar ~style ~width:(`Fixed 30) total; percentage_of total ]
+open Stdbob
+open Prgrss
 
 let compress_with_reporter quiet ~compression ~config store hashes =
-  let reporter, finalise =
-    match quiet with
-    | true -> ((fun _ -> Fiber.return ()), ignore)
-    | false ->
-        let display =
-          Progress.Multi.line
-            (make_compression_progress ~total:(List.length hashes))
-          |> Progress.Display.start ~config
-        in
-        let[@warning "-8"] Progress.Reporter.[ reporter ] =
-          Progress.Display.reporters display
-        in
-        ( (fun n ->
-            reporter n;
-            Progress.Display.tick display;
-            Fiber.return ()),
-          fun () -> Progress.Display.finalise display )
-  in
+  with_reporter ~config quiet
+    (make_compression_progress ~total:(List.length hashes))
+  @@ fun (reporter, finalise) ->
   let open Fiber in
   (match compression with
   | true -> Pack.deltify ~reporter store hashes
@@ -47,38 +14,14 @@ let compress_with_reporter quiet ~compression ~config store hashes =
   res
 
 let emit_with_reporter quiet ?g ?level ~config store compressed =
-  let reporter, finalise =
-    match quiet with
-    | true -> ((fun _ -> Fiber.return ()), ignore)
-    | false ->
-        let display =
-          Progress.Multi.line
-            (make_progress_bar ~total:(Array.length compressed))
-          |> Progress.Display.start ~config
-        in
-        let[@warning "-8"] Progress.Reporter.[ reporter ] =
-          Progress.Display.reporters display
-        in
-        ( (fun () ->
-            reporter 1;
-            Progress.Display.tick display;
-            Fiber.return ()),
-          fun () -> Progress.Display.finalise display )
-  in
+  with_reporter ~config quiet
+    (make_progress_bar ~total:(Array.length compressed))
+  @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make ?g ?level ~reporter store compressed >>| fun res ->
+  Pack.make ?g ?level ~reporter:(fun () -> reporter 1) store compressed
+  >>| fun res ->
   finalise ();
   res
-
-let sizes = [| "B"; "KiB"; "MiB"; "GiB"; "TiB"; "PiB"; "EiB"; "ZiB"; "YiB" |]
-
-let bytes_to_size ?(decimals = 2) ppf = function
-  | 0 -> Fmt.string ppf "0 byte"
-  | n ->
-      let n = float_of_int n in
-      let i = Float.floor (Float.log n /. Float.log 1024.) in
-      let r = n /. Float.pow 1024. i in
-      Fmt.pf ppf "%.*f %s" decimals r sizes.(int_of_float i)
 
 let summarize quiet compressed fpath =
   (if not quiet then
@@ -100,27 +43,13 @@ let summarize quiet compressed fpath =
 
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr fpath =
-  let reporter, finalize =
-    match quiet with
-    | true -> (ignore, ignore)
-    | false ->
-        let total = (Unix.stat (Fpath.to_string fpath)).Unix.st_size in
-        let display =
-          Progress.Multi.line (make_tranfer_bar ~total)
-          |> Progress.Display.start ~config
-        in
-        let[@warning "-8"] Progress.Reporter.[ reporter ] =
-          Progress.Display.reporters display
-        in
-        ( (fun n ->
-            reporter n;
-            Progress.Display.tick display),
-          fun () -> Progress.Display.finalise display )
-  in
+  let total = (Unix.stat (Fpath.to_string fpath)).Unix.st_size in
+  with_reporter ~config quiet (make_tranfer_bar ~total)
+  @@ fun (reporter, finalise) ->
   let open Fiber in
   Transfer.transfer ~reporter ~identity ~ciphers ~shared_keys sockaddr fpath
   >>| fun res ->
-  finalize ();
+  finalise ();
   res
 
 let run_server quiet g compression sockaddr secure_port password path =

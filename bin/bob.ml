@@ -15,8 +15,8 @@ let () =
     ]
   in
   let cmd =
-    Cmd.group ~default:Client.term
+    Cmd.group ~default:Recv.term
       (Cmd.info "bob" ~version:"%%VERSION%%" ~doc ~man)
-      [ Relay.cmd; Client.cmd; Server.cmd ]
+      [ Relay.cmd; Recv.cmd; Send.cmd ]
   in
   exit @@ Cmd.eval' cmd

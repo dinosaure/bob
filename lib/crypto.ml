@@ -246,48 +246,22 @@ module Make (Flow : FLOW) = struct
 
   let send flow str ~off ~len =
     let blit src src_off dst dst_off len =
-      Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
+      Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
     in
     Ke.Rke.N.push flow.send_queue ~blit ~length:String.length ~off ~len str;
     flush flow >>? fun () -> Flow.return (Ok len)
 
   let close { fd; _ } = Flow.close fd
 
-  let line_of_queue queue =
-    let blit src src_off dst dst_off len =
-      Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len
-    in
-    let exists ~p queue =
-      let pos = ref 0 and res = ref (-1) in
-      Ke.Rke.iter
-        (fun chr ->
-          if p chr && !res = -1 then res := !pos;
-          incr pos)
-        queue;
-      if !res = -1 then None else Some !res
-    in
-    match exists ~p:(( = ) '\n') queue with
-    | None -> None
-    | Some 0 ->
-        Ke.Rke.N.shift_exn queue 1;
-        Some ""
-    | Some pos -> (
-        let tmp = Bytes.create pos in
-        Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp;
-        Ke.Rke.N.shift_exn queue (pos + 1);
-        match Bytes.get tmp (pos - 1) with
-        | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
-        | _ -> Some (Bytes.unsafe_to_string tmp))
-
   let rec getline queue flow =
-    match line_of_queue queue with
+    match Stdbob.line_of_queue queue with
     | Some line -> Flow.return (Some line)
     | None -> (
         recv flow >>= function
         | Ok `End -> Flow.return None
         | Ok (`Data str) ->
             let blit src src_off dst dst_off len =
-              Bigstringaf.blit_from_string src ~src_off dst ~dst_off ~len
+              Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
             in
             Ke.Rke.N.push queue ~blit ~length:String.length str;
             getline queue flow

@@ -1,3 +1,5 @@
+open Stdbob
+
 let src = Logs.Src.create "bob.fiber"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -14,50 +16,8 @@ let ( >>| ) t f k = t (fun x -> k (f x))
 (* Fibers *)
 
 type fiber = Fiber : ('a -> unit t) * 'a -> fiber
-type seq = { mutable prev : seq; mutable next : seq }
 
-type node = {
-  mutable node_prev : seq;
-  mutable node_next : seq;
-  v : fiber;
-  mutable active : bool;
-}
-
-external node_of_seq : seq -> node = "%identity"
-external seq_of_node : node -> seq = "%identity"
-
-let is_empty seq = seq.next == seq
-
-let remove node =
-  if node.active then (
-    node.active <- true;
-    let seq = seq_of_node node in
-    seq.prev.next <- seq.next;
-    seq.next.prev <- seq.prev)
-
-let pop seq =
-  if is_empty seq then None
-  else
-    let res = node_of_seq seq.next in
-    remove res;
-    Some res.v
-
-let to_list seq =
-  let rec go acc =
-    match pop seq with None -> List.rev acc | Some x -> go (x :: acc)
-  in
-  go []
-
-let add seq fiber =
-  let node =
-    { node_prev = seq.prev; node_next = seq; v = fiber; active = true }
-  in
-  seq.prev.next <- seq_of_node node;
-  seq.prev <- seq_of_node node
-
-let root =
-  let rec seq = { prev = seq; next = seq } in
-  seq
+let root = Stdbob.LList.make ()
 
 (* Ivar *)
 
@@ -126,11 +86,12 @@ let detach k =
           return ()),
         ivar )
   in
-  add root fiber;
+  Stdbob.LList.add root fiber;
   wait ivar
 
 let pause () = detach ignore
 let async k = (k ()) ignore
+let ignore _ = return ()
 
 let fork f k =
   let ivar = Ivar.create () in
@@ -233,32 +194,6 @@ let write fd ~off ~len str : (int, [ `Closed | `Unix of Unix.error ]) result t =
       Hashtbl.add pwr fd ((str, off, len), ivar);
       Ivar.read ivar
 
-let line_of_queue queue =
-  let blit src src_off dst dst_off len =
-    Bigstringaf.blit_to_bytes src ~src_off dst ~dst_off ~len
-  in
-  let exists ~p queue =
-    let pos = ref 0 and res = ref (-1) in
-    Ke.Rke.iter
-      (fun chr ->
-        if p chr && !res = -1 then res := !pos;
-        incr pos)
-      queue;
-    if !res = -1 then None else Some !res
-  in
-  match exists ~p:(( = ) '\n') queue with
-  | None -> None
-  | Some 0 ->
-      Ke.Rke.N.shift_exn queue 1;
-      Some ""
-  | Some pos -> (
-      let tmp = Bytes.create pos in
-      Ke.Rke.N.keep_exn queue ~blit ~length:Bytes.length ~off:0 ~len:pos tmp;
-      Ke.Rke.N.shift_exn queue (pos + 1);
-      match Bytes.get tmp (pos - 1) with
-      | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
-      | _ -> Some (Bytes.unsafe_to_string tmp))
-
 let close fd =
   Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd));
   (try Unix.close fd
@@ -315,7 +250,7 @@ let sigrd fd =
       let buf = Bytes.create 0x100 in
       let len = Unix.read fd buf 0 0x100 in
       let blit src src_off dst dst_off len =
-        Bigstringaf.blit_from_bytes src ~src_off dst ~dst_off ~len
+        Stdbob.bigstring_blit_from_bytes src ~src_off dst ~dst_off ~len
       in
       Ke.Rke.N.push queue ~blit ~length:Bytes.length ~off:0 ~len buf;
       match (len, line_of_queue queue) with
@@ -412,7 +347,7 @@ let run fiber =
     Time.register_sleepers ();
     let rds = Hashtbl.fold (fun socket _ivar rds -> socket :: rds) prd [] in
     let wrs = Hashtbl.fold (fun socket _ivar wrs -> socket :: wrs) pwr [] in
-    let fbs = to_list root in
+    let fbs = Stdbob.LList.to_list root in
     let slp = Time.sleepers [] in
 
     Log.debug (fun m ->

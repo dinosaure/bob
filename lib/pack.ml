@@ -66,7 +66,7 @@ end
 let bigstring_input ic buf off len =
   let tmp = Bytes.create len in
   let len' = input ic tmp 0 len in
-  Bigstringaf.blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:len';
+  Stdbob.bigstring_blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:len';
   len'
 
 let load_file fpath =
@@ -76,8 +76,8 @@ let load_file fpath =
   let bf = Bytes.create ln in
   let _ = Unix.read fd bf 0 ln in
   Unix.close fd;
-  let rs = Bigstringaf.create ln in
-  Bigstringaf.blit_from_bytes bf ~src_off:0 rs ~dst_off:0 ~len:ln;
+  let rs = Bigarray.Array1.create Bigarray.char Bigarray.c_layout ln in
+  Stdbob.bigstring_blit_from_bytes bf ~src_off:0 rs ~dst_off:0 ~len:ln;
   Carton.Dec.v ~kind:`C rs
 
 let serialize_directory entries =
@@ -113,7 +113,7 @@ let load_directory rstore fpath =
   in
   let str = serialize_directory entries in
   Carton.Dec.v ~kind:`B
-    (Bigstringaf.of_string str ~off:0 ~len:(String.length str))
+    (Stdbob.bigstring_of_string str ~off:0 ~len:(String.length str))
 
 let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
@@ -179,7 +179,7 @@ let undeltify ~reporter store hashes =
   go [] hashes >>= fun targets -> Fiber.return (Array.of_list targets)
 
 let pack ~reporter ?level store targets stream =
-  let header = Bigstringaf.create 12 in
+  let header = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 12 in
   let offsets = Hashtbl.create (Array.length targets) in
   let crcs = Hashtbl.create (Array.length targets) in
   let find hash =
@@ -195,8 +195,10 @@ let pack ~reporter ?level store targets stream =
   in
   let b =
     {
-      Carton.Enc.o = Bigstringaf.create De.io_buffer_size;
-      Carton.Enc.i = Bigstringaf.create De.io_buffer_size;
+      Carton.Enc.o =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout De.io_buffer_size;
+      Carton.Enc.i =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout De.io_buffer_size;
       Carton.Enc.q = De.Queue.create 0x1000;
       Carton.Enc.w = De.Lz77.make_window ~bits:15;
     }
@@ -204,7 +206,7 @@ let pack ~reporter ?level store targets stream =
   let ctx = ref SHA256.empty in
   let cursor = ref 0L in
   Carton.Enc.header_of_pack ~length:(Array.length targets) header 0 12;
-  stream (Some (Bigstringaf.substring header ~off:0 ~len:12));
+  stream (Some (Stdbob.bigstring_substring header ~off:0 ~len:12));
   ctx := SHA256.feed_bigstring !ctx header ~off:0 ~len:12;
   cursor := Int64.add !cursor 12L;
   let encode_target idx =
@@ -215,7 +217,7 @@ let pack ~reporter ?level store targets stream =
       ~load:(load store) ~uid targets.(idx) ~cursor:(Int64.to_int !cursor)
     |> Scheduler.prj
     >>= fun (len, encoder) ->
-    let payload = Bigstringaf.substring b.o ~off:0 ~len in
+    let payload = Stdbob.bigstring_substring b.o ~off:0 ~len in
     let crc = Crc32.digest_bigstring b.o 0 len Crc32.default in
     stream (Some payload);
     ctx := SHA256.feed_bigstring !ctx b.o ~off:0 ~len;
@@ -223,13 +225,13 @@ let pack ~reporter ?level store targets stream =
     let rec go crc encoder =
       match Carton.Enc.N.encode ~o:b.o encoder with
       | `Flush (encoder, len) ->
-          let payload = Bigstringaf.substring b.o ~off:0 ~len in
+          let payload = Stdbob.bigstring_substring b.o ~off:0 ~len in
           let crc = Crc32.digest_bigstring b.o 0 len crc in
           stream (Some payload);
           ctx := SHA256.feed_bigstring !ctx b.o ~off:0 ~len;
           cursor := Int64.add !cursor (Int64.of_int len);
           let encoder =
-            Carton.Enc.N.dst encoder b.o 0 (Bigstringaf.length b.o)
+            Carton.Enc.N.dst encoder b.o 0 (Bigarray.Array1.dim b.o)
           in
           go crc encoder
       | `End ->
@@ -342,7 +344,7 @@ let replace tbl k v =
 
 let digest ~kind ?(off = 0) ?len buf =
   let len =
-    match len with Some len -> len | None -> Bigstringaf.length buf - off
+    match len with Some len -> len | None -> Bigarray.Array1.dim buf - off
   in
   let ctx = SHA256.empty in
   let ctx =
@@ -359,7 +361,9 @@ let first_pass ic ~reporter =
   let open Fiber in
   let oc = De.bigstring_create De.io_buffer_size in
   let zw = De.make_window ~bits:15 in
-  let tp = Bigstringaf.create De.io_buffer_size in
+  let tp =
+    Bigarray.Array1.create Bigarray.char Bigarray.c_layout De.io_buffer_size
+  in
   let allocate _ = zw in
   First_pass.check_header scheduler
     (fun ic buf ~off ~len ->
@@ -380,11 +384,11 @@ let first_pass ic ~reporter =
   let rec go decoder =
     match First_pass.decode decoder with
     | `Await decoder ->
-        let len = bigstring_input ic tp 0 (Bigstringaf.length tp) in
+        let len = bigstring_input ic tp 0 (Bigarray.Array1.dim tp) in
         go (First_pass.src decoder tp 0 len)
     | `Peek decoder ->
         let keep = First_pass.src_rem decoder in
-        let len = bigstring_input ic tp keep (Bigstringaf.length tp - keep) in
+        let len = bigstring_input ic tp keep (Bigarray.Array1.dim tp - keep) in
         go (First_pass.src decoder tp 0 (keep + len))
     | `Entry
         ({ First_pass.kind = Base _; offset; size; consumed; crc; _ }, decoder)

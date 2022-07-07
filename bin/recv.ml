@@ -1,3 +1,5 @@
+open Prgrss
+
 let choose = function
   | true -> fun _identity -> Fiber.return `Accept
   | false ->
@@ -15,62 +17,13 @@ let choose = function
         Fmt.pr "Accept from %s [Y/n]: %!" identity;
         asking ()
 
-let incoming_data =
-  let open Progress.Line in
-  let spin =
-    spinner
-      ~frames:
-        [
-          "⠁";
-          "⠉";
-          "⠙";
-          "⠚";
-          "⠒";
-          "⠂";
-          "⠂";
-          "⠒";
-          "⠲";
-          "⠴";
-          "⠤";
-          "⠄";
-          "⠄";
-          "⠤";
-          "⠴";
-          "⠲";
-          "⠒";
-          "⠂";
-          "⠂";
-          "⠒";
-          "⠚";
-          "⠙";
-          "⠉";
-          "⠁";
-        ]
-      ()
-  in
-  list [ spin; bytes; bytes_per_sec ]
-
 let save_with_reporter quiet ~config ?g ~identity ~ciphers ~shared_keys sockaddr
     =
-  let reporter, finalize =
-    match quiet with
-    | true -> (ignore, ignore)
-    | false ->
-        let display =
-          Progress.Multi.line incoming_data |> Progress.Display.start ~config
-        in
-        let[@warning "-8"] Progress.Reporter.[ reporter ] =
-          Progress.Display.reporters display
-        in
-        ( (fun n ->
-            reporter n;
-            Progress.Display.tick display),
-          fun () -> Progress.Display.finalise display )
-  in
+  with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   let open Fiber in
   Transfer.save ?g ~reporter ~identity ~ciphers ~shared_keys sockaddr
   >>| fun res ->
-  finalize ();
+  finalise ();
   res
 
 let run_client quiet g sockaddr secure_port password yes =

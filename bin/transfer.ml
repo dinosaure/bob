@@ -48,7 +48,7 @@ let pp_error ppf = function
   | `Crypto (#Crypto.error as err) -> Crypto.pp_error ppf err
   | #Bob_unix.error as err -> Bob_unix.pp_error ppf err
 
-let transfer ?(chunk = 0x1000) ?(reporter = ignore) ~identity ~ciphers
+let transfer ?(chunk = 0x1000) ?(reporter = Fiber.ignore) ~identity ~ciphers
     ~shared_keys sockaddr fpath =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
@@ -69,9 +69,7 @@ let transfer ?(chunk = 0x1000) ?(reporter = ignore) ~identity ~ciphers
         | len -> (
             Crypto.send flow (Bytes.unsafe_to_string temp) ~off:0 ~len
             >>= function
-            | Ok _ ->
-                reporter len;
-                go ()
+            | Ok _ -> reporter len >>= go
             | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err
             )
       in
@@ -82,7 +80,7 @@ let transfer ?(chunk = 0x1000) ?(reporter = ignore) ~identity ~ciphers
       close_in ic;
       Fiber.return res
 
-let save ?g ?(tmp : Pack.pattern = "pack-%s.pack") ?(reporter = ignore)
+let save ?g ?(tmp : Pack.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
     ~identity ~ciphers ~shared_keys sockaddr =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
@@ -100,7 +98,7 @@ let save ?g ?(tmp : Pack.pattern = "pack-%s.pack") ?(reporter = ignore)
       let rec go () =
         Crypto.recv flow >>= function
         | Ok (`Data str) ->
-            reporter (String.length str);
+            reporter (String.length str) >>= fun () ->
             output_string oc str;
             go ()
         | Ok `End -> Crypto.close flow >>= fun () -> Fiber.return (Ok ())

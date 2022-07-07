@@ -18,5 +18,14 @@ type pattern = (string -> string, Format.formatter, unit, string) format4
 
 let random_temporary_path ?g pattern =
   let g = match g with Some g -> g | None -> Random.State.make_self_init () in
-  let r = Random.State.bits g land 0xffffff in
-  Fpath.(get_default_directory () / Fmt.str pattern (Fmt.str "%06x" r))
+  let rec try_new_path tries =
+    let r = Random.State.bits g land 0xffffff in
+    let p =
+      Fpath.(get_default_directory () / Fmt.str pattern (Fmt.str "%06x" r))
+    in
+    if Sys.file_exists (Fpath.to_string p) then
+      if tries > 0 then try_new_path (pred tries)
+      else Fmt.failwith "Too many tries to create a non-existing path."
+    else p
+  in
+  try_new_path 10

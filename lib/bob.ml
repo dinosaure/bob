@@ -3,6 +3,7 @@ let src = Logs.Src.create "bob.core"
 module Log = (val Logs.src_log src : Logs.LOG)
 module State = State
 module Protocol = Protocol
+module Crypto = Crypto
 
 type 'peer income =
   | Income : ('a, 'peer) State.src * ('a, 'peer) State.packet -> 'peer income
@@ -372,5 +373,3 @@ module Secured = struct
               | Some peer1 -> `Peer (peer0, peer1)
               | None -> `Invalid_peer))
 end
-
-module Crypto = Crypto

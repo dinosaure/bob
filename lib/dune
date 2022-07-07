@@ -1,8 +1,14 @@
 (library
+ (name stdbob)
+ (public_name bob.std)
+ (modules stdbob)
+ (libraries ke))
+
+(library
  (name bob)
  (public_name bob)
  (modules crypto state protocol bob)
- (libraries ke mirage-crypto hxd.core hxd.string logs spoke.core))
+ (libraries bob.std ke mirage-crypto hxd.core hxd.string logs spoke.core))
 
 (library
  (name password)
@@ -14,13 +20,19 @@
  (name fiber)
  (public_name bob.fiber)
  (modules fiber)
- (libraries fpath bigstringaf ke bheap logs unix))
+ (libraries bob.std fpath ke bheap logs unix))
+
+(library
+ (name temp)
+ (public_name bob.temp)
+ (modules temp)
+ (libraries fmt fpath))
 
 (library
  (name pack)
  (public_name bob.pack)
- (modules pack temp)
- (libraries bob.fiber unix digestif carton))
+ (modules pack)
+ (libraries bob.fiber bob.temp unix digestif carton))
 
 (library
  (name bob_unix)

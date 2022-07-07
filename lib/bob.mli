@@ -1,5 +1,6 @@
 module Protocol = Protocol
 module State = State
+module Crypto = Crypto
 
 module Server : sig
   type t
@@ -72,5 +73,3 @@ module Secured : sig
 
   val reader : t -> reader
 end
-
-module Crypto = Crypto
