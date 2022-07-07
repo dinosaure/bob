@@ -1,3 +1,5 @@
+open Stdbob
+
 let src = Logs.Src.create "bob.pack"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -27,8 +29,6 @@ type store = {
   store : (SHA256.t, Fpath.t) Hashtbl.t;
   rstore : (Fpath.t, SHA256.t * [ `Dir | `Reg ]) Hashtbl.t;
 }
-
-let ( <.> ) f g x = f (g x)
 
 module Filesystem = struct
   let readdir =
@@ -66,7 +66,7 @@ end
 let bigstring_input ic buf off len =
   let tmp = Bytes.create len in
   let len' = input ic tmp 0 len in
-  Stdbob.bigstring_blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:len';
+  bigstring_blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:len';
   len'
 
 let load_file fpath =
@@ -77,7 +77,7 @@ let load_file fpath =
   let _ = Unix.read fd bf 0 ln in
   Unix.close fd;
   let rs = Bigarray.Array1.create Bigarray.char Bigarray.c_layout ln in
-  Stdbob.bigstring_blit_from_bytes bf ~src_off:0 rs ~dst_off:0 ~len:ln;
+  bigstring_blit_from_bytes bf ~src_off:0 rs ~dst_off:0 ~len:ln;
   Carton.Dec.v ~kind:`C rs
 
 let serialize_directory entries =
@@ -113,7 +113,7 @@ let load_directory rstore fpath =
   in
   let str = serialize_directory entries in
   Carton.Dec.v ~kind:`B
-    (Stdbob.bigstring_of_string str ~off:0 ~len:(String.length str))
+    (bigstring_of_string str ~off:0 ~len:(String.length str))
 
 let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
@@ -206,7 +206,7 @@ let pack ~reporter ?level store targets stream =
   let ctx = ref SHA256.empty in
   let cursor = ref 0L in
   Carton.Enc.header_of_pack ~length:(Array.length targets) header 0 12;
-  stream (Some (Stdbob.bigstring_substring header ~off:0 ~len:12));
+  stream (Some (bigstring_substring header ~off:0 ~len:12));
   ctx := SHA256.feed_bigstring !ctx header ~off:0 ~len:12;
   cursor := Int64.add !cursor 12L;
   let encode_target idx =
@@ -217,7 +217,7 @@ let pack ~reporter ?level store targets stream =
       ~load:(load store) ~uid targets.(idx) ~cursor:(Int64.to_int !cursor)
     |> Scheduler.prj
     >>= fun (len, encoder) ->
-    let payload = Stdbob.bigstring_substring b.o ~off:0 ~len in
+    let payload = bigstring_substring b.o ~off:0 ~len in
     let crc = Crc32.digest_bigstring b.o 0 len Crc32.default in
     stream (Some payload);
     ctx := SHA256.feed_bigstring !ctx b.o ~off:0 ~len;
@@ -225,7 +225,7 @@ let pack ~reporter ?level store targets stream =
     let rec go crc encoder =
       match Carton.Enc.N.encode ~o:b.o encoder with
       | `Flush (encoder, len) ->
-          let payload = Stdbob.bigstring_substring b.o ~off:0 ~len in
+          let payload = bigstring_substring b.o ~off:0 ~len in
           let crc = Crc32.digest_bigstring b.o 0 len crc in
           stream (Some payload);
           ctx := SHA256.feed_bigstring !ctx b.o ~off:0 ~len;
