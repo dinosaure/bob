@@ -6,12 +6,13 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type +'a t = ('a -> unit) -> unit
 
-let identity x = x
 let return x k = k x
+let always x _ = return x
 let bind t f k = t (fun x -> f x k)
 let both a b = bind a (fun a -> bind b (fun b -> return (a, b)))
 let ( >>= ) = bind
 let ( >>| ) t f k = t (fun x -> k (f x))
+let catch f handler k = try f () k with exn -> handler exn k
 
 (* Fibers *)
 
@@ -135,33 +136,35 @@ let rec parallel_map ~f = function
 let openfile fpath flags mode =
   fork (fun () ->
       try return (Ok (Unix.openfile (Fpath.to_string fpath) flags mode))
-      with Unix.Unix_error (errno, f, args) -> return (Error (errno, f, args)))
+      with Unix.Unix_error (errno, _, _) -> return (Error errno))
   >>= wait
 
 let prd = Hashtbl.create 0x100
 
-let read fd : ([ `Data of string | `End ], Unix.error) result t =
+let read fd : ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t =
   match Hashtbl.find_opt prd fd with
   | Some (`Read ivar) -> Ivar.read ivar
   | _ ->
-      Log.debug (fun m -> m "Start to read something into %d." (Obj.magic fd));
-      let ivar : ([ `Data of string | `End ], Unix.error) result Ivar.t =
+      let ivar :
+          ([ `Data of Stdbob.bigstring | `End ], Unix.error) result Ivar.t =
         Ivar.create ()
       in
       Hashtbl.add prd fd (`Read ivar);
       Ivar.read ivar
 
-let really_read fd len : (string, [ `End | `Unix of Unix.error ]) result t =
+let really_read fd len :
+    (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result t =
   if len = 0 then invalid_arg "Impossible to really read 0 byte.";
   match Hashtbl.find_opt prd fd with
   | Some (`Really_read (ivar, _, _, _)) -> Ivar.read ivar
   | _ ->
       Log.debug (fun m ->
           m "Start to really read something into %d." (Obj.magic fd));
-      let ivar : (string, [ `End | `Unix of Unix.error ]) result Ivar.t =
+      let ivar :
+          (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result Ivar.t =
         Ivar.create ()
       in
-      let buf = Bytes.create len in
+      let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
       Hashtbl.add prd fd (`Really_read (ivar, buf, 0, len));
       Ivar.read ivar
 
@@ -184,14 +187,15 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
 
 let pwr = Hashtbl.create 0x100
 
-let write fd ~off ~len str : (int, [ `Closed | `Unix of Unix.error ]) result t =
+let write fd bstr ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t
+    =
   match Hashtbl.find_opt pwr fd with
   | Some (_, ivar) -> Ivar.read ivar
   | None ->
       let ivar : (int, [ `Closed | `Unix of Unix.error ]) result Ivar.t =
         Ivar.create ()
       in
-      Hashtbl.add pwr fd ((str, off, len), ivar);
+      Hashtbl.add pwr fd ((bstr, off, len), ivar);
       Ivar.read ivar
 
 let close fd =
@@ -220,24 +224,43 @@ let close fd =
 
 (* Unblocked Unix syscalls *)
 
+(* XXX(dinosaure): to let us to execute syscalls as fast as we can:
+   1) we use [Stdbob.bigstring] because, on upon layer, they use that...
+   2) we re-implement [read] and [write] with [Stdbob.bigstring] and
+      without exception leak! (to be able to annote externals with [noalloc])
+   3) the bad case is when we got an error (if we returns [-1]). In such
+      case, that's fine to allocate and so on. On upon layer, we will
+      probably terminates.
+*)
+
+external bigstring_read :
+  Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
+  = "bob_bigstring_read"
+  [@@noalloc]
+
+external retrieve_error : unit -> Unix.error = "bob_retrieve_error"
+
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read ivar) -> (
-      let buf = Bytes.create 0x100 in
+      let bstr =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout io_buffer_size
+      in
       Hashtbl.remove prd fd;
-      match Unix.read fd buf 0 0x100 with
+      match bigstring_read fd bstr 0 io_buffer_size with
       | 0 -> Ivar.fill ivar (Ok `End)
-      | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len)))
-      | exception Unix.Unix_error (errno, _, _) ->
+      | ret when ret < 0 ->
+          let errno = retrieve_error () in
           Log.err (fun m ->
               m "Got an error while reading: %s" (Unix.error_message errno));
-          Ivar.fill ivar (Error errno))
+          Ivar.fill ivar (Error errno)
+      | len -> Ivar.fill ivar (Ok (`Data (Bigarray.Array1.sub bstr 0 len))))
   | Some (`Really_read (ivar, buf, off, len)) -> (
       Hashtbl.remove prd fd;
-      match Unix.read fd buf off len with
+      match bigstring_read fd buf off len with
       | 0 -> Ivar.fill ivar (Error `End)
-      | len' when len = len' -> Ivar.fill ivar (Ok (Bytes.unsafe_to_string buf))
+      | len' when len = len' -> Ivar.fill ivar (Ok buf)
       | len' ->
           Hashtbl.add prd fd (`Really_read (ivar, buf, off + len', len - len'))
       | exception Unix.Unix_error (errno, _, _) ->
@@ -262,22 +285,30 @@ let sigrd fd =
           Hashtbl.remove prd fd;
           Ivar.fill ivar (Some line))
 
+external bigstring_write :
+  Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
+  = "bob_bigstring_write"
+  [@@noalloc]
+
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with
   | None -> ()
-  | Some ((str, off, len), ivar) -> (
-      try
-        let len = Unix.write_substring fd str off len in
+  | Some ((bstr, off, len), ivar) -> (
+      let ret = bigstring_write fd bstr off len in
+      if ret >= 0 then (
         Hashtbl.remove pwr fd;
-        Ivar.fill ivar (Ok len)
-      with
-      | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
-          Hashtbl.remove pwr fd;
-          Ivar.fill ivar (Error `Closed)
-      | Unix.Unix_error (errno, f, arg) ->
-          Log.err (fun m -> m "%s(%s): %s" f arg (Unix.error_message errno));
-          Hashtbl.remove pwr fd;
-          Ivar.fill ivar (Error (`Unix errno)))
+        Ivar.fill ivar (Ok len))
+      else
+        let errno = retrieve_error () in
+        match errno with
+        | Unix.ECONNRESET ->
+            Hashtbl.remove pwr fd;
+            Ivar.fill ivar (Error `Closed)
+        | errno ->
+            Log.err (fun m ->
+                m "write(%d): %s" (Obj.magic fd) (Unix.error_message errno));
+            Hashtbl.remove pwr fd;
+            Ivar.fill ivar (Error (`Unix errno)))
 
 let sigexcept fd =
   match Hashtbl.find_opt prd fd with
@@ -350,9 +381,9 @@ let run fiber =
     let fbs = Stdbob.LList.to_list root in
     let slp = Time.sleepers [] in
 
-    Log.debug (fun m ->
+    (* Log.debug (fun m ->
         m "rds:%d, wrs:%d, fibers:%d, sleepers:%d" (List.length rds)
-          (List.length wrs) (List.length fbs) (List.length slp));
+          (List.length wrs) (List.length fbs) (List.length slp)); *)
 
     (* XXX(dinosaure): it seems that, on Windows, the EOF is signaled
        via the [except] list of file-descriptors - on Linux, only the
@@ -370,10 +401,10 @@ let run fiber =
           raise_notrace exn
     in
 
-    Log.debug (fun m ->
+    (* Log.debug (fun m ->
         m "ready rds:%d, ready wrs:%d, ready excepts:%d" (List.length ready_rds)
           (List.length ready_wrs)
-          (List.length ready_excepts));
+          (List.length ready_excepts)); *)
     List.iter
       (fun (Fiber (k, ivar)) ->
         try k ivar (fun () -> ())

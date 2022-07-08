@@ -3,43 +3,23 @@ open Prgrss
 
 let compress_with_reporter quiet ~compression ~config store hashes =
   with_reporter ~config quiet
-    (make_compression_progress ~total:(List.length hashes))
+    (make_compression_progress ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  (match compression with
-  | true -> Pack.deltify ~reporter store hashes
-  | false -> Pack.undeltify ~reporter store hashes)
-  >>| fun res ->
+  Pack.deltify ~reporter ~compression store hashes >>| fun res ->
   finalise ();
   res
 
-let emit_with_reporter quiet ?g ?level ~config store compressed =
-  with_reporter ~config quiet
-    (make_progress_bar ~total:(Array.length compressed))
+let emit_with_reporter quiet ?g ?level ~config store objects =
+  with_reporter ~config quiet (make_progress_bar ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make ?g ?level ~reporter:(fun () -> reporter 1) store compressed
-  >>| fun res ->
+  let open Stream in
+  let path = Temp.random_temporary_path ?g "pack-%s.pack" in
+  let flow = Pack.make ?level ~reporter:(fun () -> reporter 1) store in
+  Stream.(to_file path (via flow objects)) >>= fun () ->
   finalise ();
-  res
-
-let summarize quiet compressed fpath =
-  (if not quiet then
-   let inflated =
-     Array.fold_left
-       (fun sum q -> sum + Carton.Enc.target_length q)
-       0 compressed
-   in
-   let deflated = (Unix.stat (Fpath.to_string fpath)).Unix.st_size in
-   let decimals = 1 in
-   let a = Fmt.to_to_string (bytes_to_size ~decimals) inflated in
-   let b = Fmt.to_to_string (bytes_to_size ~decimals) deflated in
-   let len = String.length a + String.length b in
-   let arrow = if len mod 2 = 0 then " -> " else " --> " in
-   let len = len + String.length arrow in
-   let pad = (30 - len) / 2 in
-   Fmt.pr "[%*s%s%s%s%*s]\n%!" pad " " a arrow b pad " ");
-  Fiber.return ()
+  Fiber.return path
 
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr fpath =
@@ -56,36 +36,45 @@ let run_server quiet g compression sockaddr secure_port password path =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
-  let open Fiber in
-  let hashes, store = Pack.store path in
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
-  compress_with_reporter quiet ~config ~compression store hashes
-  >>= fun compressed ->
-  emit_with_reporter quiet ~g
-    ~level:(if compression then 4 else 0)
-    ~config store compressed
-  >>= fun fpath ->
-  summarize quiet compressed fpath >>= fun () ->
-  Connect.connect socket sockaddr |> function
-  | Error err ->
-      Fmt.epr "%s: %a.\n%!" Sys.executable_name Connect.pp_error err;
-      Fiber.return 1
-  | Ok () -> (
-      Bob_clear.server socket ~g ~secret >>= function
-      | Ok (identity, ciphers, shared_keys) -> (
-          let sockaddr =
-            Transfer.sockaddr_with_secure_port sockaddr secure_port
-          in
-          transfer_with_reporter quiet ~config ~identity ~ciphers:(flip ciphers)
-            ~shared_keys:(flip shared_keys) sockaddr fpath
-          >>= function
-          | Ok () -> Fiber.return 0
-          | Error err ->
-              Fmt.epr "%s: %a.\n%!" Sys.executable_name Transfer.pp_error err;
-              Fiber.return 1)
+  let open Fiber in
+  Pack.store path >>= fun (hashes, store) ->
+  match Pack.length store with
+  | 0 ->
+      assert false
+      (* XXX(dinosaure): impossible case. The user gaves
+         a valid path which contains, at least, one object. *)
+  | 1 -> assert false
+  | n -> (
+      if not quiet then Fmt.pr ">>> %*s%d object(s).\n%!" 33 " " n;
+      compress_with_reporter quiet ~config ~compression store hashes
+      >>= fun compressed ->
+      emit_with_reporter quiet ~g
+        ~level:(if compression then 4 else 0)
+        ~config store compressed
+      >>= fun fpath ->
+      Connect.connect socket sockaddr |> function
       | Error err ->
-          Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err;
-          Fiber.return 1)
+          Fmt.epr "%s: %a.\n%!" Sys.executable_name Connect.pp_error err;
+          Fiber.return 1
+      | Ok () -> (
+          Bob_clear.server socket ~g ~secret >>= function
+          | Ok (identity, ciphers, shared_keys) -> (
+              let sockaddr =
+                Transfer.sockaddr_with_secure_port sockaddr secure_port
+              in
+              transfer_with_reporter quiet ~config ~identity
+                ~ciphers:(flip ciphers) ~shared_keys:(flip shared_keys) sockaddr
+                fpath
+              >>= function
+              | Ok () -> Fiber.return 0
+              | Error err ->
+                  Fmt.epr "%s: %a.\n%!" Sys.executable_name Transfer.pp_error
+                    err;
+                  Fiber.return 1)
+          | Error err ->
+              Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err;
+              Fiber.return 1))
 
 let run quiet g () compression sockaddr secure_port password path =
   let code =

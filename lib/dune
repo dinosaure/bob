@@ -20,7 +20,16 @@
  (name fiber)
  (public_name bob.fiber)
  (modules fiber)
+ (foreign_stubs
+  (language c)
+  (names bob))
  (libraries bob.std fpath ke bheap logs unix))
+
+(library
+ (name stream)
+ (public_name bob.stream)
+ (modules stream)
+ (libraries hxd.core hxd.string fpath decompress.zl bob.std bob.fiber))
 
 (library
  (name temp)
@@ -32,7 +41,7 @@
  (name pack)
  (public_name bob.pack)
  (modules pack)
- (libraries bob.fiber bob.temp unix digestif carton))
+ (libraries bob.fiber bob.temp bob.stream unix digestif carton))
 
 (library
  (name bob_unix)

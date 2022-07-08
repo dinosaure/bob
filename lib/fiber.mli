@@ -26,10 +26,12 @@
 type +'a t
 
 val return : 'a -> 'a t
-val ignore : 'a -> unit t
+val ignore : _ -> unit t
+val always : 'a -> _ -> 'a t
 val bind : 'a t -> ('a -> 'b t) -> 'b t
 val both : 'a t -> 'b t -> ('a * 'b) t
 val fork_and_join : (unit -> 'a t) -> (unit -> 'b t) -> ('a * 'b) t
+val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
 val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
 val ( >>| ) : 'a t -> ('a -> 'b) -> 'b t
 
@@ -81,19 +83,22 @@ val openfile :
   Fpath.t ->
   Unix.open_flag list ->
   int ->
-  (Unix.file_descr, Unix.error * string * string) result t
+  (Unix.file_descr, Unix.error) result t
 
-val read : Unix.file_descr -> ([ `Data of string | `End ], Unix.error) result t
+val read :
+  Unix.file_descr -> ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t
 
 val write :
   Unix.file_descr ->
+  Stdbob.bigstring ->
   off:int ->
   len:int ->
-  string ->
   (int, [ `Closed | `Unix of Unix.error ]) result t
 
 val really_read :
-  Unix.file_descr -> int -> (string, [ `End | `Unix of Unix.error ]) result t
+  Unix.file_descr ->
+  int ->
+  (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result t
 
 val close : Unix.file_descr -> unit t
 val accept : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t

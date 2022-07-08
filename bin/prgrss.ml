@@ -1,12 +1,13 @@
 let make_compression_progress ~total =
   let open Progress.Line in
-  list [ spacer 32; count_to total; const "delta-ified object(s)" ]
+  list [ const ">>>"; spacer 32; count_to total; const "delta-ified object(s)" ]
 
 let make_progress_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list
     [
+      const ">>>";
       brackets @@ bar ~style ~width:(`Fixed 30) total;
       count_to total;
       const "compressed object(s)";
@@ -15,42 +16,19 @@ let make_progress_bar ~total =
 let make_tranfer_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
-  list [ brackets @@ bar ~style ~width:(`Fixed 30) total; percentage_of total ]
+  list
+    [
+      const ">>>";
+      brackets @@ bar ~style ~width:(`Fixed 30) total;
+      percentage_of total;
+    ]
 
 let incoming_data =
   let open Progress.Line in
   let spin =
-    spinner
-      ~frames:
-        [
-          "⠁";
-          "⠉";
-          "⠙";
-          "⠚";
-          "⠒";
-          "⠂";
-          "⠂";
-          "⠒";
-          "⠲";
-          "⠴";
-          "⠤";
-          "⠄";
-          "⠄";
-          "⠤";
-          "⠴";
-          "⠲";
-          "⠒";
-          "⠂";
-          "⠂";
-          "⠒";
-          "⠚";
-          "⠙";
-          "⠉";
-          "⠁";
-        ]
-      ()
+    spinner ~frames:[ "⠋"; "⠙"; "⠹"; "⠸"; "⠼"; "⠴"; "⠦"; "⠧"; "⠇"; "⠏" ] ()
   in
-  list [ spin; bytes; bytes_per_sec ]
+  list [ const ">>>"; spin; bytes; bytes_per_sec ]
 
 let with_reporter ~config quiet t f =
   let reporter, finalise =

@@ -3,7 +3,13 @@ type bigstring =
 
 val flip : 'a * 'b -> 'b * 'a
 val identity : 'a -> 'a
+val always : 'a -> 'b -> 'a
 val ( <.> ) : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b
+val msgf : ('a, Format.formatter, unit, [> `Msg of string ]) format4 -> 'a
+val io_buffer_size : int
+
+val bigstring_blit :
+  bigstring -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit
 
 val bigstring_blit_to_bytes :
   bigstring -> src_off:int -> bytes -> dst_off:int -> len:int -> unit
@@ -16,7 +22,9 @@ val bigstring_blit_from_bytes :
 
 val bigstring_of_string : string -> off:int -> len:int -> bigstring
 val bigstring_substring : bigstring -> off:int -> len:int -> string
+val bigstring_to_string : bigstring -> string
 val line_of_queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t -> string option
+val bigstring_input : in_channel -> bigstring -> int -> int -> int
 
 module LList : sig
   type 'a seq

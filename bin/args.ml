@@ -149,7 +149,7 @@ let setup_password quiet g password =
 let setup_password password =
   Term.(const setup_password $ setup_logs $ setup_random $ password)
 
-let setup_temp = Option.iter Pack.Temp.set_default_directory
+let setup_temp = Option.iter Temp.set_default_directory
 
 let temp =
   let doc = "The temporary directory used to generate the archive." in

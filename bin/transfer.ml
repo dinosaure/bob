@@ -20,16 +20,17 @@ module Crypto = Bob_unix.Crypto.Make (struct
     Fiber.read fd >>= function
     | Error _ as err -> Fiber.return err
     | Ok `End -> Fiber.return (Ok `Eof)
-    | Ok (`Data str) -> Fiber.return (Ok (`Data (Cstruct.of_string str)))
+    | Ok (`Data bstr) -> Fiber.return (Ok (`Data (Cstruct.of_bigarray bstr)))
 
   let write fd cs =
-    let rec go str off len =
-      Fiber.write fd ~off ~len str >>= function
+    let rec go bstr off len =
+      Fiber.write fd bstr ~off ~len >>= function
       | Error _ as err -> Fiber.return err
       | Ok len' when len' = len -> Fiber.return (Ok ())
-      | Ok len' -> go str (off + len') (len - len')
+      | Ok len' -> go bstr (off + len') (len - len')
     in
-    go (Cstruct.to_string cs) 0 (Cstruct.length cs)
+    let { Cstruct.buffer; off; len } = cs in
+    go buffer off len
 end)
 
 let ( >>? ) x f =
@@ -80,7 +81,7 @@ let transfer ?(chunk = 0x1000) ?(reporter = Fiber.ignore) ~identity ~ciphers
       close_in ic;
       Fiber.return res
 
-let save ?g ?(tmp : Pack.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
+let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
     ~identity ~ciphers ~shared_keys sockaddr =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
@@ -92,7 +93,7 @@ let save ?g ?(tmp : Pack.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () -> (
-      let tmp = Pack.Temp.random_temporary_path ?g tmp in
+      let tmp = Temp.random_temporary_path ?g tmp in
       let oc = open_out_bin (Fpath.to_string tmp) in
       let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
       let rec go () =

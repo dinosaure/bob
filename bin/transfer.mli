@@ -22,7 +22,7 @@ val transfer :
 
 val save :
   ?g:Random.State.t ->
-  ?tmp:Pack.pattern ->
+  ?tmp:Temp.pattern ->
   ?reporter:(int -> unit Fiber.t) ->
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->

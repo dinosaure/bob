@@ -21,7 +21,26 @@ external string_get_uint32 : string -> int -> int32 = "%caml_string_get32"
 
 let flip (a, b) = (b, a)
 let identity x = x
+let always x _ = x
 let ( <.> ) f g x = f (g x)
+let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
+let io_buffer_size = 65536
+
+let bigstring_blit src ~src_off dst ~dst_off ~len =
+  let len0 = len land 3 in
+  let len1 = len asr 2 in
+
+  for i = 0 to len1 - 1 do
+    let i = i * 4 in
+    let v = bigstring_get_uint32 src (src_off + i) in
+    bigstring_set_uint32 dst (dst_off + i) v
+  done;
+
+  for i = 0 to len0 - 1 do
+    let i = (len1 * 4) + i in
+    let v = bigstring_get_uint8 src (src_off + i) in
+    bigstring_set_uint8 dst (dst_off + i) v
+  done
 
 let bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len =
   let len0 = len land 3 in
@@ -107,7 +126,36 @@ let bigstring_substring t ~off ~len =
   bigstring_blit_to_bytes t ~src_off:off res ~dst_off:0 ~len;
   Bytes.unsafe_to_string res
 
+let bigstring_to_string t =
+  bigstring_substring t ~off:0 ~len:(Bigarray.Array1.dim t)
+
+let bigstring_input ic buf off len =
+  let tmp = Bytes.create len in
+  let res = input ic tmp 0 len in
+  bigstring_blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:res;
+  res
+
 module LList = struct
+  (* Copyright (c) 1999-2020, the Authors of Lwt (docs/AUTHORS)
+
+     Permission is hereby granted, free of charge, to any person obtaining a copy
+     of this software and associated documentation files (the "Software"), to deal
+     in the Software without restriction, including without limitation the rights
+     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+     copies of the Software, and to permit persons to whom the Software is
+     furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be included in all
+     copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+     SOFTWARE.
+  *)
   type 'a seq = { mutable prev : 'a seq; mutable next : 'a seq }
 
   type 'a node = {

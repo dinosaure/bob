@@ -141,13 +141,12 @@ let write_string ctx str =
 
 let write_fmt ctx fmt = Fmt.kstr (write_string ctx) fmt
 let done_unit = Done ()
-let always x _ = x
 
 let send_string ctx str =
   safe
     (fun ctx ->
       write_string ctx str;
-      flush (always done_unit) ctx)
+      flush (Stdbob.always done_unit) ctx)
     ctx
 
 let uid_of_packet = function
@@ -207,7 +206,7 @@ let send_packet ctx (uid, packet) =
       write_fmt ctx "%04x" uid;
       write_fmt ctx "%02x" (uid_of_packet packet);
       write_fmt ctx "%a" pp_packet packet;
-      flush (always done_unit) ctx)
+      flush (Stdbob.always done_unit) ctx)
     ctx
 
 let len_of_packet = function

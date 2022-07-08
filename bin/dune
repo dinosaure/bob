@@ -11,6 +11,12 @@
  (libraries fmt.tty logs.fmt bob.fiber))
 
 (executable
+ (name compress)
+ (public_name bob.compress)
+ (modules compress)
+ (libraries bob.stream))
+
+(executable
  (name bob)
  (public_name bob)
  (modules prgrss transfer daemon bob clear bob_clear recv send relay connect
