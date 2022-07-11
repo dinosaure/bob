@@ -13,13 +13,13 @@ module SHA256 = struct
   let null = digest_string ""
   let compare a b = String.compare (to_raw_string a) (to_raw_string b)
 
-  let sink_bigstring =
-    Stream.Sink.make ~init:(Fiber.always empty)
+  let sink_bigstring ?(ctx = empty) () =
+    Stream.Sink.make ~init:(Fiber.always ctx)
       ~push:(fun ctx bstr -> Fiber.return (feed_bigstring ctx bstr))
       ~stop:(Fiber.return <.> get) ()
 
-  let sink_string =
-    Stream.Sink.make ~init:(Fiber.always empty)
+  let sink_string ?(ctx = empty) () =
+    Stream.Sink.make ~init:(Fiber.always ctx)
       ~push:(fun ctx str -> Fiber.return (feed_string ctx str))
       ~stop:(Fiber.return <.> get) ()
 end
@@ -310,12 +310,10 @@ let hash_of_filename path =
   let open Stream in
   let len = Unix.(stat (Fpath.to_string path)).Unix.st_size in
   let hdr = Fmt.str "blob %d\000" len in
-  let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
+  let ctx = SHA256.feed_string SHA256.empty hdr in
   Stream.of_file path >>= function
   | Error (`Msg err) -> Fmt.failwith "%s." err
-  | Ok stream ->
-      let open Stream.Infix in
-      Stream.(into SHA256.sink_bigstring (singleton hdr ++ stream))
+  | Ok stream -> Stream.(into (SHA256.sink_bigstring ~ctx ()) stream)
 
 let hash_of_directory rstore path =
   let entries = Filesystem.readdir path in
@@ -332,7 +330,7 @@ let hash_of_directory rstore path =
   let open Stream in
   Stream.to_string (serialize_directory entries) >>= fun str ->
   let hdr = Fmt.str "tree %d\000" (String.length str) in
-  Stream.(into SHA256.sink_string (double hdr str))
+  Stream.(into (SHA256.sink_string ()) (double hdr str))
 
 let store path =
   let open Fiber in
@@ -379,6 +377,48 @@ let store path =
 let make ?level ~reporter store =
   let length = length store in
   pack ~reporter ?level ~length store
+
+let encode_header_of_file ~length =
+  let buf = Buffer.create 16 in
+  let c = ref ((0b011 (* [`C] *) lsl 4) lor (length land 15)) in
+  let l = ref (length asr 4) in
+  while !l != 0 do
+    Buffer.add_char buf (Char.chr (!c lor 0x80 land 0xff));
+    c := !l land 0x7f;
+    l := !l asr 7
+  done;
+  Buffer.contents buf
+
+let make_one ?(level = 4) ?g ~reporter path =
+  let open Fiber in
+  Stream.Stream.of_file path >>= function
+  | Error _ as err -> Fiber.return err
+  | Ok file ->
+      let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\0001" in
+      let hdr_entry =
+        encode_header_of_file
+          ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
+      in
+      let q = De.Queue.create 0x1000 in
+      let w = De.Lz77.make_window ~bits:15 in
+      let deflate_zlib = Stream.Flow.deflate_zlib ~q ~w ~level in
+      let file = Stream.Stream.via deflate_zlib file in
+      let path = Temp.random_temporary_path ?g "pack-%s.pack" in
+      let hdr = hdr ^ hdr_entry in
+      let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
+      let open Stream in
+      Stream.into
+        Sink.(zip (file path) (SHA256.sink_bigstring ()))
+        Stream.(Infix.(singleton hdr ++ file))
+      >>= fun ((), hash) ->
+      let hash =
+        bigstring_of_string
+          (SHA256.to_raw_string hash)
+          ~off:0 ~len:SHA256.length
+      in
+      Stream.into (Sink.file ~erase:false path) (Stream.singleton hash)
+      >>= fun () ->
+      reporter () >>= fun () -> Fiber.return (Ok path)
 
 module First_pass = Carton.Dec.Fp (SHA256)
 module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)

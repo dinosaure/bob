@@ -76,6 +76,12 @@ module Source = struct
 
   let length src = fold (fun count _ -> Fiber.return (succ count)) 0 src
 
+  let unfold seed pull =
+    Source { init = Fiber.always seed; pull; stop = (fun _ -> Fiber.return ()) }
+
+  let iterate ~f x =
+    unfold x (fun x -> f x >>= fun acc -> Fiber.return (Some (x, acc)))
+
   let next (Source src) =
     let go s =
       src.pull s >>| function
@@ -132,6 +138,104 @@ module Sink = struct
     in
     Sink { init; push; full; stop }
 
+  let zip (Sink l) (Sink r) =
+    let init () =
+      l.init () >>= fun l_acc ->
+      r.init () >>= fun r_acc -> Fiber.return (l_acc, r_acc)
+    in
+    let push (l_acc, r_acc) x =
+      l.push l_acc x >>= fun l_acc ->
+      r.push r_acc x >>= fun r_acc -> Fiber.return (l_acc, r_acc)
+    in
+    let full (l_acc, r_acc) =
+      l.full l_acc >>= fun lb ->
+      r.full r_acc >>= fun rb -> Fiber.return (lb || rb)
+    in
+    let stop (l_acc, r_acc) =
+      l.stop l_acc >>= fun l_ret ->
+      r.stop r_acc >>= fun r_ret -> Fiber.return (l_ret, r_ret)
+    in
+    Sink { init; push; full; stop }
+
+  type ('top, 'a, 'b) flat_map =
+    | Flat_map_top : 'top -> ('top, 'a, 'b) flat_map
+    | Flat_map_sub : {
+        init : 'sub;
+        push : 'sub -> 'a -> 'sub Fiber.t;
+        full : 'sub -> bool Fiber.t;
+        stop : 'sub -> 'b Fiber.t;
+      }
+        -> ('top, 'a, 'b) flat_map
+
+  let flat_map f (Sink top) =
+    let init () = top.init () >>| fun top -> Flat_map_top top in
+    let push s x =
+      match s with
+      | Flat_map_sub sub ->
+          sub.push sub.init x >>| fun init -> Flat_map_sub { sub with init }
+      | Flat_map_top acc -> (
+          top.push acc x >>= fun acc' ->
+          top.full acc' >>= function
+          | false -> Fiber.return (Flat_map_top acc')
+          | true ->
+              top.stop acc' >>= f >>= fun (Sink sub) ->
+              sub.init () >>| fun init ->
+              Flat_map_sub
+                { init; push = sub.push; full = sub.full; stop = sub.stop })
+    in
+    let full = function
+      | Flat_map_top acc -> top.full acc
+      | Flat_map_sub sub -> sub.full sub.init
+    in
+    let stop = function
+      | Flat_map_top acc ->
+          top.stop acc >>= f >>= fun (Sink sub) -> sub.init () >>= sub.stop
+      | Flat_map_sub sub -> sub.stop sub.init
+    in
+    Sink { init; push; full; stop }
+
+  let fill v =
+    Sink
+      {
+        init = Fiber.always ();
+        push = (fun () _ -> Fiber.return ());
+        full = Fiber.always true;
+        stop = Fiber.always v;
+      }
+
+  type ('a, 'b) race = Both of 'a * 'b | Left of 'a | Right of 'b
+
+  let race (Sink l) (Sink r) =
+    let init () =
+      l.init () >>= fun l_acc ->
+      r.init () >>= fun r_acc -> Fiber.return (Both (l_acc, r_acc))
+    in
+    let push state x =
+      match state with
+      | Left _ | Right _ -> Fmt.invalid_arg "One of the sinks is already filled"
+      | Both (l_acc, r_acc) -> (
+          l.push l_acc x >>= fun l_acc' ->
+          r.push r_acc x >>= fun r_acc' ->
+          l.full l_acc' >>= fun l_full ->
+          r.full r_acc' >>= fun r_full ->
+          match (l_full, r_full) with
+          | true, _ -> Fiber.return (Right r_acc')
+          | false, true -> Fiber.return (Left l_acc')
+          | false, false -> Fiber.return (Both (l_acc', r_acc')))
+    in
+    let full = function
+      | Both _ -> Fiber.return false
+      | _ -> Fiber.return true
+    in
+    let stop = function
+      | Left l_acc -> l.stop l_acc >>| fun l -> Left l
+      | Right r_acc -> r.stop r_acc >>| fun r -> Right r
+      | Both (l_acc, r_acc) ->
+          l.stop l_acc >>= fun l ->
+          r.stop r_acc >>= fun r -> Fiber.return (Both (l, r))
+    in
+    Sink { init; push; full; stop }
+
   let bigstring =
     let bigstring_blit src src_off dst dst_off len =
       Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
@@ -173,10 +277,11 @@ module Sink = struct
         Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
           (Unix.error_message errno)
 
-  let file path =
+  let file ?(erase = true) path =
     let init () =
-      Fiber.openfile path Unix.[ O_WRONLY; O_APPEND; O_CREAT ] 0o644
-      >>= function
+      let flags = Unix.[ O_WRONLY; O_APPEND; O_CREAT ] in
+      let flags = if erase then Unix.O_TRUNC :: flags else flags in
+      Fiber.openfile path flags 0o644 >>= function
       | Ok fd -> Fiber.return fd
       | Error errno ->
           Fmt.failwith "openfile(%a): %s" Fpath.pp path
@@ -475,6 +580,7 @@ module Stream = struct
   let of_array arr = from (Source.array arr)
   let to_bigstring stream = into Sink.bigstring stream
   let to_string stream = into Sink.string stream
+  let iterate ~f x = from (Source.iterate ~f x)
 
   (* Input & Output *)
 

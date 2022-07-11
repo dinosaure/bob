@@ -27,6 +27,13 @@ val make :
    of objects into a series of [string]. [level] lets the user to choose the
    [zlib] level compression (between [0] and [9]). *)
 
+val make_one :
+  ?level:int ->
+  ?g:Random.State.t ->
+  reporter:(unit -> unit Fiber.t) ->
+  Fpath.t ->
+  (Fpath.t, [> `Msg of string ]) result Fiber.t
+
 type status
 
 val first_pass :

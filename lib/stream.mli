@@ -10,6 +10,8 @@ module Source : sig
   val file : Fpath.t -> Stdbob.bigstring source
   val array : 'a array -> 'a source
   val fold : ('r -> 'a -> 'r Fiber.t) -> 'r -> 'a source -> 'r Fiber.t
+  val unfold : 's -> ('s -> ('a * 's) option Fiber.t) -> 'a source
+  val iterate : f:('a -> 'a Fiber.t) -> 'a -> 'a source
   val length : 'a source -> int Fiber.t
   val next : 'a source -> ('a * 'a source) option Fiber.t
   val dispose : 'a source -> unit Fiber.t
@@ -34,7 +36,16 @@ module Sink : sig
     ('a, 'r) sink
 
   val is_full : ('a, 'r) sink -> bool Fiber.t
+  val zip : ('a, 'r1) sink -> ('a, 'r2) sink -> ('a, 'r1 * 'r2) sink
+  val fill : 'a -> (_, 'a) sink
   val push : 'a -> ('a, 'r) sink -> ('a, 'r) sink
+
+  val flat_map :
+    ('r1 -> ('a, 'r2) sink Fiber.t) -> ('a, 'r1) sink -> ('a, 'r2) sink
+
+  type ('a, 'b) race = Both of 'a * 'b | Left of 'a | Right of 'b
+
+  val race : ('a, 'r1) sink -> ('a, 'r2) sink -> ('a, ('r1, 'r2) race) sink
 
   (** {3: Basics.} *)
 
@@ -45,7 +56,7 @@ module Sink : sig
   (** {3: Input & Output.} *)
 
   val stdout : (Stdbob.bigstring, unit) sink
-  val file : Fpath.t -> (Stdbob.bigstring, unit) sink
+  val file : ?erase:bool -> Fpath.t -> (Stdbob.bigstring, unit) sink
 end
 
 type ('a, 'b) flow = { flow : 'r. ('b, 'r) sink -> ('a, 'r) sink } [@@unboxed]
@@ -81,6 +92,7 @@ module Stream : sig
   val map : ('a -> 'b Fiber.t) -> 'a stream -> 'b stream
   val filter_map : ('a -> 'b option Fiber.t) -> 'a stream -> 'b stream
   val of_iter : (('a -> unit Fiber.t) -> unit Fiber.t) -> 'a stream
+  val iterate : f:('a -> 'a Fiber.t) -> 'a -> 'a stream
 
   (** {3: Basics.} *)
 
