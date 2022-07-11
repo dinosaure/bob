@@ -9,6 +9,10 @@ type 'a source =
 module Source : sig
   val file : Fpath.t -> Stdbob.bigstring source
   val array : 'a array -> 'a source
+  val fold : ('r -> 'a -> 'r Fiber.t) -> 'r -> 'a source -> 'r Fiber.t
+  val length : 'a source -> int Fiber.t
+  val next : 'a source -> ('a * 'a source) option Fiber.t
+  val dispose : 'a source -> unit Fiber.t
 end
 
 type ('a, 'r) sink =

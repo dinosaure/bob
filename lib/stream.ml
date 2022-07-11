@@ -60,6 +60,34 @@ module Source = struct
       else Fiber.return (Some (arr.(i), succ i))
     in
     Source { init = Fiber.always 0; pull; stop = Fiber.ignore }
+
+  let fold f r0 (Source src) =
+    let rec go r s =
+      src.pull s >>= function
+      | None -> Fiber.return r
+      | Some (a, s') -> f r a >>= fun a -> go a s'
+    in
+    src.init () >>= fun s0 ->
+    Fiber.catch
+      (fun () ->
+        go r0 s0 >>= fun r ->
+        src.stop s0 >>= fun () -> Fiber.return r)
+      (fun exn -> src.stop s0 >>= fun () -> raise exn)
+
+  let length src = fold (fun count _ -> Fiber.return (succ count)) 0 src
+
+  let next (Source src) =
+    let go s =
+      src.pull s >>| function
+      | Some (x, s') -> Some (x, Source { src with init = Fiber.always s' })
+      | None -> None
+    in
+    src.init () >>= fun s0 ->
+    Fiber.catch
+      (fun () -> go s0)
+      (fun exn -> src.stop s0 >>= fun () -> raise exn)
+
+  let dispose (Source src) = src.init () >>= src.stop
 end
 
 type ('a, 'r) sink =
@@ -131,6 +159,11 @@ module Sink = struct
     Sink { k with init = (fun () -> k.init () >>= fun acc -> k.push acc x) }
 
   let rec until ~path fd bstr off len =
+    Log.debug (fun m -> m "Write down into a file (%d):" (Obj.magic fd));
+    Log.debug (fun m ->
+        m "@[<hov>%a@]"
+          (Hxd_string.pp Hxd.default)
+          (bigstring_to_string (Bigarray.Array1.sub bstr off len)));
     Fiber.write fd bstr ~off ~len >>= function
     | Ok len' when len' - len = 0 -> Fiber.return fd
     | Ok len' -> until ~path fd bstr (off + len') (len - len')
@@ -150,7 +183,12 @@ module Sink = struct
             (Unix.error_message errno)
     in
     let stop fd = Fiber.close fd in
-    let push fd bstr = until ~path fd bstr 0 (Bigarray.Array1.dim bstr) in
+    let push fd bstr =
+      Log.debug (fun m -> m "Push:");
+      Log.debug (fun m ->
+          m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string bstr));
+      until ~path fd bstr 0 (Bigarray.Array1.dim bstr)
+    in
     let full = Fiber.always false in
     Sink { init; stop; full; push }
 
@@ -454,7 +492,7 @@ module Stream = struct
             | false -> (
                 Fiber.read fd >>= function
                 | Ok `End -> Fiber.return r
-                | Ok (`Data str) -> k.push r str >>= go
+                | Ok (`Data bstr) -> k.push r bstr >>= go
                 | Error errno ->
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Fpath.pp path
                       (Unix.error_message errno))
@@ -472,7 +510,7 @@ module Stream = struct
         | false -> (
             Fiber.read Unix.stdin >>= function
             | Ok `End -> Fiber.return r
-            | Ok (`Data str) -> k.push r str >>= go
+            | Ok (`Data bstr) -> k.push r bstr >>= go
             | Error errno ->
                 Fmt.failwith "read(<stdin>): %s" (Unix.error_message errno))
       in

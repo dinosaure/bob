@@ -16,6 +16,7 @@ let emit_with_reporter quiet ?g ?level ~config store objects =
   let open Fiber in
   let open Stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
+  Fmt.pr ">>> Generate the PACK file into: %a.\n%!" Fpath.pp path;
   let flow = Pack.make ?level ~reporter:(fun () -> reporter 1) store in
   Stream.(to_file path (via flow objects)) >>= fun () ->
   finalise ();

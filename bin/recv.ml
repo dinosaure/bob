@@ -26,6 +26,14 @@ let save_with_reporter quiet ~config ?g ~identity ~ciphers ~shared_keys sockaddr
   finalise ();
   res
 
+let extract_with_reporter quiet ~config path =
+  with_reporter ~config quiet counter @@ fun (reporter, finalise) ->
+  let open Fiber in
+  let entries = Pack.first_pass ~reporter (Stream.Source.file path) in
+  Stream.Source.length entries >>= fun _ ->
+  finalise ();
+  Fiber.return ()
+
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
@@ -46,8 +54,8 @@ let run_client quiet g sockaddr secure_port password yes =
           save_with_reporter quiet ~config ~g ~identity ~ciphers ~shared_keys
             sockaddr
           >>= function
-          | Ok fpath ->
-              Fmt.epr ">>> Document saved into %a.\n%!" Fpath.pp fpath;
+          | Ok path ->
+              extract_with_reporter quiet ~config path >>= fun _ ->
               Fiber.return 0
           | Error err ->
               Fmt.epr "%s: %a.\n%!" Sys.executable_name Transfer.pp_error err;

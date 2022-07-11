@@ -30,9 +30,15 @@ val make :
 type status
 
 val first_pass :
-  in_channel ->
   reporter:(int -> unit Fiber.t) ->
-  ( Digestif.SHA256.t * status array * Digestif.SHA256.t Carton.Dec.oracle,
-    [> `Msg of string ] )
-  result
-  Fiber.t
+  Stdbob.bigstring Stream.source ->
+  (int64
+  * status
+  * [ `Base of Carton.Dec.weight
+    | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
+    | `Ref of
+      Digestif.SHA256.t
+      * Carton.Dec.weight
+      * Carton.Dec.weight
+      * Carton.Dec.weight ])
+  Stream.source

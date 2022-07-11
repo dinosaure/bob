@@ -94,6 +94,7 @@ let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () -> (
       let tmp = Temp.random_temporary_path ?g tmp in
+      Fmt.pr ">>> Save the PACK file into: %a.\n%!" Fpath.pp tmp;
       let oc = open_out_bin (Fpath.to_string tmp) in
       let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
       let rec go () =

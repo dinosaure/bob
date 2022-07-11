@@ -30,6 +30,10 @@ let incoming_data =
   in
   list [ const ">>>"; spin; bytes; bytes_per_sec ]
 
+let counter =
+  let open Progress.Line in
+  list [ const ">>>"; spacer 32; sum ~width:5 (); const "object(s)" ]
+
 let with_reporter ~config quiet t f =
   let reporter, finalise =
     match quiet with
