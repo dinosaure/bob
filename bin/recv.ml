@@ -22,7 +22,9 @@ let save_with_reporter quiet ~config ?g ~identity ~ciphers ~shared_keys sockaddr
     =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   let open Fiber in
-  Transfer.save ?g ~reporter ~identity ~ciphers ~shared_keys sockaddr
+  Transfer.save ?g
+    ~reporter:(Fiber.return <.> reporter)
+    ~identity ~ciphers ~shared_keys sockaddr
   >>| fun res ->
   finalise ();
   res
@@ -30,10 +32,26 @@ let save_with_reporter quiet ~config ?g ~identity ~ciphers ~shared_keys sockaddr
 let extract_with_reporter quiet ~config path =
   with_reporter ~config quiet counter @@ fun (reporter, finalise) ->
   let open Fiber in
-  let entries = Pack.first_pass ~reporter (Stream.Source.file path) in
-  Stream.Source.length entries >>= fun _ ->
+  let entries =
+    Pack.first_pass
+      ~reporter:(Fiber.return <.> reporter)
+      (Stream.Source.file path)
+  in
+  Pack.collect entries >>= fun (matrix, oracle) ->
   finalise ();
-  Fiber.return ()
+  let total = Array.length matrix in
+  with_reporter ~config quiet (make_verify_bar ~total)
+  @@ fun (reporter, finalise) ->
+  Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path matrix
+  >>= fun () ->
+  finalise ();
+  let entries = Array.to_list matrix in
+  let resolved, unresolved = List.partition Pack.is_resolved entries in
+  match (resolved, unresolved) with
+  | [ file; name ], [] when Pack.kind_of_status name = `D ->
+      Pack.extract_file ~file ~name path >>= fun () -> Fiber.return (Ok ())
+  | _, [] -> assert false
+  | _, _unresolved -> Fiber.return (Error `Incomplete_pack_file)
 
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
@@ -49,12 +67,12 @@ let run_client quiet g sockaddr secure_port password yes =
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   save_with_reporter quiet ~config ~g ~identity ~ciphers ~shared_keys sockaddr
   >>| Transfer.open_error
-  >>? fun path ->
-  extract_with_reporter quiet ~config path >>= fun _ -> Fiber.return (Ok ())
+  >>? fun path -> extract_with_reporter quiet ~config path
 
 let pp_error ppf = function
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
+  | `Incomplete_pack_file -> Fmt.pf ppf "Your received an incomplete PACK file"
 
 let run quiet g sockaddr secure_port password yes =
   match Fiber.run (run_client quiet g sockaddr secure_port password yes) with

@@ -245,11 +245,12 @@ module Make (Flow : FLOW) = struct
       >>? fun () -> flush flow)
     else Flow.return (Ok ())
 
-  let send flow str ~off ~len =
+  let send flow bstr ~off ~len =
     let blit src src_off dst dst_off len =
-      Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
+      Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
     in
-    Ke.Rke.N.push flow.send_queue ~blit ~length:String.length ~off ~len str;
+    Ke.Rke.N.push flow.send_queue ~blit ~length:Bigarray.Array1.dim ~off ~len
+      bstr;
     flush flow >>? fun () -> Flow.return (Ok len)
 
   let close { fd; _ } = Flow.close fd

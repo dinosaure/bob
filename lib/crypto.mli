@@ -33,7 +33,7 @@ module Make (Flow : FLOW) : sig
 
   val send :
     Flow.flow t ->
-    string ->
+    Stdbob.bigstring ->
     off:int ->
     len:int ->
     (int, write_error) result Flow.t

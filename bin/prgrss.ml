@@ -26,6 +26,17 @@ let make_progress_bar_for_file ~total =
       constf " / %a" (bytes_to_size ~decimals:2) total;
     ]
 
+let make_verify_bar ~total =
+  let open Progress.Line in
+  let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
+  list
+    [
+      const ">>>";
+      brackets @@ bar ~style ~width:(`Fixed 30) total;
+      count_to total;
+      const "verified object(s)";
+    ]
+
 let make_tranfer_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
@@ -50,7 +61,7 @@ let counter =
 let with_reporter ~config quiet t f =
   let reporter, finalise =
     match quiet with
-    | true -> ((fun _ -> Fiber.return ()), ignore)
+    | true -> (ignore, ignore)
     | false ->
         let display = Progress.Multi.line t |> Progress.Display.start ~config in
         let[@warning "-8"] Progress.Reporter.[ reporter ] =
@@ -58,8 +69,7 @@ let with_reporter ~config quiet t f =
         in
         ( (fun n ->
             reporter n;
-            Progress.Display.tick display;
-            Fiber.return ()),
+            Progress.Display.tick display),
           fun () -> Progress.Display.finalise display )
   in
   f (reporter, finalise)

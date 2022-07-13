@@ -24,7 +24,6 @@ module SHA256 = struct
       ~stop:(Fiber.return <.> get) ()
 end
 
-module Crc32 = Checkseum.Crc32
 module Scheduler = Carton.Make (Fiber)
 
 let scheduler =
@@ -145,11 +144,12 @@ let load_directory rstore path =
   Carton.Dec.v ~kind:`B
     (bigstring_of_string str ~off:0 ~len:(String.length str))
 
-let load_root hash =
-  let str = Fmt.str "commit 30\000%s" (SHA256.to_raw_string hash) in
+let load_root path hash =
+  let basename = Fpath.basename path in
+  let entry = Fmt.str "%s\000%s" basename (SHA256.to_raw_string hash) in
   Fiber.return
     (Carton.Dec.v ~kind:`A
-       (bigstring_of_string str ~off:0 ~len:(String.length str)))
+       (bigstring_of_string entry ~off:0 ~len:(String.length entry)))
 
 let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
@@ -162,7 +162,7 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
       | Unix.S_DIR -> Scheduler.inj (load_directory store.rstore path)
       | _ -> failwith "Invalid kind of object")
   | None, Some hash' when SHA256.equal hash hash' ->
-      Scheduler.inj (load_root hash')
+      Scheduler.inj (load_root store.path hash')
   | None, (Some _ | None) ->
       Log.err (fun m -> m "The object %a does not exists." SHA256.pp hash);
       raise Not_found
@@ -274,10 +274,15 @@ let pack ~reporter ?level ~length store =
     let push (t, acc) target =
       let open Fiber in
       reporter () >>= fun () ->
+      let anchor = t.cursor in
       Hashtbl.add t.offsets (Carton.Enc.target_uid target) t.cursor;
       let find hash =
         match Hashtbl.find_opt t.offsets hash with
-        | Some v -> Fiber.return (Some (Int64.to_int v))
+        | Some v ->
+            Log.debug (fun m ->
+                m "Ask where is %a: %08Lx (anchor: %08Lx)." SHA256.pp hash v
+                  anchor);
+            Fiber.return (Some (Int64.to_int v))
         | None -> Fiber.return None
       in
 
@@ -388,9 +393,12 @@ let make ?level ~reporter store =
   let length = length store in
   pack ~reporter ?level ~length store
 
-let encode_header_of_file ~length =
+let _C = 0b011
+let _D = 0b100
+
+let encode_header_of_entry ~kind ~length =
   let buf = Buffer.create 16 in
-  let c = ref ((0b011 (* [`C] *) lsl 4) lor (length land 15)) in
+  let c = ref ((kind lsl 4) lor (length land 15)) in
   let l = ref (length asr 4) in
   while !l != 0 do
     Buffer.add_char buf (Char.chr (!c lor 0x80 land 0xff));
@@ -400,14 +408,31 @@ let encode_header_of_file ~length =
   Buffer.add_char buf (Char.chr !c);
   Buffer.contents buf
 
+let entry_with_filename ?level path =
+  let entry = Fpath.basename path in
+  let length = String.length entry in
+  let output =
+    Bigarray.Array1.create Bigarray.char Bigarray.c_layout (3 * length)
+  in
+  match
+    Zl.Def.Ns.deflate ?level
+      (bigstring_of_string entry ~off:0 ~len:length)
+      output
+  with
+  | Ok len ->
+      let hdr_entry = encode_header_of_entry ~kind:_D ~length in
+      ( bigstring_of_string hdr_entry ~off:0 ~len:(String.length hdr_entry),
+        Bigarray.Array1.sub output 0 len )
+  | _ -> Fmt.failwith "Impossible to compress the entry with filename"
+
 let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
   | Error _ as err -> Fiber.return err
   | Ok file ->
-      let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\001" in
+      let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
       let hdr_entry =
-        encode_header_of_file
+        encode_header_of_entry ~kind:_C
           ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
       in
       let hdr = hdr ^ hdr_entry in
@@ -426,8 +451,16 @@ let make_one ?(level = 4) ~reporter ~finalise path =
             Fiber.return ())
           file
       in
+      let hdr_name, name = entry_with_filename ~level path in
+      let name =
+        Stream.tap
+          (fun bstr ->
+            ctx := SHA256.feed_bigstring !ctx bstr;
+            Fiber.return ())
+          (Stream.double hdr_name name)
+      in
       Stream.Infix.(
-        Stream.singleton hdr ++ file
+        Stream.singleton hdr ++ file ++ name
         ++ Stream.of_fiber (fun () ->
                finalise ();
                (Fiber.return
@@ -440,6 +473,23 @@ module First_pass = Carton.Dec.Fp (SHA256)
 module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)
 
 type status = Verify.status
+
+type entry =
+  int64
+  * status
+  * [ `Base of Carton.Dec.weight
+    | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
+    | `Ref of
+      Digestif.SHA1.t
+      * Carton.Dec.weight
+      * Carton.Dec.weight
+      * Carton.Dec.weight ]
+
+let is_base = Verify.is_base
+let is_resolved = Verify.is_resolved
+let offset_of_status = Verify.offset_of_status
+let kind_of_status = Verify.kind_of_status
+
 type decode = [ First_pass.decode | `Keep of First_pass.decode * string ]
 
 let rec analyse ~reporter src source state =
@@ -483,21 +533,27 @@ let rec analyse ~reporter src source state =
   | `Entry (entry, decoder) -> (
       match entry with
       | { First_pass.kind = Base _; offset; size; _ } ->
-          Log.debug (fun m -> m "Got a new entry (base): %08Lx" offset);
+          let idx = First_pass.count decoder - 1 in
+          Log.debug (fun m ->
+              m "[%4d] Got a new entry (base): %08Lx" idx offset);
           let elt =
             (offset, Verify.unresolved_base ~cursor:offset, `Base size)
           in
           let src = ((First_pass.decode decoder :> decode), src, source) in
           reporter 1 >>| fun () -> `Ret (Some (elt, src))
       | { kind = Ofs { sub; source = s; target }; size; offset; _ } ->
-          Log.debug (fun m -> m "Got a new entry (ofs): %08Lx" offset);
+          let idx = First_pass.count decoder - 1 in
+          Log.debug (fun m ->
+              m "[%4d] Got a new entry (ofs): %08Lx (sub: %08x)" idx offset sub);
           let elt =
             (offset, Verify.unresolved_node, `Ofs (sub, s, target, size))
           in
           let src = ((First_pass.decode decoder :> decode), src, source) in
           reporter 1 >>| fun () -> `Ret (Some (elt, src))
       | { kind = Ref { ptr; source = s; target }; size; offset; _ } ->
-          Log.debug (fun m -> m "Got a new entry (ref): %08Lx" offset);
+          let idx = First_pass.count decoder - 1 in
+          Log.debug (fun m ->
+              m "[%04x] Got a new entry (ref): %08Lx" idx offset);
           let elt =
             (offset, Verify.unresolved_node, `Ref (ptr, s, target, size))
           in
@@ -561,3 +617,134 @@ let first_pass ~reporter source =
     Stream.Source.dispose source
   in
   Stream.Source { init; pull; stop }
+
+let replace tbl k v =
+  match Hashtbl.find tbl k with
+  | v' -> if v < v' then Hashtbl.replace tbl k v'
+  | exception _ -> Hashtbl.add tbl k v
+
+let digest ~kind ?(off = 0) ?len buf =
+  let len =
+    match len with Some len -> len | None -> Bigarray.Array1.dim buf - off
+  in
+  let ctx = SHA256.empty in
+  let ctx =
+    match kind with
+    | `A -> SHA256.feed_string ctx (Fmt.str "commit %d\000" len)
+    | `B -> SHA256.feed_string ctx (Fmt.str "tree %d\000" len)
+    | `C -> SHA256.feed_string ctx (Fmt.str "blob %d\000" len)
+    | `D -> SHA256.feed_string ctx (Fmt.str "mesg %d\000" len)
+  in
+  let ctx = SHA256.feed_bigstring ctx ~off ~len buf in
+  SHA256.get ctx
+
+let make_window bits = De.make_window ~bits
+
+let map (fd, st) ~pos len =
+  let len = min (Int64.sub st.Unix.LargeFile.st_size pos) (Int64.of_int len) in
+  let len = Int64.to_int len in
+  let res =
+    Unix.map_file fd ~pos Bigarray.char Bigarray.c_layout false [| len |]
+  in
+  Bigarray.array1_of_genarray res
+
+let collect entries =
+  let where = Hashtbl.create 0x100 in
+  let child = Hashtbl.create 0x100 in
+  let sized = Hashtbl.create 0x100 in
+  let register (idx, acc) (offset, status, v) =
+    match v with
+    | `Base weight ->
+        Hashtbl.add where offset idx;
+        Hashtbl.add sized offset weight;
+        Fiber.return (succ idx, status :: acc)
+    | `Ofs (v, source, target, _weight) ->
+        let v = Int64.(sub offset (of_int v)) in
+        Log.debug (fun m -> m "An object references to another one at %08Lx" v);
+        replace sized v source;
+        replace sized offset target;
+        Hashtbl.add where offset idx;
+        (try
+           let vs = Hashtbl.find child (`Ofs v) in
+           Hashtbl.replace child (`Ofs v) (offset :: vs)
+         with _ -> Hashtbl.add child (`Ofs v) [ offset ]);
+        Fiber.return (succ idx, status :: acc)
+    | `Ref (ptr, source, target, _weight) ->
+        Log.debug (fun m ->
+            m "An object references to another one: %a" SHA256.pp ptr);
+        replace sized offset (max target source);
+        Hashtbl.add where offset idx;
+        (try
+           let vs = Hashtbl.find child (`Ref ptr) in
+           Hashtbl.replace child (`Ref ptr) (offset :: vs)
+         with _ -> Hashtbl.add child (`Ref ptr) [ offset ]);
+        Fiber.return (succ idx, status :: acc)
+  in
+  let open Fiber in
+  Stream.Source.fold register (0, []) entries >>= fun (_max, entries) ->
+  let matrix = Array.of_list (List.rev entries) in
+  let where ~cursor = Hashtbl.find where cursor in
+  let children ~cursor ~uid =
+    match
+      (Hashtbl.find_opt child (`Ofs cursor), Hashtbl.find_opt child (`Ref uid))
+    with
+    | Some a, Some b -> List.sort_uniq compare (a @ b)
+    | Some x, None | None, Some x -> x
+    | None, None -> []
+  in
+  let weight ~cursor = Hashtbl.find sized cursor in
+  let oracle = { Carton.Dec.where; children; digest; weight } in
+  Fiber.return (matrix, oracle)
+
+let verify ?reporter:(verbose = ignore) ~oracle path matrix =
+  let open Fiber in
+  let fd = Unix.openfile (Fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
+  let st = Unix.LargeFile.stat (Fpath.to_string path) in
+  let pack =
+    Carton.Dec.make (fd, st) ~allocate:make_window
+      ~z:(De.bigstring_create De.io_buffer_size)
+      ~uid_ln:SHA256.length ~uid_rw:SHA256.of_raw_string Stdbob.never
+  in
+  Verify.verify ~threads:4 pack ~map ~oracle ~verbose ~matrix >>= fun () ->
+  Unix.close fd;
+  Fiber.return ()
+
+let extract_file ~file ~name path =
+  let fd = Unix.openfile (Fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
+  let st = Unix.LargeFile.stat (Fpath.to_string path) in
+  let pack =
+    Carton.Dec.make (fd, st) ~allocate:make_window
+      ~z:(De.bigstring_create De.io_buffer_size)
+      ~uid_ln:SHA256.length ~uid_rw:SHA256.of_raw_string Stdbob.never
+  in
+  let name_ofs = Verify.offset_of_status name in
+  let name =
+    let weight =
+      Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null name_ofs
+    in
+    let raw = Carton.Dec.make_raw ~weight in
+    Carton.Dec.of_offset ~map pack raw ~cursor:name_ofs
+  in
+  let name =
+    bigstring_to_string
+      (Bigarray.Array1.sub (Carton.Dec.raw name) 0 (Carton.Dec.len name))
+  in
+  let file_ofs = Verify.offset_of_status file in
+  (* TODO(dinosaure): we should have a streaming API for a /base/
+     object. At least, we will be able to show that we save the file
+     interactively into the file-system. *)
+  let file =
+    let weight =
+      Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null file_ofs
+    in
+    let raw = Carton.Dec.make_raw ~weight in
+    Carton.Dec.of_offset ~map pack raw ~cursor:file_ofs
+  in
+  let open Fiber in
+  let open Stream in
+  Stream.to_file (Fpath.v name)
+    (Stream.singleton
+       (Bigarray.Array1.sub (Carton.Dec.raw file) 0 (Carton.Dec.len file)))
+  >>= fun res ->
+  Unix.close fd;
+  Fiber.return res

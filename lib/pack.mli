@@ -39,10 +39,8 @@ val make_one :
 
 type status
 
-val first_pass :
-  reporter:(int -> unit Fiber.t) ->
-  Stdbob.bigstring Stream.source ->
-  (int64
+type entry =
+  int64
   * status
   * [ `Base of Carton.Dec.weight
     | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
@@ -50,5 +48,27 @@ val first_pass :
       Digestif.SHA1.t
       * Carton.Dec.weight
       * Carton.Dec.weight
-      * Carton.Dec.weight ])
-  Stream.source
+      * Carton.Dec.weight ]
+
+val is_base : status -> bool
+val is_resolved : status -> bool
+val offset_of_status : status -> int64
+val kind_of_status : status -> [ `A | `B | `C | `D ]
+
+val first_pass :
+  reporter:(int -> unit Fiber.t) ->
+  Stdbob.bigstring Stream.source ->
+  entry Stream.source
+
+val collect :
+  entry Stream.source ->
+  (status array * Digestif.SHA1.t Carton.Dec.oracle) Fiber.t
+
+val verify :
+  ?reporter:(unit -> unit) ->
+  oracle:Digestif.SHA1.t Carton.Dec.oracle ->
+  Fpath.t ->
+  status array ->
+  unit Fiber.t
+
+val extract_file : file:status -> name:status -> Fpath.t -> unit Fiber.t

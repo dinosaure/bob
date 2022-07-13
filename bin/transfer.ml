@@ -1,5 +1,9 @@
 open Stdbob
 
+let src = Logs.Src.create "bob.transfer"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let sockaddr_with_secure_port sockaddr secure_port =
   match sockaddr with
   | Unix.ADDR_INET (inet_addr, _) -> Unix.ADDR_INET (inet_addr, secure_port)
@@ -48,15 +52,18 @@ let pp_error ppf = function
 
 let open_error = function Ok _ as v -> v | Error #error as v -> v
 
-let crypto_of_flow ~reporter flow =
+let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
   let open Fiber in
-  let init () = Fiber.return (Ok flow) in
+  let init () =
+    let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
+    Fiber.return (Ok flow)
+  in
   let push state bstr =
     match state with
     | Error _ as err -> Fiber.return err
     | Ok flow -> (
-        let str = bigstring_to_string bstr in
-        Crypto.send flow str ~off:0 ~len:(String.length str) >>= function
+        Crypto.send flow bstr ~off:0 ~len:(Bigarray.Array1.dim bstr)
+        >>= function
         | Ok len -> reporter len >>= fun () -> Fiber.return (Ok flow)
         | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err)
   in
@@ -78,9 +85,8 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () ->
-      let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
       let open Stream in
-      let crypto = crypto_of_flow ~reporter flow in
+      let crypto = crypto_of_flow ~reporter ~ciphers ~shared_keys socket in
       Stream.into crypto stream
       >>| reword_error (fun err ->
               `Crypto (err :> [ Crypto.write_error | Crypto.error ]))
@@ -97,6 +103,7 @@ let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () -> (
       let tmp = Temp.random_temporary_path ?g tmp in
+      Log.debug (fun m -> m "Save the PACK file into: %a." Fpath.pp tmp);
       let oc = open_out_bin (Fpath.to_string tmp) in
       let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
       let rec go () =

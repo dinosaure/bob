@@ -6,7 +6,8 @@ let compress_with_reporter quiet ~compression ~config store hashes =
     (make_compression_progress ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.deltify ~reporter ~compression store hashes >>| fun res ->
+  Pack.deltify ~reporter:(Fiber.return <.> reporter) ~compression store hashes
+  >>| fun res ->
   finalise ();
   res
 
@@ -20,7 +21,11 @@ let emit_with_reporter quiet ?g ?level ~config store objects =
   let open Stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
   Logs.debug (fun m -> m "Generate the PACK file: %a" Fpath.pp path);
-  let flow = Pack.make ?level ~reporter:(fun () -> reporter 1) store in
+  let flow =
+    Pack.make ?level
+      ~reporter:(Fiber.return <.> reporter <.> Stdbob.always 1)
+      store
+  in
   Stream.(to_file path (via flow objects)) >>= fun () ->
   finalise ();
   Fiber.return (File path)
@@ -30,7 +35,8 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ?level ~reporter ~finalise path >>= function
+  Pack.make_one ?level ~reporter:(Fiber.return <.> reporter) ~finalise path
+  >>= function
   | Error (`Msg err) -> Fmt.failwith "%s." err
   | Ok stream -> Fiber.return (Stream stream)
 
@@ -45,7 +51,9 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       let open Fiber in
       let open Stream in
       Stream.of_file path >>| Result.get_ok
-      >>= Transfer.transfer ~reporter ~identity ~ciphers ~shared_keys sockaddr
+      >>= Transfer.transfer
+            ~reporter:(Fiber.return <.> reporter)
+            ~identity ~ciphers ~shared_keys sockaddr
       >>| fun res ->
       finalise ();
       res
