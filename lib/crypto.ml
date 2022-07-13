@@ -153,10 +153,12 @@ let get_record record queue symmetric =
       in
       Ke.Rke.N.keep_exn queue ~blit ~length:Cstruct.length record ~len:2;
       let len = Cstruct.BE.get_uint16 record 0 in
-      if Ke.Rke.length queue >= len then (
-        Ke.Rke.N.keep_exn queue ~blit ~length:Cstruct.length record ~len;
-        Ke.Rke.N.shift_exn queue len;
-        `Record (Cstruct.sub record 2 (len - 2)))
+      let required = 2 + len + Cipher_block.tag_size in
+      if Ke.Rke.length queue >= required then (
+        Ke.Rke.N.keep_exn queue ~blit ~length:Cstruct.length record
+          ~len:required;
+        Ke.Rke.N.shift_exn queue required;
+        `Record (Cstruct.sub record 2 (len + Cipher_block.tag_size)))
       else `Await_rec (len - Ke.Rke.length queue)
 
 let record ~dst ~seq queue symmetric =
@@ -168,10 +170,9 @@ let record ~dst ~seq queue symmetric =
   Ke.Rke.N.keep_exn queue ~length:Cstruct.length ~blit ~off:2 ~len dst;
   let buf = encrypt symmetric seq (Cstruct.sub dst 2 len) in
   Ke.Rke.N.shift_exn queue len;
-  let len = 2 + Cstruct.length buf in
   Cstruct.BE.set_uint16 dst 0 len;
   Cstruct.blit buf 0 dst 2 (Cstruct.length buf);
-  Cstruct.sub dst 0 len
+  Cstruct.sub dst 0 (2 + Cstruct.length buf)
 
 module type FLOW = sig
   type +'a t

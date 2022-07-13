@@ -48,8 +48,27 @@ let pp_error ppf = function
 
 let open_error = function Ok _ as v -> v | Error #error as v -> v
 
-let transfer ?(chunk = 0x1000) ?(reporter = Fiber.ignore) ~identity ~ciphers
-    ~shared_keys sockaddr fpath =
+let crypto_of_flow ~reporter flow =
+  let open Fiber in
+  let init () = Fiber.return (Ok flow) in
+  let push state bstr =
+    match state with
+    | Error _ as err -> Fiber.return err
+    | Ok flow -> (
+        let str = bigstring_to_string bstr in
+        Crypto.send flow str ~off:0 ~len:(String.length str) >>= function
+        | Ok len -> reporter len >>= fun () -> Fiber.return (Ok flow)
+        | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err)
+  in
+  let full = Fiber.always false in
+  let stop = function
+    | Ok flow -> Crypto.close flow >>| fun () -> Ok ()
+    | Error _ as err -> Fiber.return err
+  in
+  Stream.Sink { init; push; full; stop }
+
+let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
+    sockaddr stream =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
@@ -59,25 +78,12 @@ let transfer ?(chunk = 0x1000) ?(reporter = Fiber.ignore) ~identity ~ciphers
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () ->
-      let ic = open_in_bin (Fpath.to_string fpath) in
       let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
-      let temp = Bytes.create chunk in
-      let rec go () =
-        match input ic temp 0 chunk with
-        | 0 -> Crypto.close flow >>= fun () -> Fiber.return (Ok ())
-        | len -> (
-            Crypto.send flow (Bytes.unsafe_to_string temp) ~off:0 ~len
-            >>= function
-            | Ok _ -> reporter len >>= go
-            | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err
-            )
-      in
-      go ()
+      let open Stream in
+      let crypto = crypto_of_flow ~reporter flow in
+      Stream.into crypto stream
       >>| reword_error (fun err ->
               `Crypto (err :> [ Crypto.write_error | Crypto.error ]))
-      >>= fun res ->
-      close_in ic;
-      Fiber.return res
 
 let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
     ~identity ~ciphers ~shared_keys sockaddr =

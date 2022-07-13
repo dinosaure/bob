@@ -30,21 +30,22 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ?level ~reporter path >>= function
+  Pack.make_one ?level ~reporter ~finalise path >>= function
   | Error (`Msg err) -> Fmt.failwith "%s." err
-  | Ok stream ->
-      finalise ();
-      Fiber.return (Stream stream)
+  | Ok stream -> Fiber.return (Stream stream)
 
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr = function
-  | Stream _stream -> assert false
+  | Stream stream ->
+      Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
       let total = (Unix.stat (Fpath.to_string path)).Unix.st_size in
       with_reporter ~config quiet (make_tranfer_bar ~total)
       @@ fun (reporter, finalise) ->
       let open Fiber in
-      Transfer.transfer ~reporter ~identity ~ciphers ~shared_keys sockaddr path
+      let open Stream in
+      Stream.of_file path >>| Result.get_ok
+      >>= Transfer.transfer ~reporter ~identity ~ciphers ~shared_keys sockaddr
       >>| fun res ->
       finalise ();
       res

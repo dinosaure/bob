@@ -428,6 +428,10 @@ let pipe fd0 fd1 =
         if Fiber.Ivar.is_empty closed then Fiber.Ivar.fill closed `Closed;
         Fiber.return ()
     | `Read (`Data (bstr, off, len)) -> (
+        Log.debug (fun m ->
+            m "[%a -> %a]: @[<hov>%a@]" pp_sockaddr peer0 pp_sockaddr peer1
+              (Hxd_string.pp Hxd.default)
+              (bigstring_to_string (Bigarray.Array1.sub bstr off len)));
         full_write fd1 bstr ~off ~len >>= function
         | Ok () -> transmit fd0 fd1 ()
         | Error _ ->

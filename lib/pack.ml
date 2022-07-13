@@ -400,7 +400,7 @@ let encode_header_of_file ~length =
   Buffer.add_char buf (Char.chr !c);
   Buffer.contents buf
 
-let make_one ?(level = 4) ~reporter path =
+let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
   | Error _ as err -> Fiber.return err
@@ -412,11 +412,13 @@ let make_one ?(level = 4) ~reporter path =
       in
       let hdr = hdr ^ hdr_entry in
       let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
-      let ctx = ref SHA256.empty in
+      let ctx = ref (SHA256.feed_bigstring SHA256.empty hdr) in
       let q = De.Queue.create 0x1000 in
       let w = De.Lz77.make_window ~bits:15 in
       let open Stream in
       let zlib = Flow.deflate_zlib ~q ~w ~level in
+      let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
+      let file = Stream.via zlib file in
       let file =
         Stream.tap
           (fun bstr ->
@@ -424,11 +426,10 @@ let make_one ?(level = 4) ~reporter path =
             Fiber.return ())
           file
       in
-      let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
-      let file = Stream.via zlib file in
       Stream.Infix.(
         Stream.singleton hdr ++ file
         ++ Stream.of_fiber (fun () ->
+               finalise ();
                (Fiber.return
                <.> bigstring_of_string ~off:0 ~len:SHA256.length
                <.> SHA256.to_raw_string <.> SHA256.get)

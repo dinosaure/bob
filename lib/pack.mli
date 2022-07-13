@@ -30,6 +30,7 @@ val make :
 val make_one :
   ?level:int ->
   reporter:(int -> unit Fiber.t) ->
+  finalise:(unit -> unit) ->
   Fpath.t ->
   (Stdbob.bigstring Stream.stream, [> `Msg of string ]) result Fiber.t
 (** [make ?level ~reporter path] returns the path of the generated PACK file
