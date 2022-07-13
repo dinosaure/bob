@@ -333,6 +333,13 @@ module Flow = struct
     in
     { flow }
 
+  let tap f =
+    let flow (Sink k) =
+      let push r x = f x >>= fun () -> k.push r x in
+      Sink { k with push }
+    in
+    { flow }
+
   (* Buffering *)
 
   let flush_if_full ~push ~acc ke capacity =
@@ -536,6 +543,13 @@ module Stream = struct
 
   let map f t = via (Flow.map f) t
   let filter_map f t = via (Flow.filter_map f) t
+  let tap f t = via (Flow.tap f) t
+
+  let of_fiber f =
+    let stream (Sink k) =
+      k.init () >>= fun acc -> f () >>= k.push acc >>= k.stop
+    in
+    { stream }
 
   let of_iter iter =
     let exception Stop in

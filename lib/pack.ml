@@ -5,7 +5,7 @@ let src = Logs.Src.create "bob.pack"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module SHA256 = struct
-  include Digestif.SHA256
+  include Digestif.SHA1
 
   let hash x = Hashtbl.hash x
   let length = digest_size
@@ -39,6 +39,7 @@ type store = {
   store : (SHA256.t, Fpath.t) Hashtbl.t;
   rstore : (Fpath.t, SHA256.t * [ `Dir | `Reg ]) Hashtbl.t;
   root : SHA256.t option;
+  path : Fpath.t;
 }
 
 let length { rstore; root; _ } =
@@ -96,6 +97,7 @@ let rec full_read fd ba off len =
    (cc XXX(rand)). We will stay simple and see how we can improve that. *)
 let load_file path =
   let open Fiber in
+  Log.debug (fun m -> m "Load the file: %a.\n%!" Fpath.pp path);
   let len = (Unix.stat (Fpath.to_string path)).Unix.st_size in
   Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
   | Ok fd ->
@@ -144,7 +146,7 @@ let load_directory rstore path =
     (bigstring_of_string str ~off:0 ~len:(String.length str))
 
 let load_root hash =
-  let str = Fmt.str "root 40\000%s" (SHA256.to_raw_string hash) in
+  let str = Fmt.str "commit 30\000%s" (SHA256.to_raw_string hash) in
   Fiber.return
     (Carton.Dec.v ~kind:`A
        (bigstring_of_string str ~off:0 ~len:(String.length str)))
@@ -153,7 +155,8 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
   match (Hashtbl.find_opt store.store hash, store.root) with
   | Some path, _ -> (
-      let stat = Unix.stat (Fpath.to_string path) in
+      let path = Fpath.(store.path // path) in
+      let stat = Unix.stat Fpath.(to_string path) in
       match stat.Unix.st_kind with
       | Unix.S_REG -> Scheduler.inj (load_file path)
       | Unix.S_DIR -> Scheduler.inj (load_directory store.rstore path)
@@ -278,6 +281,10 @@ let pack ~reporter ?level ~length store =
         | None -> Fiber.return None
       in
 
+      Log.debug (fun m ->
+          m "Start to encode %a at %08Lx" SHA256.pp
+            (Carton.Enc.target_uid target)
+            t.cursor);
       Carton.Enc.encode_target ?level scheduler ~b:t.b
         ~find:(Scheduler.inj <.> find) ~load:(load store) ~uid:t.uid target
         ~cursor:(Int64.to_int t.cursor)
@@ -332,38 +339,40 @@ let hash_of_directory rstore path =
   let hdr = Fmt.str "tree %d\000" (String.length str) in
   Stream.(into (SHA256.sink_string ()) (double hdr str))
 
-let store path =
+let store root =
   let open Fiber in
   let rstore = Hashtbl.create 0x100 in
   let compute path =
     let stat = Unix.stat (Fpath.to_string path) in
     match stat.Unix.st_kind with
     | Unix.S_REG ->
-        Log.debug (fun m -> m "Calculate the hash of %a" Fpath.pp path);
         hash_of_filename path >>= fun hash ->
+        let path = Option.get (Fpath.relativize ~root path) in
+        Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
-        Log.debug (fun m ->
-            m "Calculate the hash of %a (directory)" Fpath.pp path);
+        let path = Fpath.to_dir_path path in
         hash_of_directory rstore path >>= fun hash ->
-        Hashtbl.add rstore (Fpath.to_dir_path path) (hash, `Dir);
+        let path = Option.get (Fpath.relativize ~root path) in
+        Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
+        Hashtbl.add rstore path (hash, `Dir);
         Fiber.return (Some hash)
     | _ -> Fiber.return None
   in
   let open Stream in
   let paths =
     Stream.of_iter @@ fun f ->
-    Filesystem.fold ~dotfiles:false ~f:(fun path () -> f path) () path
+    Filesystem.fold ~dotfiles:false ~f:(fun path () -> f path) () root
   in
   let hashes = Stream.filter_map compute paths in
   (* XXX(dinosaure): populate [rstore] and [store]. *)
   Stream.to_list hashes >>= fun hashes ->
-  let hash_of_root =
-    if Sys.is_directory (Fpath.to_string path) then
-      let hash, _ = Hashtbl.find rstore (Fpath.to_dir_path path) in
-      Some hash
-    else None
+  let hash_of_root, path =
+    if Sys.is_directory (Fpath.to_string root) then
+      let hash, _ = Hashtbl.find rstore (Fpath.v "./") in
+      (Some hash, Fpath.to_dir_path root)
+    else (None, root)
   in
   let store = Hashtbl.create (Hashtbl.length rstore) in
   Hashtbl.iter (fun v (k, _) -> Hashtbl.add store k v) rstore;
@@ -372,7 +381,8 @@ let store path =
   let hashes =
     match hash_of_root with Some hash -> hash :: hashes | None -> hashes
   in
-  Fiber.return (Stream.of_list hashes, { store; rstore; root = hash_of_root })
+  Fiber.return
+    (Stream.of_list hashes, { store; rstore; root = hash_of_root; path })
 
 let make ?level ~reporter store =
   let length = length store in
@@ -387,38 +397,43 @@ let encode_header_of_file ~length =
     c := !l land 0x7f;
     l := !l asr 7
   done;
+  Buffer.add_char buf (Char.chr !c);
   Buffer.contents buf
 
-let make_one ?(level = 4) ?g ~reporter path =
+let make_one ?(level = 4) ~reporter path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
   | Error _ as err -> Fiber.return err
   | Ok file ->
-      let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\0001" in
+      let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\001" in
       let hdr_entry =
         encode_header_of_file
           ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
       in
-      let q = De.Queue.create 0x1000 in
-      let w = De.Lz77.make_window ~bits:15 in
-      let deflate_zlib = Stream.Flow.deflate_zlib ~q ~w ~level in
-      let file = Stream.Stream.via deflate_zlib file in
-      let path = Temp.random_temporary_path ?g "pack-%s.pack" in
       let hdr = hdr ^ hdr_entry in
       let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
+      let ctx = ref SHA256.empty in
+      let q = De.Queue.create 0x1000 in
+      let w = De.Lz77.make_window ~bits:15 in
       let open Stream in
-      Stream.into
-        Sink.(zip (file path) (SHA256.sink_bigstring ()))
-        Stream.(Infix.(singleton hdr ++ file))
-      >>= fun ((), hash) ->
-      let hash =
-        bigstring_of_string
-          (SHA256.to_raw_string hash)
-          ~off:0 ~len:SHA256.length
+      let zlib = Flow.deflate_zlib ~q ~w ~level in
+      let file =
+        Stream.tap
+          (fun bstr ->
+            ctx := SHA256.feed_bigstring !ctx bstr;
+            Fiber.return ())
+          file
       in
-      Stream.into (Sink.file ~erase:false path) (Stream.singleton hash)
-      >>= fun () ->
-      reporter () >>= fun () -> Fiber.return (Ok path)
+      let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
+      let file = Stream.via zlib file in
+      Stream.Infix.(
+        Stream.singleton hdr ++ file
+        ++ Stream.of_fiber (fun () ->
+               (Fiber.return
+               <.> bigstring_of_string ~off:0 ~len:SHA256.length
+               <.> SHA256.to_raw_string <.> SHA256.get)
+                 !ctx))
+      |> fun stream -> Fiber.return (Ok stream)
 
 module First_pass = Carton.Dec.Fp (SHA256)
 module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)
@@ -496,6 +511,7 @@ and peek ~reporter src rest source = function
   | `Peek decoder ->
       let src'_len = String.length rest
       and src_off = First_pass.src_rem decoder in
+      Log.debug (fun m -> m "Peek %d bytes from the given flow." src'_len);
       let len = min src'_len (Bigarray.Array1.dim src - src_off) in
       bigstring_blit_from_string rest ~src_off:0 src ~dst_off:src_off ~len;
       if String.length rest - len = 0 then

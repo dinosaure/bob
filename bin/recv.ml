@@ -1,3 +1,4 @@
+open Stdbob
 open Prgrss
 
 let choose = function
@@ -38,35 +39,29 @@ let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Connect.connect socket sockaddr |> function
-  | Error err ->
-      Fmt.epr "%s: %a.\n%!" Sys.executable_name Connect.pp_error err;
-      Fiber.return 1
-  | Ok () -> (
-      Logs.debug (fun m -> m "The client is connected to the relay.");
-      let choose = choose yes in
-      Bob_clear.client socket ~choose ~g ~password >>= function
-      | Ok (identity, ciphers, shared_keys) -> (
-          let config = Progress.Config.v ~ppf:Fmt.stdout () in
-          let sockaddr =
-            Transfer.sockaddr_with_secure_port sockaddr secure_port
-          in
-          save_with_reporter quiet ~config ~g ~identity ~ciphers ~shared_keys
-            sockaddr
-          >>= function
-          | Ok path ->
-              extract_with_reporter quiet ~config path >>= fun _ ->
-              Fiber.return 0
-          | Error err ->
-              Fmt.epr "%s: %a.\n%!" Sys.executable_name Transfer.pp_error err;
-              Fiber.return 1)
-      | Error err ->
-          Fmt.epr "%s: %a.\n%!" Sys.executable_name Bob_clear.pp_error err;
-          Fiber.return 1)
+  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
+  >>? fun () ->
+  Logs.debug (fun m -> m "The client is connected to the relay.");
+  let choose = choose yes in
+  Bob_clear.client socket ~choose ~g ~password
+  >>? fun (identity, ciphers, shared_keys) ->
+  let config = Progress.Config.v ~ppf:Fmt.stdout () in
+  let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
+  save_with_reporter quiet ~config ~g ~identity ~ciphers ~shared_keys sockaddr
+  >>| Transfer.open_error
+  >>? fun path ->
+  extract_with_reporter quiet ~config path >>= fun _ -> Fiber.return (Ok ())
+
+let pp_error ppf = function
+  | #Transfer.error as err -> Transfer.pp_error ppf err
+  | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
 
 let run quiet g sockaddr secure_port password yes =
-  let code = Fiber.run (run_client quiet g sockaddr secure_port password yes) in
-  `Ok code
+  match Fiber.run (run_client quiet g sockaddr secure_port password yes) with
+  | Ok () -> `Ok 0
+  | Error err ->
+      Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err;
+      `Ok 1
 
 open Cmdliner
 open Args

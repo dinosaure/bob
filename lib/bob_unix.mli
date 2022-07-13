@@ -51,7 +51,9 @@ module Make (IO : IO) : sig
     IO.fd ->
     g:Random.State.t ->
     secret:Spoke.secret ->
-    (string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys, error) result
+    ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
+      [> error ] )
+    result
     Fiber.t
   (** [server socket ~g ~secret] tries to find {i via} a relay (represented by
       the given [socket]), a peer which shares the same password as you. *)
@@ -61,7 +63,9 @@ module Make (IO : IO) : sig
     choose:(string -> [ `Accept | `Refuse ] Fiber.t) ->
     g:Random.State.t ->
     password:string ->
-    (string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys, error) result
+    ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
+      [> error ] )
+    result
     Fiber.t
   (** [client socket ~choose ~g ~password] tries to find {i via} a relay
       (represented by the given [socket]), a peer which shares the same password

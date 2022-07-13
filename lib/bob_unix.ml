@@ -174,18 +174,22 @@ module Make (IO : IO) = struct
     | Error err, _ -> IO.close socket >>= fun () -> Fiber.return (Error err)
     | _, Error err -> IO.close socket >>= fun () -> Fiber.return (Error err)
 
+  let open_error = function Ok _ as v -> v | Error #error as v -> v
+
   let server socket ~g ~secret =
     let t = Bob.Server.hello ~g ~secret in
     let choose _ = assert false in
     let agreement _ = assert false in
     run ~choose ~agreement ~receive:Bob.Server.receive ~send:Bob.Server.send
       socket t
+    >>| open_error
 
   let client socket ~choose ~g ~password =
     let identity = Unix.gethostname () in
     let t = Bob.Client.make ~g ~password ~identity in
     run ~choose ~agreement:Bob.Client.agreement ~receive:Bob.Client.receive
       ~send:Bob.Client.send socket t
+    >>| open_error
 
   let relay ?(timeout = 3600.) socket rooms ~stop =
     let t = Bob.Relay.make () in

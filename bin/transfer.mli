@@ -1,6 +1,6 @@
 type error =
   [ Bob_unix.error
-  | `Connect of Connect.error
+  | `Connect of Unix.error
   | `Crypto of
     [ `Closed
     | `Corrupted
@@ -8,6 +8,7 @@ type error =
     | `Wr of [ `Closed | `Unix of Unix.error ] ] ]
 
 val pp_error : error Fmt.t
+val open_error : ('a, error) result -> ('a, [> error ]) result
 val sockaddr_with_secure_port : Unix.sockaddr -> int -> Unix.sockaddr
 
 val transfer :

@@ -25,6 +25,7 @@ let always x _ = x
 let ( <.> ) f g x = f (g x)
 let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 let io_buffer_size = 65536
+let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 
 let bigstring_blit src ~src_off dst ~dst_off ~len =
   let len0 = len land 3 in

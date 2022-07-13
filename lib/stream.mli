@@ -68,6 +68,7 @@ module Flow : sig
   val compose : ('a, 'b) flow -> ('b, 'c) flow -> ('a, 'c) flow
   val ( << ) : ('a, 'b) flow -> ('b, 'c) flow -> ('a, 'c) flow
   val ( >> ) : ('b, 'c) flow -> ('a, 'b) flow -> ('a, 'c) flow
+  val tap : ('a -> unit Fiber.t) -> ('a, 'a) flow
 
   (** {3: Buffering.} *)
 
@@ -93,9 +94,11 @@ module Stream : sig
   val filter_map : ('a -> 'b option Fiber.t) -> 'a stream -> 'b stream
   val of_iter : (('a -> unit Fiber.t) -> unit Fiber.t) -> 'a stream
   val iterate : f:('a -> 'a Fiber.t) -> 'a -> 'a stream
+  val tap : ('a -> unit Fiber.t) -> 'a stream -> 'a stream
 
   (** {3: Basics.} *)
 
+  val of_fiber : (unit -> 'a Fiber.t) -> 'a stream
   val of_list : 'a list -> 'a stream
   val to_list : 'a stream -> 'a list Fiber.t
   val of_array : 'a array -> 'a stream

@@ -1,3 +1,5 @@
+open Stdbob
+
 let sockaddr_with_secure_port sockaddr secure_port =
   match sockaddr with
   | Unix.ADDR_INET (inet_addr, _) -> Unix.ADDR_INET (inet_addr, secure_port)
@@ -33,29 +35,25 @@ module Crypto = Bob_unix.Crypto.Make (struct
     go buffer off len
 end)
 
-let ( >>? ) x f =
-  Fiber.(x >>= function Ok x -> f x | Error err -> return (Error err))
-
-let reword_error f = function Ok v -> Ok v | Error err -> Error (f err)
-
 type error =
   [ Bob_unix.error
-  | `Connect of Connect.error
+  | `Connect of Unix.error
   | `Crypto of [ Crypto.write_error | Crypto.error ] ]
 
 let pp_error ppf = function
-  | `Connect err -> Connect.pp_error ppf err
+  | `Connect errno -> Fmt.pf ppf "connect(): %s" (Unix.error_message errno)
   | `Crypto (#Crypto.write_error as err) -> Crypto.pp_write_error ppf err
   | `Crypto (#Crypto.error as err) -> Crypto.pp_error ppf err
   | #Bob_unix.error as err -> Bob_unix.pp_error ppf err
+
+let open_error = function Ok _ as v -> v | Error #error as v -> v
 
 let transfer ?(chunk = 0x1000) ?(reporter = Fiber.ignore) ~identity ~ciphers
     ~shared_keys sockaddr fpath =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.return (Connect.connect socket sockaddr)
-  >>| reword_error (fun err -> `Connect err)
+  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
@@ -86,8 +84,7 @@ let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.return (Connect.connect socket sockaddr)
-  >>| reword_error (fun err -> `Connect err)
+  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->

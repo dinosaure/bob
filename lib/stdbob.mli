@@ -6,6 +6,7 @@ val identity : 'a -> 'a
 val always : 'a -> 'b -> 'a
 val ( <.> ) : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b
 val msgf : ('a, Format.formatter, unit, [> `Msg of string ]) format4 -> 'a
+val reword_error : ('e0 -> 'e1) -> ('a, 'e0) result -> ('a, 'e1) result
 val io_buffer_size : int
 
 val bigstring_blit :

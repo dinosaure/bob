@@ -12,6 +12,7 @@ let bind t f k = t (fun x -> f x k)
 let both a b = bind a (fun a -> bind b (fun b -> return (a, b)))
 let ( >>= ) = bind
 let ( >>| ) t f k = t (fun x -> k (f x))
+let ( >>? ) x f = x >>= function Ok x -> f x | Error err -> return (Error err)
 let catch f handler k = try f () k with exn -> handler exn k
 
 (* Fibers *)
@@ -190,12 +191,22 @@ let pwr = Hashtbl.create 0x100
 let write fd bstr ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t
     =
   match Hashtbl.find_opt pwr fd with
-  | Some (_, ivar) -> Ivar.read ivar
-  | None ->
+  | Some (`Write (_, ivar)) -> Ivar.read ivar
+  | _ ->
       let ivar : (int, [ `Closed | `Unix of Unix.error ]) result Ivar.t =
         Ivar.create ()
       in
-      Hashtbl.add pwr fd ((bstr, off, len), ivar);
+      Hashtbl.add pwr fd (`Write ((bstr, off, len), ivar));
+      Ivar.read ivar
+
+let connect fd sockaddr : (unit, Unix.error) result t =
+  match Hashtbl.find_opt pwr fd with
+  | Some (`Connect (_sockaddr', ivar)) ->
+      Ivar.read ivar
+      (* TODO(dinosaure): we should check if [sockaddr = _sockaddr']. *)
+  | _ ->
+      let ivar : (unit, Unix.error) result Ivar.t = Ivar.create () in
+      Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
       Ivar.read ivar
 
 let close fd =
@@ -216,9 +227,12 @@ let close fd =
       Ivar.fill ivar (line_of_queue queue)
   | None -> ());
   (match Hashtbl.find_opt pwr fd with
-  | Some (_, ivar) ->
+  | Some (`Write (_, ivar)) ->
       Hashtbl.remove pwr fd;
       Ivar.fill ivar (Error `Closed)
+  | Some (`Connect (_, ivar)) ->
+      Hashtbl.remove pwr fd;
+      Ivar.fill ivar (Error Unix.EBADF)
   | None -> ());
   return ()
 
@@ -293,7 +307,13 @@ external bigstring_write :
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with
   | None -> ()
-  | Some ((bstr, off, len), ivar) -> (
+  | Some (`Connect (sockaddr, ivar)) -> (
+      Hashtbl.remove pwr fd;
+      try
+        Unix.connect fd sockaddr;
+        Ivar.fill ivar (Ok ())
+      with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
+  | Some (`Write ((bstr, off, len), ivar)) -> (
       let ret = bigstring_write fd bstr off len in
       if ret >= 0 then (
         Hashtbl.remove pwr fd;

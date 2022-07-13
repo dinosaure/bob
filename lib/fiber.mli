@@ -35,6 +35,9 @@ val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
 val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
 val ( >>| ) : 'a t -> ('a -> 'b) -> 'b t
 
+val ( >>? ) :
+  ('a, 'e) result t -> ('a -> ('b, 'e) result t) -> ('b, 'e) result t
+
 module Ivar : sig
   type 'a t
 
@@ -100,6 +103,7 @@ val really_read :
   int ->
   (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result t
 
+val connect : Unix.file_descr -> Unix.sockaddr -> (unit, Unix.error) result t
 val close : Unix.file_descr -> unit t
 val accept : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t
 val sleep : float -> unit t
