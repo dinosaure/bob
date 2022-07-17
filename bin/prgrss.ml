@@ -37,6 +37,17 @@ let make_verify_bar ~total =
       const "verified object(s)";
     ]
 
+let make_extract_bar ~total =
+  let open Progress.Line in
+  let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
+  list
+    [
+      const ">>>";
+      brackets @@ bar ~style ~width:(`Fixed 30) total;
+      count_to total;
+      const "extracted object(s)";
+    ]
+
 let make_tranfer_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in

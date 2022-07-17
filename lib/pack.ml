@@ -167,9 +167,11 @@ let load_directory rstore ~root path =
   Carton.Dec.v ~kind:`B
     (bigstring_of_string str ~off:0 ~len:(String.length str))
 
-let load_root path hash =
+let load_root ~real_length path hash =
   let basename = Fpath.basename path in
-  let entry = Fmt.str "%s\000%s" basename (SHA256.to_raw_string hash) in
+  let entry =
+    Fmt.str "%s\000%s%d" basename (SHA256.to_raw_string hash) real_length
+  in
   Fiber.return
     (Carton.Dec.v ~kind:`A
        (bigstring_of_string entry ~off:0 ~len:(String.length entry)))
@@ -179,7 +181,8 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
   match (Hashtbl.find_opt store.store hash, store.root) with
   | None, Some (hash_of_root, hash_of_tree) when hash_of_root = hash ->
       Log.debug (fun m -> m "Load root object.");
-      Scheduler.inj (load_root store.path hash_of_tree)
+      let real_length = Hashtbl.length store.rstore in
+      Scheduler.inj (load_root ~real_length store.path hash_of_tree)
   | Some path, _ -> (
       let real_path = Fpath.(store.path // path) in
       let stat = Unix.stat Fpath.(to_string real_path) in
@@ -368,10 +371,7 @@ let hash_of_directory ~root rstore path =
         | Some (hash, `Dir) -> Some (Fpath.(to_dir_path (v entry)), hash)
         | Some (hash, `Reg) -> Some (Fpath.v entry, hash)
         | Some (_, `Root) -> None
-        | None ->
-            Log.err (fun m ->
-                m "%a not found into the current store." Fpath.pp key);
-            None)
+        | None -> None)
       entries
   in
   let open Fiber in
@@ -382,9 +382,11 @@ let hash_of_directory ~root rstore path =
   let hdr = Fmt.str "tree %d\000" (String.length str) in
   Stream.(into (SHA256.sink_string ()) (double hdr str))
 
-let hash_of_root ~root hash =
+let hash_of_root ~real_length ~root hash =
   let str =
-    Fmt.str "%s\000%s" (Fpath.basename root) (SHA256.to_raw_string hash)
+    Fmt.str "%s\000%s%d" (Fpath.basename root)
+      (SHA256.to_raw_string hash)
+      real_length
   in
   let hdr = Fmt.str "commit %d\000" (String.length str) in
   SHA256.digest_string (hdr ^ str)
@@ -426,7 +428,8 @@ let store root =
   let hashes_for_directory =
     if Sys.is_directory (Fpath.to_string root) then (
       let hash_of_tree, _ = Hashtbl.find rstore root in
-      let hash_of_root = hash_of_root ~root hash_of_tree in
+      let real_length = Hashtbl.length rstore in
+      let hash_of_root = hash_of_root ~real_length ~root hash_of_tree in
       Log.debug (fun m -> m "Hash of root: %a" SHA256.pp hash_of_root);
       Log.debug (fun m ->
           m "Hash of tree: %a (%a)" SHA256.pp hash_of_tree Fpath.pp root);
@@ -1013,17 +1016,21 @@ let readdir ~path contents =
   let stop = Fiber.ignore in
   Stream.Source { init; pull; stop }
 
-let rec create_filesystem pack =
+let rec create_filesystem ~reporter pack =
   let init = Fiber.always pack in
   let push pack = function
-    | `Dir (path, hash) -> create_directory pack path hash
-    | `Reg (path, hash) -> create_file pack path hash
+    | `Dir (path, hash) ->
+        reporter 1;
+        create_directory ~reporter pack path hash
+    | `Reg (path, hash) ->
+        reporter 1;
+        create_file pack path hash
   in
   let full _ = Fiber.return false in
   let stop _ = Fiber.return () in
   Stream.Sink { init; push; full; stop }
 
-and create_directory pack path hash =
+and create_directory ~reporter pack path hash =
   if not (Sys.file_exists (Fpath.to_string path)) then
     Sys.mkdir (Fpath.to_string path) 0o755;
   let contents =
@@ -1037,7 +1044,7 @@ and create_directory pack path hash =
     Bigarray.Array1.sub (Carton.Dec.raw contents) 0 (Carton.Dec.len contents)
   in
   Stream.Stream.run ~from:(readdir ~path contents) ~via:Stream.Flow.identity
-    ~into:(create_filesystem pack)
+    ~into:(create_filesystem ~reporter pack)
   >>= function
   | (), None -> Fiber.return pack
   | (), Some _ -> failwith "Tree entry partially consumed"

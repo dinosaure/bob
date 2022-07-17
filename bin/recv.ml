@@ -98,7 +98,6 @@ let extract_with_reporter quiet ~config ?g
       Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle tmp status
       >>= fun () ->
       finalise ();
-      Fmt.pr ">>> PACK file saved into: %a.\n%!" Fpath.pp tmp;
       match
         Array.find_opt (fun status -> Pack.kind_of_status status = `A) status
       with
@@ -139,14 +138,27 @@ let extract_with_reporter quiet ~config ?g
             bigstring_to_string
               (Bigarray.Array1.sub (Carton.Dec.raw root) 0 (Carton.Dec.len root))
           in
-          let[@warning "-8"] [ name; hash ] =
+          let[@warning "-8"] (name :: rest) =
             String.split_on_char '\000' root
           in
-          Fmt.pr ">>> %S:%a.\n%!" name Digestif.SHA1.pp
-            (Digestif.SHA1.of_raw_string hash);
-          Pack.create_directory pack (Fpath.v name)
-            (Digestif.SHA1.of_raw_string hash)
-          >>= fun _ -> Fiber.return (Ok ()))
+          let rest = String.concat "\000" rest in
+          let hash =
+            Digestif.SHA1.of_raw_string
+              (String.sub rest 0 Digestif.SHA1.digest_size)
+          in
+          let total =
+            int_of_string
+              (String.sub rest Digestif.SHA1.digest_size
+                 (String.length rest - Digestif.SHA1.digest_size))
+          in
+          Fmt.pr ">>> Received a directory: %s\n%!" name;
+          with_reporter ~config quiet (make_extract_bar ~total)
+          @@ fun (reporter, finalise) ->
+          reporter 2;
+          (* XXX(dinosaure): the commit and the root directory. *)
+          Pack.create_directory ~reporter pack (Fpath.v name) hash >>= fun _ ->
+          finalise ();
+          Fiber.return (Ok ()))
 
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in

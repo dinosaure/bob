@@ -96,6 +96,7 @@ val verify :
 val extract_file : file:status -> name:status -> Fpath.t -> unit Fiber.t
 
 val create_directory :
+  reporter:(int -> unit) ->
   (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t ->
   Fpath.t ->
   Digestif.SHA1.t ->
