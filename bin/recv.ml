@@ -25,6 +25,16 @@ let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
     ~reporter:(Fiber.return <.> reporter)
     ~finalise ~identity ~ciphers ~shared_keys sockaddr
 
+let make_window bits = De.make_window ~bits
+
+let map (fd, st) ~pos len =
+  let len = min (Int64.sub st.Unix.LargeFile.st_size pos) (Int64.of_int len) in
+  let len = Int64.to_int len in
+  let res =
+    Unix.map_file fd ~pos Bigarray.char Bigarray.c_layout false [| len |]
+  in
+  Bigarray.array1_of_genarray res
+
 let extract_with_reporter quiet ~config ?g
     (from : Stdbob.bigstring Stream.source) =
   let open Fiber in
@@ -55,7 +65,7 @@ let extract_with_reporter quiet ~config ?g
         ~into:(Sink.file (Fpath.v name))
       >>= fun ((), _source) ->
       Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
-  | Some (`Elt entry, decoder, src, off), leftover ->
+  | Some (`Elt entry, decoder, src, off), leftover -> (
       let from =
         match leftover with
         | Some leftover when Bigarray.Array1.dim src - off > 0 ->
@@ -88,7 +98,55 @@ let extract_with_reporter quiet ~config ?g
       Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle tmp status
       >>= fun () ->
       finalise ();
-      Fiber.return (Ok ())
+      Fmt.pr ">>> PACK file saved into: %a.\n%!" Fpath.pp tmp;
+      match
+        Array.find_opt (fun status -> Pack.kind_of_status status = `A) status
+      with
+      | None -> Fiber.return (Error `No_root)
+      | Some root ->
+          let fd =
+            Unix.openfile (Fpath.to_string tmp) Unix.[ O_RDONLY ] 0o644
+          in
+          let st = Unix.LargeFile.stat (Fpath.to_string tmp) in
+          let id =
+            Array.fold_left
+              (fun tbl status ->
+                Hashtbl.add tbl
+                  (Pack.uid_of_status status)
+                  (Pack.offset_of_status status);
+                tbl)
+              (Hashtbl.create 0x100) status
+          in
+          let find uid =
+            Logs.debug (fun m -> m "Try to find: %a." Digestif.SHA1.pp uid);
+            Hashtbl.find id uid
+          in
+          let pack =
+            Carton.Dec.make (fd, st) ~allocate:make_window
+              ~z:(De.bigstring_create De.io_buffer_size)
+              ~uid_ln:Digestif.SHA1.digest_size
+              ~uid_rw:Digestif.SHA1.of_raw_string find
+          in
+          let root =
+            Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null
+              (Pack.offset_of_status root)
+            |> fun weight ->
+            let raw = Carton.Dec.make_raw ~weight in
+            Carton.Dec.of_offset ~map pack raw
+              ~cursor:(Pack.offset_of_status root)
+          in
+          let root =
+            bigstring_to_string
+              (Bigarray.Array1.sub (Carton.Dec.raw root) 0 (Carton.Dec.len root))
+          in
+          let[@warning "-8"] [ name; hash ] =
+            String.split_on_char '\000' root
+          in
+          Fmt.pr ">>> %S:%a.\n%!" name Digestif.SHA1.pp
+            (Digestif.SHA1.of_raw_string hash);
+          Pack.create_directory pack (Fpath.v name)
+            (Digestif.SHA1.of_raw_string hash)
+          >>= fun _ -> Fiber.return (Ok ()))
 
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
@@ -110,6 +168,7 @@ let pp_error ppf = function
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
+  | `No_root -> Fmt.pf ppf "The given PACK file has no root"
 
 let run quiet g sockaddr secure_port password yes =
   match Fiber.run (run_client quiet g sockaddr secure_port password yes) with

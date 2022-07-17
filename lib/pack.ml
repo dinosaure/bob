@@ -36,15 +36,17 @@ let scheduler =
 
 type store = {
   store : (SHA256.t, Fpath.t) Hashtbl.t;
-  rstore : (Fpath.t, SHA256.t * [ `Dir | `Reg ]) Hashtbl.t;
-  root : SHA256.t option;
+  rstore : (Fpath.t, SHA256.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
+  root : (SHA256.t * SHA256.t) option;
   path : Fpath.t;
 }
 
-let length { rstore; root; _ } =
-  match root with
-  | Some _ -> Hashtbl.length rstore + 1
-  | None -> Hashtbl.length rstore
+let length { rstore; _ } =
+  let module Set = Set.Make (SHA256) in
+  let hashes =
+    Hashtbl.fold (fun _ (hash, _) set -> Set.add hash set) rstore Set.empty
+  in
+  Set.cardinal hashes
 
 module Filesystem = struct
   let readdir =
@@ -90,13 +92,24 @@ let rec full_read fd ba off len =
     | len' when len - len' > 0 -> full_read fd ba (off + len') (len - len')
     | _ -> ()
 
+let rec full_write ~path fd bstr off len =
+  let open Fiber in
+  Fiber.write fd bstr ~off ~len >>= function
+  | Ok len' when len' - len = 0 -> Fiber.return fd
+  | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
+  | Error `Closed ->
+      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Fpath.pp path
+  | Error (`Unix errno) ->
+      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
+        (Unix.error_message errno)
+
 (* XXX(dinosaure): [mmap] can be a solution here but it seems that the kernel
    does many page-faults if the usage is load many files. [mmap] becomes
    interesting when we load several times the same file at different offsets
    (cc XXX(rand)). We will stay simple and see how we can improve that. *)
 let load_file path =
   let open Fiber in
-  Log.debug (fun m -> m "Load the file: %a.\n%!" Fpath.pp path);
+  Log.debug (fun m -> m "Load the file: %a." Fpath.pp path);
   let len = (Unix.stat (Fpath.to_string path)).Unix.st_size in
   Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
   | Ok fd ->
@@ -127,14 +140,24 @@ let serialize_directory entries =
         [ "100644 "; Fpath.to_string p; "\x00"; SHA256.to_raw_string hash ]
       |> Fiber.return
 
-let load_directory rstore path =
-  let entries = Filesystem.readdir path in
+let load_directory rstore ~root path =
+  Log.debug (fun m -> m "Load directory: %a." Fpath.pp path);
+  let entries = Filesystem.readdir Fpath.(root // path) in
   let entries =
     List.filter_map
       (fun entry ->
-        match Hashtbl.find_opt rstore Fpath.(path / entry) with
+        let key = Fpath.(path / entry) in
+        let key = Fpath.relativize ~root key in
+        Log.debug (fun m ->
+            m "relativize root:%a %a" Fpath.pp root Fpath.pp path);
+        let key =
+          match key with Some key -> key | None -> Fpath.(path / entry)
+        in
+        Log.debug (fun m -> m "Try to find: %a." Fpath.pp key);
+        match Hashtbl.find_opt rstore key with
         | Some (hash, `Dir) -> Some (Fpath.(to_dir_path (v entry)), hash)
         | Some (hash, `Reg) -> Some (Fpath.v entry, hash)
+        | Some (_, `Root) -> None
         | None -> None)
       entries
   in
@@ -154,15 +177,19 @@ let load_root path hash =
 let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
   match (Hashtbl.find_opt store.store hash, store.root) with
+  | None, Some (hash_of_root, hash_of_tree) when hash_of_root = hash ->
+      Log.debug (fun m -> m "Load root object.");
+      Scheduler.inj (load_root store.path hash_of_tree)
   | Some path, _ -> (
-      let path = Fpath.(store.path // path) in
-      let stat = Unix.stat Fpath.(to_string path) in
+      let real_path = Fpath.(store.path // path) in
+      let stat = Unix.stat Fpath.(to_string real_path) in
+      Log.debug (fun m ->
+          m "Load %a object (%a)." Fpath.pp path Fpath.pp real_path);
       match stat.Unix.st_kind with
-      | Unix.S_REG -> Scheduler.inj (load_file path)
-      | Unix.S_DIR -> Scheduler.inj (load_directory store.rstore path)
+      | Unix.S_REG -> Scheduler.inj (load_file real_path)
+      | Unix.S_DIR ->
+          Scheduler.inj (load_directory store.rstore ~root:store.path path)
       | _ -> failwith "Invalid kind of object")
-  | None, Some hash' when SHA256.equal hash hash' ->
-      Scheduler.inj (load_root store.path hash')
   | None, (Some _ | None) ->
       Log.err (fun m -> m "The object %a does not exists." SHA256.pp hash);
       raise Not_found
@@ -242,6 +269,7 @@ let rec encode_target t ~push ~acc encoder =
 let pack ~reporter ?level ~length store =
   let flow (Stream.Sink k) =
     let init () =
+      Log.debug (fun m -> m "Start to encode a PACK file.");
       let uid =
         {
           Carton.Enc.uid_ln = SHA256.digest_size;
@@ -283,7 +311,9 @@ let pack ~reporter ?level ~length store =
                 m "Ask where is %a: %08Lx (anchor: %08Lx)." SHA256.pp hash v
                   anchor);
             Fiber.return (Some (Int64.to_int v))
-        | None -> Fiber.return None
+        | None ->
+            Log.err (fun m -> m "%a not found." SHA256.pp hash);
+            Fiber.return None
       in
 
       Log.debug (fun m ->
@@ -327,27 +357,45 @@ let hash_of_filename path =
   | Error (`Msg err) -> Fmt.failwith "%s." err
   | Ok stream -> Stream.(into (SHA256.sink_bigstring ~ctx ()) stream)
 
-let hash_of_directory rstore path =
+let hash_of_directory ~root rstore path =
   let entries = Filesystem.readdir path in
   let entries =
     List.filter_map
       (fun entry ->
-        match Hashtbl.find_opt rstore Fpath.(path / entry) with
+        let key = Fpath.(path / entry) in
+        let key = Option.get (Fpath.relativize ~root key) in
+        match Hashtbl.find_opt rstore key with
         | Some (hash, `Dir) -> Some (Fpath.(to_dir_path (v entry)), hash)
         | Some (hash, `Reg) -> Some (Fpath.v entry, hash)
-        | None -> None)
+        | Some (_, `Root) -> None
+        | None ->
+            Log.err (fun m ->
+                m "%a not found into the current store." Fpath.pp key);
+            None)
       entries
   in
   let open Fiber in
   let open Stream in
   Stream.to_string (serialize_directory entries) >>= fun str ->
+  Log.debug (fun m -> m "Serialization of %a:" Fpath.pp path);
+  Log.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
   let hdr = Fmt.str "tree %d\000" (String.length str) in
   Stream.(into (SHA256.sink_string ()) (double hdr str))
 
+let hash_of_root ~root hash =
+  let str =
+    Fmt.str "%s\000%s" (Fpath.basename root) (SHA256.to_raw_string hash)
+  in
+  let hdr = Fmt.str "commit %d\000" (String.length str) in
+  SHA256.digest_string (hdr ^ str)
+
 let store root =
   let open Fiber in
-  let rstore = Hashtbl.create 0x100 in
+  let rstore : (Fpath.t, SHA256.t * [ `Reg | `Dir | `Root ]) Hashtbl.t =
+    Hashtbl.create 0x100
+  in
   let compute path =
+    Log.debug (fun m -> m "Compute %a." Fpath.pp path);
     let stat = Unix.stat (Fpath.to_string path) in
     match stat.Unix.st_kind with
     | Unix.S_REG ->
@@ -357,8 +405,8 @@ let store root =
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
-        let path = Fpath.to_dir_path path in
-        hash_of_directory rstore path >>= fun hash ->
+        Log.debug (fun m -> m "Calculate the hash of %a" Fpath.pp path);
+        hash_of_directory ~root rstore path >>= fun hash ->
         let path = Stdlib.Option.get (Fpath.relativize ~root path) in
         Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Dir);
@@ -373,21 +421,33 @@ let store root =
   let hashes = Stream.filter_map compute paths in
   (* XXX(dinosaure): populate [rstore] and [store]. *)
   Stream.to_list hashes >>= fun hashes ->
-  let hash_of_root, path =
-    if Sys.is_directory (Fpath.to_string root) then
-      let hash, _ = Hashtbl.find rstore (Fpath.v "./") in
-      (Some hash, Fpath.to_dir_path root)
-    else (None, root)
-  in
   let store = Hashtbl.create (Hashtbl.length rstore) in
   Hashtbl.iter (fun v (k, _) -> Hashtbl.add store k v) rstore;
-  Log.debug (fun m ->
-      m "The store contains %d objects." (Hashtbl.length rstore));
-  let hashes =
-    match hash_of_root with Some hash -> hash :: hashes | None -> hashes
+  let hashes_for_directory =
+    if Sys.is_directory (Fpath.to_string root) then (
+      let hash_of_tree, _ = Hashtbl.find rstore root in
+      let hash_of_root = hash_of_root ~root hash_of_tree in
+      Log.debug (fun m -> m "Hash of root: %a" SHA256.pp hash_of_root);
+      Log.debug (fun m ->
+          m "Hash of tree: %a (%a)" SHA256.pp hash_of_tree Fpath.pp root);
+      Hashtbl.add rstore (Fpath.v "./") (hash_of_root, `Root);
+      Some (hash_of_root, hash_of_tree))
+    else None
   in
+  let hashes =
+    match hashes_for_directory with
+    | Some (hash_of_root, _) -> hash_of_root :: hashes
+    | None -> hashes
+  in
+  let module Set = Set.Make (SHA256) in
+  let hashes =
+    List.fold_left (fun set hash -> Set.add hash set) Set.empty hashes
+  in
+  let hashes = Set.elements hashes in
+  Log.debug (fun m -> m "Store of %a." Fpath.pp root);
   Fiber.return
-    (Stream.of_list hashes, { store; rstore; root = hash_of_root; path })
+    ( Stream.of_list hashes,
+      { store; rstore; root = hashes_for_directory; path = root } )
 
 let make ?level ~reporter store =
   let length = length store in
@@ -490,6 +550,7 @@ type entry =
 let is_base = Verify.is_base
 let is_resolved = Verify.is_resolved
 let offset_of_status = Verify.offset_of_status
+let uid_of_status = Verify.uid_of_status
 let kind_of_status = Verify.kind_of_status
 
 type decode = [ First_pass.decode | `Keep of First_pass.decode * string ]
@@ -620,6 +681,12 @@ let first_pass ~reporter source =
   in
   Stream.Source { init; pull; stop }
 
+let pp_kind ppf = function
+  | `A -> Fmt.string ppf "A"
+  | `B -> Fmt.string ppf "B"
+  | `C -> Fmt.string ppf "C"
+  | `D -> Fmt.string ppf "D"
+
 let rec until_await_or_peek :
     reporter:(int -> unit Fiber.t) ->
     full:('acc -> bool Fiber.t) ->
@@ -642,9 +709,12 @@ let rec until_await_or_peek :
       Fiber.return (None, None, acc)
   | `Malformed err -> failwith err
   | `Entry (entry, decoder) -> (
-      Log.debug (fun m -> m "Got a new entry!");
       match entry with
       | { First_pass.kind = Base kind; offset; size; _ } -> (
+          Log.debug (fun m ->
+              m "[%08Lx] Got a new entry (base, kind:%a, size:%d byte(s))."
+                offset pp_kind kind
+                (size :> int));
           let elt =
             `Elt
               (offset, Verify.unresolved_base ~cursor:offset, `Base (kind, size))
@@ -918,6 +988,81 @@ let verify ?reporter:(verbose = ignore) ~oracle path matrix =
   Verify.verify ~threads:4 pack ~map ~oracle ~verbose ~matrix >>= fun () ->
   Unix.close fd;
   Fiber.return ()
+
+let v_space = Cstruct.string " "
+let v_null = Cstruct.string "\x00"
+
+let readdir ~path contents =
+  let init () = Fiber.return (Cstruct.of_bigarray contents) in
+  let pull contents =
+    let ( >>= ) = Option.bind in
+    Cstruct.cut ~sep:v_space contents >>= fun (perm, contents) ->
+    Cstruct.cut ~sep:v_null contents >>= fun (name, contents) ->
+    (try Some (Cstruct.sub contents 0 SHA256.length) with _ -> None)
+    >>= fun hash ->
+    let contents = Cstruct.shift contents SHA256.length in
+    let hash = SHA256.of_raw_string (Cstruct.to_string hash) in
+    match Cstruct.to_string perm with
+    | "40000" ->
+        Some (`Dir (Fpath.(path / Cstruct.to_string name), hash), contents)
+    | "100644" ->
+        Some (`Reg (Fpath.(path / Cstruct.to_string name), hash), contents)
+    | _ -> failwith "Invalid kind of entry into a tree"
+  in
+  let pull = Fiber.return <.> pull in
+  let stop = Fiber.ignore in
+  Stream.Source { init; pull; stop }
+
+let rec create_filesystem pack =
+  let init = Fiber.always pack in
+  let push pack = function
+    | `Dir (path, hash) -> create_directory pack path hash
+    | `Reg (path, hash) -> create_file pack path hash
+  in
+  let full _ = Fiber.return false in
+  let stop _ = Fiber.return () in
+  Stream.Sink { init; push; full; stop }
+
+and create_directory pack path hash =
+  if not (Sys.file_exists (Fpath.to_string path)) then
+    Sys.mkdir (Fpath.to_string path) 0o755;
+  let contents =
+    Carton.Dec.weight_of_uid ~map pack ~weight:Carton.Dec.null hash
+    |> fun weight ->
+    let raw = Carton.Dec.make_raw ~weight in
+    Carton.Dec.of_uid ~map pack raw hash
+  in
+  let open Fiber in
+  let contents =
+    Bigarray.Array1.sub (Carton.Dec.raw contents) 0 (Carton.Dec.len contents)
+  in
+  Stream.Stream.run ~from:(readdir ~path contents) ~via:Stream.Flow.identity
+    ~into:(create_filesystem pack)
+  >>= function
+  | (), None -> Fiber.return pack
+  | (), Some _ -> failwith "Tree entry partially consumed"
+
+and create_file pack path hash =
+  let contents =
+    Carton.Dec.weight_of_uid ~map pack ~weight:Carton.Dec.null hash
+    |> fun weight ->
+    let raw = Carton.Dec.make_raw ~weight in
+    Carton.Dec.of_uid ~map pack raw hash
+  in
+  let open Fiber in
+  let bstr =
+    Bigarray.Array1.sub (Carton.Dec.raw contents) 0 (Carton.Dec.len contents)
+  in
+  Fiber.openfile path Unix.[ O_CREAT; O_TRUNC; O_WRONLY; O_APPEND ] 0o644
+  >>= function
+  | Error errno ->
+      Log.err (fun m ->
+          m "Impossible to save %a: %s" Fpath.pp path (Unix.error_message errno));
+      Fiber.return pack
+  | Ok fd ->
+      let open Fiber in
+      full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= Fiber.close
+      >>= fun () -> Fiber.return pack
 
 let extract_file ~file ~name path =
   let fd = Unix.openfile (Fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in

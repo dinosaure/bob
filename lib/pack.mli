@@ -55,6 +55,7 @@ val is_base : status -> bool
 val is_resolved : status -> bool
 val offset_of_status : status -> int64
 val kind_of_status : status -> [ `A | `B | `C | `D ]
+val uid_of_status : status -> Digestif.SHA1.t
 
 val first_pass :
   reporter:(int -> unit Fiber.t) ->
@@ -93,3 +94,9 @@ val verify :
   unit Fiber.t
 
 val extract_file : file:status -> name:status -> Fpath.t -> unit Fiber.t
+
+val create_directory :
+  (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t ->
+  Fpath.t ->
+  Digestif.SHA1.t ->
+  (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t Fiber.t

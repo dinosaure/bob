@@ -41,7 +41,7 @@
  (name pack)
  (public_name bob.pack)
  (modules pack)
- (libraries bob.fiber bob.temp bob.stream unix digestif carton))
+ (libraries bob.fiber bob.temp bob.stream cstruct unix digestif carton))
 
 (library
  (name bob_unix)

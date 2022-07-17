@@ -6,14 +6,17 @@ let compress_with_reporter quiet ~compression ~config store hashes =
     (make_compression_progress ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
+  Logs.debug (fun m -> m "Start deltification.");
   Pack.deltify ~reporter:(Fiber.return <.> reporter) ~compression store hashes
   >>| fun res ->
+  Logs.debug (fun m -> m "Deltification is done.");
   finalise ();
   res
 
 type pack = Stream of Stdbob.bigstring Stream.stream | File of Fpath.t
 
-let emit_with_reporter quiet ?g ?level ~config store objects =
+let emit_with_reporter quiet ?g ?level ~config store
+    (objects : Digestif.SHA1.t Carton.Enc.q Stream.stream) =
   with_reporter ~config quiet
     (make_progress_bar_for_objects ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
