@@ -21,12 +21,11 @@ val transfer :
   Stdbob.bigstring Stream.stream ->
   (unit, error) result Fiber.t
 
-val save :
-  ?g:Random.State.t ->
-  ?tmp:Temp.pattern ->
+val receive :
   ?reporter:(int -> unit Fiber.t) ->
+  ?finalise:(unit -> unit) ->
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
   Unix.sockaddr ->
-  (Fpath.t, error) result Fiber.t
+  (Stdbob.bigstring Stream.source, error) result Fiber.t

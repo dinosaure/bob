@@ -9,6 +9,7 @@ val msgf : ('a, Format.formatter, unit, [> `Msg of string ]) format4 -> 'a
 val reword_error : ('e0 -> 'e1) -> ('a, 'e0) result -> ('a, 'e1) result
 val never : 'a -> 'b
 val io_buffer_size : int
+val bigstring_get_uint8 : bigstring -> int -> int
 
 val bigstring_blit :
   bigstring -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit

@@ -34,13 +34,18 @@ type 'a source =
       -> 'a source
 
 module Source = struct
-  let file path =
+  let file ?offset path =
     let init () =
       Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
-      | Ok fd -> Fiber.return fd
       | Error errno ->
           Fmt.failwith "openfile(%a): %s" Fpath.pp path
             (Unix.error_message errno)
+      | Ok fd -> (
+          match offset with
+          | None -> Fiber.return fd
+          | Some offset ->
+              let _ = Unix.LargeFile.lseek fd offset Unix.SEEK_SET in
+              Fiber.return fd)
     in
     let stop fd = Fiber.close fd in
     let pull fd =
@@ -60,6 +65,13 @@ module Source = struct
       else Fiber.return (Some (arr.(i), succ i))
     in
     Source { init = Fiber.always 0; pull; stop = Fiber.ignore }
+
+  let list lst =
+    let pull = function
+      | [] -> Fiber.return None
+      | x :: r -> Fiber.return (Some (x, r))
+    in
+    Source { init = Fiber.always lst; pull; stop = Fiber.ignore }
 
   let fold f r0 (Source src) =
     let rec go r s =
@@ -93,6 +105,18 @@ module Source = struct
       (fun () -> go s0)
       (fun exn -> src.stop s0 >>= fun () -> raise exn)
 
+  let prepend v (Source source) =
+    let init () = Fiber.return (`Pre v) in
+    let pull = function
+      | `Pre v -> source.init () >>= fun r -> Fiber.return (Some (v, `Src r))
+      | `Src r -> (
+          source.pull r >>= function
+          | Some (v, r) -> Fiber.return (Some (v, `Src r))
+          | None -> Fiber.return None)
+    in
+    let stop = function `Pre _ -> Fiber.return () | `Src r -> source.stop r in
+    Source { init; pull; stop }
+
   let dispose (Source src) = src.init () >>= src.stop
 end
 
@@ -104,6 +128,16 @@ type ('a, 'r) sink =
       stop : 's -> 'r Fiber.t;
     }
       -> ('a, 'r) sink
+
+let rec full_write ~path fd bstr off len =
+  Fiber.write fd bstr ~off ~len >>= function
+  | Ok len' when len' - len = 0 -> Fiber.return fd
+  | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
+  | Error `Closed ->
+      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Fpath.pp path
+  | Error (`Unix errno) ->
+      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
+        (Unix.error_message errno)
 
 module Sink = struct
   let make ~init ~push ?(full = Fiber.always false) ~stop () =
@@ -257,25 +291,20 @@ module Sink = struct
     in
     Sink { init; push; full; stop }
 
+  let to_string =
+    let init () = Fiber.return (Buffer.create 0x100) in
+    let push buf bstr =
+      Buffer.add_string buf (bigstring_to_string bstr);
+      Fiber.return buf
+    in
+    let full = Fiber.always false in
+    let stop buf = Fiber.return (Buffer.contents buf) in
+    Sink { init; push; full; stop }
+
   let is_full (Sink k) = k.init () >>= k.full
 
   let push x (Sink k) =
     Sink { k with init = (fun () -> k.init () >>= fun acc -> k.push acc x) }
-
-  let rec until ~path fd bstr off len =
-    Log.debug (fun m -> m "Write down into a file (%d):" (Obj.magic fd));
-    Log.debug (fun m ->
-        m "@[<hov>%a@]"
-          (Hxd_string.pp Hxd.default)
-          (bigstring_to_string (Bigarray.Array1.sub bstr off len)));
-    Fiber.write fd bstr ~off ~len >>= function
-    | Ok len' when len' - len = 0 -> Fiber.return fd
-    | Ok len' -> until ~path fd bstr (off + len') (len - len')
-    | Error `Closed ->
-        Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Fpath.pp path
-    | Error (`Unix errno) ->
-        Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
-          (Unix.error_message errno)
 
   let file ?(erase = true) path =
     let init () =
@@ -292,7 +321,7 @@ module Sink = struct
       Log.debug (fun m -> m "Push:");
       Log.debug (fun m ->
           m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string bstr));
-      until ~path fd bstr 0 (Bigarray.Array1.dim bstr)
+      full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr)
     in
     let full = Fiber.always false in
     Sink { init; stop; full; push }
@@ -300,13 +329,23 @@ module Sink = struct
   let stdout =
     let init () = Fiber.return () in
     let push () bstr =
-      until ~path:(Fpath.v "<stdout>") Unix.stdout bstr 0
+      full_write ~path:(Fpath.v "<stdout>") Unix.stdout bstr 0
         (Bigarray.Array1.dim bstr)
       >>= fun _stdout -> Fiber.return ()
     in
     let full = Fiber.always false in
     let stop () = Fiber.return () in
     Sink { init; push; full; stop }
+
+  let first =
+    Sink
+      {
+        init = (fun () -> Fiber.return None);
+        push = (fun _ x -> Fiber.return (Some x));
+        full =
+          (function None -> Fiber.return false | Some _ -> Fiber.return true);
+        stop = Fiber.return;
+      }
 end
 
 type ('a, 'b) flow = { flow : 'r. ('b, 'r) sink -> ('a, 'r) sink } [@@unboxed]
@@ -447,6 +486,34 @@ module Flow = struct
       Sink { init; stop; full; push }
     in
     { flow }
+
+  let save_into ?offset path =
+    let flow (Sink k) =
+      let init () =
+        let flags = Unix.[ O_WRONLY; O_CREAT ] in
+        let flags =
+          if Stdlib.Option.is_some offset then flags else Unix.O_APPEND :: flags
+        in
+        Fiber.openfile path flags 0o644 >>= function
+        | Error errno ->
+            Fmt.failwith "openfile(%a): %s" Fpath.pp path
+              (Unix.error_message errno)
+        | Ok fd -> (
+            match offset with
+            | Some offset ->
+                let _ = Unix.LargeFile.lseek fd offset Unix.SEEK_END in
+                k.init () >>= fun acc -> Fiber.return (fd, acc)
+            | None -> k.init () >>= fun acc -> Fiber.return (fd, acc))
+      in
+      let push (fd, acc) bstr =
+        full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= fun fd ->
+        k.push acc bstr >>= fun acc -> Fiber.return (fd, acc)
+      in
+      let full (_, acc) = k.full acc in
+      let stop (fd, acc) = Fiber.close fd >>= fun () -> k.stop acc in
+      Sink { init; stop; full; push }
+    in
+    { flow }
 end
 
 type 'a stream = { stream : 'r. ('a, 'r) sink -> 'r Fiber.t } [@@unboxed]
@@ -463,6 +530,37 @@ let bracket :
     (fun exn -> stop acc >>= fun _ -> raise exn)
 
 module Stream = struct
+  let run ~from:(Source src) ~via:{ flow } ~into:snk =
+    let (Sink snk) = flow snk in
+    let rec loop r s =
+      snk.full r >>= function
+      | true ->
+          snk.stop r >>= fun r' ->
+          let leftover =
+            Source { src with init = (fun () -> Fiber.return s) }
+          in
+          Fiber.return (r', Some leftover)
+      | false -> (
+          src.pull s >>= function
+          | Some (x, s') -> snk.push r x >>= fun r' -> loop r' s'
+          | None ->
+              src.stop s >>= fun () ->
+              snk.stop r >>= fun r' -> Fiber.return (r', None))
+    in
+    snk.init () >>= fun r0 ->
+    snk.full r0 >>= function
+    | true -> snk.stop r0 >>= fun r' -> Fiber.return (r', Some (Source src))
+    | false ->
+        Fiber.catch
+          (fun () -> src.init ())
+          (fun exn -> snk.stop r0 >>= fun _ -> raise exn)
+        >>= fun s0 ->
+        Fiber.catch
+          (fun () -> loop r0 s0)
+          (fun exn ->
+            src.stop s0 >>= fun () ->
+            snk.stop r0 >>= fun _r' -> raise exn)
+
   (* Composition *)
 
   let into sink t = t.stream sink
@@ -640,9 +738,6 @@ module Stream = struct
 
   let to_file path = into (Sink.file path)
   let stdout = into Sink.stdout
-
-  module Infix = struct
-    let ( >>= ) x f = flat_map f x
-    let ( ++ ) = concat
-  end
+  let ( >>= ) x f = flat_map f x
+  let ( ++ ) = concat
 end

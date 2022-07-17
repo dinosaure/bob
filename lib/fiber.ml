@@ -15,6 +15,10 @@ let ( >>| ) t f k = t (fun x -> k (f x))
 let ( >>? ) x f = x >>= function Ok x -> f x | Error err -> return (Error err)
 let catch f handler k = try f () k with exn -> handler exn k
 
+module Option = struct
+  let iter f = function Some x -> f x | None -> return ()
+end
+
 (* Fibers *)
 
 type fiber = Fiber : ('a -> unit t) * 'a -> fiber

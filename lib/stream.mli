@@ -7,13 +7,15 @@ type 'a source =
       -> 'a source
 
 module Source : sig
-  val file : Fpath.t -> Stdbob.bigstring source
+  val file : ?offset:int64 -> Fpath.t -> Stdbob.bigstring source
   val array : 'a array -> 'a source
+  val list : 'a list -> 'a source
   val fold : ('r -> 'a -> 'r Fiber.t) -> 'r -> 'a source -> 'r Fiber.t
   val unfold : 's -> ('s -> ('a * 's) option Fiber.t) -> 'a source
   val iterate : f:('a -> 'a Fiber.t) -> 'a -> 'a source
   val length : 'a source -> int Fiber.t
   val next : 'a source -> ('a * 'a source) option Fiber.t
+  val prepend : 'a -> 'a source -> 'a source
   val dispose : 'a source -> unit Fiber.t
 end
 
@@ -39,6 +41,7 @@ module Sink : sig
   val zip : ('a, 'r1) sink -> ('a, 'r2) sink -> ('a, 'r1 * 'r2) sink
   val fill : 'a -> (_, 'a) sink
   val push : 'a -> ('a, 'r) sink -> ('a, 'r) sink
+  val first : ('a, 'a option) sink
 
   val flat_map :
     ('r1 -> ('a, 'r2) sink Fiber.t) -> ('a, 'r1) sink -> ('a, 'r2) sink
@@ -52,6 +55,7 @@ module Sink : sig
   val list : ('a, 'a list) sink
   val string : (string, string) sink
   val bigstring : (Stdbob.bigstring, Stdbob.bigstring) sink
+  val to_string : (Stdbob.bigstring, string) sink
 
   (** {3: Input & Output.} *)
 
@@ -81,6 +85,11 @@ module Flow : sig
     w:De.Lz77.window ->
     level:int ->
     (Stdbob.bigstring, Stdbob.bigstring) flow
+
+  (** {3: Input & Output.} *)
+
+  val save_into :
+    ?offset:int64 -> Fpath.t -> (Stdbob.bigstring, Stdbob.bigstring) flow
 end
 
 type 'a stream
@@ -108,6 +117,12 @@ module Stream : sig
 
   (** {3: Composition.} *)
 
+  val run :
+    from:'a source ->
+    via:('a, 'b) flow ->
+    into:('b, 'c) sink ->
+    ('c * 'a source option) Fiber.t
+
   val into : ('a, 'b) sink -> 'a stream -> 'b Fiber.t
   val via : ('a, 'b) flow -> 'a stream -> 'b stream
   val from : 'a source -> 'a stream
@@ -120,9 +135,6 @@ module Stream : sig
   val stdin : Stdbob.bigstring stream
   val to_file : Fpath.t -> Stdbob.bigstring stream -> unit Fiber.t
   val stdout : Stdbob.bigstring stream -> unit Fiber.t
-
-  module Infix : sig
-    val ( >>= ) : 'a stream -> ('a -> 'b stream Fiber.t) -> 'b stream
-    val ( ++ ) : 'a stream -> 'a stream -> 'a stream
-  end
+  val ( >>= ) : 'a stream -> ('a -> 'b stream Fiber.t) -> 'b stream
+  val ( ++ ) : 'a stream -> 'a stream -> 'a stream
 end

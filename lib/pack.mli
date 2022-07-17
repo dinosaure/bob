@@ -34,15 +34,16 @@ val make_one :
   Fpath.t ->
   (Stdbob.bigstring Stream.stream, [> `Msg of string ]) result Fiber.t
 (** [make ?level ~reporter path] returns the path of the generated PACK file
-   of the given file. [level] lets the user to choose the [zlib] level compression
-   (between [0] and [9]). *)
+    of the given file. [level] lets the user to choose the [zlib] level
+    compression (between [0] and [9]). *)
 
 type status
+type decoder
 
 type entry =
   int64
   * status
-  * [ `Base of Carton.Dec.weight
+  * [ `Base of [ `A | `B | `C | `D ] * Carton.Dec.weight
     | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
     | `Ref of
       Digestif.SHA1.t
@@ -59,6 +60,26 @@ val first_pass :
   reporter:(int -> unit Fiber.t) ->
   Stdbob.bigstring Stream.source ->
   entry Stream.source
+
+val analyse :
+  ?decoder:decoder ->
+  (int -> unit Fiber.t) ->
+  ( Stdbob.bigstring,
+    [ `End of Digestif.SHA1.t | `Elt of entry ]
+    * decoder option
+    * Stdbob.bigstring
+    * int )
+  Stream.flow
+
+val inflate_entry :
+  reporter:(int -> unit Fiber.t) ->
+  (Stdbob.bigstring, Stdbob.bigstring) Stream.flow
+(** [inflate_entry ~reporter] creates a flow (usable with {!Stream.run} for
+    instance) which deflates an entry (including its header). The given input
+    (a {!Stream.source} or a {!Stream.stream}) must start at the beginning of
+    the entry. It returns the deflated entry. An entry can be a [`Base] (and,
+    in such case, you extract the entry) or a patch (and, in such case, you
+    must reconstruct the entry with its source). *)
 
 val collect :
   entry Stream.source ->

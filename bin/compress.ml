@@ -10,7 +10,10 @@ let ic_of_file = function
 
 let compress ic oc =
   ic_of_file ic >>= fun ic ->
-  let oc = Option.value ~default:Stream.stdout (Option.map Stream.to_file oc) in
+  let oc =
+    Stdlib.Option.value ~default:Stream.stdout
+      (Stdlib.Option.map Stream.to_file oc)
+  in
   let flow =
     Flow.deflate_zlib ~q:(De.Queue.create 0x1000)
       ~w:(De.Lz77.make_window ~bits:15)

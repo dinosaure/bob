@@ -110,7 +110,7 @@ let serialize_directory entries =
   (* XXX(dinosaure): à la Git. *)
   let entries = List.sort (fun (a, _) (b, _) -> Fpath.compare a b) entries in
   let open Stream in
-  let open Stream.Infix in
+  let open Stream in
   Stream.of_list entries >>= fun (p, hash) ->
   match Fpath.is_dir_path p with
   | true ->
@@ -352,14 +352,14 @@ let store root =
     match stat.Unix.st_kind with
     | Unix.S_REG ->
         hash_of_filename path >>= fun hash ->
-        let path = Option.get (Fpath.relativize ~root path) in
+        let path = Stdlib.Option.get (Fpath.relativize ~root path) in
         Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
         let path = Fpath.to_dir_path path in
         hash_of_directory rstore path >>= fun hash ->
-        let path = Option.get (Fpath.relativize ~root path) in
+        let path = Stdlib.Option.get (Fpath.relativize ~root path) in
         Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Dir);
         Fiber.return (Some hash)
@@ -431,27 +431,21 @@ let make_one ?(level = 4) ~reporter ~finalise path =
   | Error _ as err -> Fiber.return err
   | Ok file ->
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
-      let hdr_entry =
-        encode_header_of_entry ~kind:_C
-          ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
-      in
-      let hdr = hdr ^ hdr_entry in
+      let hdr = hdr in
       let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
       let ctx = ref (SHA256.feed_bigstring SHA256.empty hdr) in
       let q = De.Queue.create 0x1000 in
       let w = De.Lz77.make_window ~bits:15 in
       let open Stream in
+      let hdr_name, name = entry_with_filename ~level path in
+      let hdr_file =
+        encode_header_of_entry ~kind:_C
+          ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
+        |> fun str -> bigstring_of_string str ~off:0 ~len:(String.length str)
+      in
       let zlib = Flow.deflate_zlib ~q ~w ~level in
       let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
       let file = Stream.via zlib file in
-      let file =
-        Stream.tap
-          (fun bstr ->
-            ctx := SHA256.feed_bigstring !ctx bstr;
-            Fiber.return ())
-          file
-      in
-      let hdr_name, name = entry_with_filename ~level path in
       let name =
         Stream.tap
           (fun bstr ->
@@ -459,9 +453,16 @@ let make_one ?(level = 4) ~reporter ~finalise path =
             Fiber.return ())
           (Stream.double hdr_name name)
       in
-      Stream.Infix.(
-        Stream.singleton hdr ++ file ++ name
-        ++ Stream.of_fiber (fun () ->
+      let file =
+        Stream.tap
+          (fun bstr ->
+            ctx := SHA256.feed_bigstring !ctx bstr;
+            Fiber.return ())
+          Stream.(singleton hdr_file ++ file)
+      in
+      Stream.(
+        singleton hdr ++ name ++ file
+        ++ of_fiber (fun () ->
                finalise ();
                (Fiber.return
                <.> bigstring_of_string ~off:0 ~len:SHA256.length
@@ -473,11 +474,12 @@ module First_pass = Carton.Dec.Fp (SHA256)
 module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)
 
 type status = Verify.status
+type decoder = First_pass.decoder
 
 type entry =
   int64
   * status
-  * [ `Base of Carton.Dec.weight
+  * [ `Base of [ `A | `B | `C | `D ] * Carton.Dec.weight
     | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
     | `Ref of
       Digestif.SHA1.t
@@ -532,12 +534,12 @@ let rec analyse ~reporter src source state =
   | `Malformed err -> Fmt.failwith "PACK: %s" err
   | `Entry (entry, decoder) -> (
       match entry with
-      | { First_pass.kind = Base _; offset; size; _ } ->
+      | { First_pass.kind = Base kind; offset; size; _ } ->
           let idx = First_pass.count decoder - 1 in
           Log.debug (fun m ->
               m "[%4d] Got a new entry (base): %08Lx" idx offset);
           let elt =
-            (offset, Verify.unresolved_base ~cursor:offset, `Base size)
+            (offset, Verify.unresolved_base ~cursor:offset, `Base (kind, size))
           in
           let src = ((First_pass.decode decoder :> decode), src, source) in
           reporter 1 >>| fun () -> `Ret (Some (elt, src))
@@ -618,6 +620,214 @@ let first_pass ~reporter source =
   in
   Stream.Source { init; pull; stop }
 
+let rec until_await_or_peek :
+    reporter:(int -> unit Fiber.t) ->
+    full:('acc -> bool Fiber.t) ->
+    push:('acc -> 'a -> 'acc Fiber.t) ->
+    acc:'acc ->
+    Stdbob.bigstring ->
+    First_pass.decoder ->
+    (First_pass.decoder option * (Stdbob.bigstring * int) option * 'acc) Fiber.t
+    =
+ fun ~reporter ~full ~push ~acc src decoder ->
+  let open Fiber in
+  match First_pass.decode decoder with
+  | `Await decoder -> Fiber.return (Some decoder, None, acc)
+  | `Peek decoder ->
+      let src_len = First_pass.src_rem decoder in
+      if src_len > 0 then Fiber.return (Some decoder, Some (src, src_len), acc)
+      else Fiber.return (Some decoder, None, acc)
+  | `End hash ->
+      push acc (`End hash, None, De.bigstring_empty, 0) >>= fun acc ->
+      Fiber.return (None, None, acc)
+  | `Malformed err -> failwith err
+  | `Entry (entry, decoder) -> (
+      Log.debug (fun m -> m "Got a new entry!");
+      match entry with
+      | { First_pass.kind = Base kind; offset; size; _ } -> (
+          let elt =
+            `Elt
+              (offset, Verify.unresolved_base ~cursor:offset, `Base (kind, size))
+          in
+          let off =
+            let max = Bigarray.Array1.dim src in
+            let len = First_pass.src_rem decoder in
+            max - len
+          in
+          reporter 1 >>= fun () ->
+          push acc (elt, Some decoder, src, off) >>= fun acc ->
+          full acc >>= function
+          | true when off = 0 -> Fiber.return (Some decoder, None, acc)
+          | true -> Fiber.return (Some decoder, Some (src, off), acc)
+          | false -> until_await_or_peek ~reporter ~full ~push ~acc src decoder)
+      | { kind = Ofs { sub; source = s; target }; size; offset; _ } -> (
+          let elt =
+            `Elt (offset, Verify.unresolved_node, `Ofs (sub, s, target, size))
+          in
+          let off =
+            let max = Bigarray.Array1.dim src in
+            let len = First_pass.src_rem decoder in
+            max - len
+          in
+          reporter 1 >>= fun () ->
+          push acc (elt, Some decoder, src, off) >>= fun acc ->
+          full acc >>= function
+          | true when off = 0 -> Fiber.return (Some decoder, None, acc)
+          | true -> Fiber.return (Some decoder, Some (src, off), acc)
+          | false -> until_await_or_peek ~reporter ~full ~push ~acc src decoder)
+      | { kind = Ref { ptr; source = s; target }; size; offset; _ } -> (
+          let elt =
+            `Elt (offset, Verify.unresolved_node, `Ref (ptr, s, target, size))
+          in
+          let off =
+            let max = Bigarray.Array1.dim src in
+            let len = First_pass.src_rem decoder in
+            max - len
+          in
+          reporter 1 >>= fun () ->
+          push acc (elt, Some decoder, src, off) >>= fun acc ->
+          full acc >>= function
+          | true when off = 0 -> Fiber.return (Some decoder, None, acc)
+          | true -> Fiber.return (Some decoder, Some (src, off), acc)
+          | false -> until_await_or_peek ~reporter ~full ~push ~acc src decoder)
+      )
+
+let analyse ?decoder reporter =
+  let open Fiber in
+  let flow (Stream.Sink k) =
+    let init () =
+      match decoder with
+      | Some decoder ->
+          k.init () >>= fun acc -> Fiber.return (Some decoder, None, acc)
+      | None ->
+          let oc = De.bigstring_create De.io_buffer_size in
+          let zw = De.make_window ~bits:15 in
+          let allocate _ = zw in
+          let decoder = First_pass.decoder ~o:oc ~allocate `Manual in
+          k.init () >>= fun acc -> Fiber.return (Some decoder, None, acc)
+    in
+    let rec push (decoder, previous, acc) next =
+      k.full acc >>= function
+      | true -> Fiber.return (decoder, previous, acc)
+      | false -> (
+          match (decoder, previous) with
+          | None, _ -> Fiber.return (None, None, acc)
+          | Some decoder, None ->
+              let decoder =
+                First_pass.src decoder next 0 (Bigarray.Array1.dim next)
+              in
+              until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc next
+                decoder
+          | Some decoder, Some (current, len) ->
+              let max =
+                min
+                  (Bigarray.Array1.dim current - len)
+                  (Bigarray.Array1.dim next)
+              in
+              if max > 0 then (
+                bigstring_blit next ~src_off:0 current ~dst_off:len ~len:max;
+                let decoder = First_pass.src decoder current 0 (len + max) in
+                until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc
+                  current decoder
+                >>= fun ret ->
+                push ret Bigarray.Array1.(sub next max (dim next - max)))
+              else
+                let tmp =
+                  Bigarray.Array1.create Bigarray.char Bigarray.c_layout
+                    (len + Bigarray.Array1.dim next)
+                in
+                bigstring_blit current ~src_off:0 tmp ~dst_off:0 ~len;
+                bigstring_blit next ~src_off:0 tmp ~dst_off:len
+                  ~len:(Bigarray.Array1.dim next);
+                let decoder =
+                  First_pass.src decoder tmp 0 (len + Bigarray.Array1.dim next)
+                in
+                until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc tmp
+                  decoder)
+    in
+    let full (_, _, acc) = k.full acc in
+    let stop (_, _, acc) = k.stop acc in
+    Stream.Sink { init; stop; full; push }
+  in
+  { Stream.flow }
+
+let inflate_entry ~reporter =
+  let open Fiber in
+  let flow (Stream.Sink k) =
+    let init () = k.init () >>= fun acc -> Fiber.return (`Header, acc) in
+    let rec push (state, acc) next =
+      match state with
+      | `Ignore -> Fiber.return (`Ignore, acc)
+      | `Header ->
+          Log.debug (fun m -> m "Consume the header entry into the PACK file.");
+          let pos = ref 0 in
+          let chr = ref (bigstring_get_uint8 next !pos) in
+          while
+            incr pos;
+            !chr land 0x80 != 0 && !pos < Bigarray.Array1.dim next
+          do
+            chr := bigstring_get_uint8 next !pos
+          done;
+          if !chr land 0x80 == 0 then
+            let allocate bits = De.make_window ~bits in
+            let o = De.bigstring_create De.io_buffer_size in
+            let decoder = Zl.Inf.decoder `Manual ~o ~allocate in
+            if Bigarray.Array1.dim next - !pos = 0 then
+              Fiber.return (`Inflate (o, Zl.Inf.decode decoder), acc)
+            else
+              push
+                (`Inflate (o, Zl.Inf.decode decoder), acc)
+                Bigarray.Array1.(sub next !pos (dim next - !pos))
+          else Fiber.return (`Header, acc)
+      | `Inflate (output, state) -> (
+          match state with
+          | `Flush decoder ->
+              let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+              reporter len >>= fun () ->
+              k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+              push
+                (`Inflate (output, Zl.Inf.(decode <.> flush) decoder), acc)
+                next
+          | `End decoder ->
+              let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+              reporter len >>= fun () ->
+              k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+              Fiber.return (`Ignore, acc)
+          | `Malformed err -> failwith err
+          | `Await decoder ->
+              let decoder =
+                Zl.Inf.src decoder next 0 (Bigarray.Array1.dim next)
+              in
+              Fiber.return (`Inflate (output, Zl.Inf.decode decoder), acc))
+    in
+    let full (state, acc) =
+      match state with `Ignore -> Fiber.return true | _ -> k.full acc
+    in
+    let stop (state, acc) =
+      match state with
+      | `Ignore | `Header -> k.stop acc
+      | `Inflate (output, state) ->
+          let rec go acc = function
+            | `Await _ | `Malformed _ ->
+                k.stop acc
+                (* XXX(dinosaure): we probably need to signal [src decoder 0 0] for the
+                   [`Await] case to ensure that we close the decoder but it seems to work. *)
+            | `Flush decoder ->
+                let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+                reporter len >>= fun () ->
+                k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+                go acc (Zl.Inf.(decode <.> flush) decoder)
+            | `End decoder ->
+                let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+                reporter len >>= fun () ->
+                k.push acc (Bigarray.Array1.sub output 0 len) >>= k.stop
+          in
+          go acc state
+    in
+    Stream.Sink { init; stop; full; push }
+  in
+  { Stream.flow }
+
 let replace tbl k v =
   match Hashtbl.find tbl k with
   | v' -> if v < v' then Hashtbl.replace tbl k v'
@@ -654,7 +864,7 @@ let collect entries =
   let sized = Hashtbl.create 0x100 in
   let register (idx, acc) (offset, status, v) =
     match v with
-    | `Base weight ->
+    | `Base (_, weight) ->
         Hashtbl.add where offset idx;
         Hashtbl.add sized offset weight;
         Fiber.return (succ idx, status :: acc)

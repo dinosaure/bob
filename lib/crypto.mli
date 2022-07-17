@@ -29,7 +29,9 @@ module Make (Flow : FLOW) : sig
 
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
-  val recv : Flow.flow t -> ([ `Data of string | `End ], error) result Flow.t
+
+  val recv :
+    Flow.flow t -> ([ `Data of Stdbob.bigstring | `End ], error) result Flow.t
 
   val send :
     Flow.flow t ->

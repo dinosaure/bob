@@ -212,7 +212,9 @@ module Make (Flow : FLOW) = struct
         match decrypt flow.recv flow.recv_seq buf with
         | Some buf ->
             flow.recv_seq <- Int64.succ flow.recv_seq;
-            Flow.return (Ok (`Data (Cstruct.to_string buf)))
+            let { Cstruct.buffer; off; len } = buf in
+            let res = Bigarray.Array1.sub buffer off len in
+            Flow.return (Ok (`Data res))
         | None -> Flow.return (Error `Corrupted))
     | (`Await_hdr | `Await_rec _) as await -> (
         Flow.read flow.fd >>= function
@@ -261,11 +263,11 @@ module Make (Flow : FLOW) = struct
     | None -> (
         recv flow >>= function
         | Ok `End -> Flow.return None
-        | Ok (`Data str) ->
+        | Ok (`Data bstr) ->
             let blit src src_off dst dst_off len =
-              Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
+              Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
             in
-            Ke.Rke.N.push queue ~blit ~length:String.length str;
+            Ke.Rke.N.push queue ~blit ~length:Bigarray.Array1.dim bstr;
             getline queue flow
         | Error err ->
             Log.err (fun m -> m "Error while reading a line: %a" pp_error err);

@@ -7,7 +7,7 @@ let choose = function
       let open Fiber in
       fun identity ->
         let rec asking () =
-          Fiber.getline Unix.stdin >>| Option.map String.lowercase_ascii
+          Fiber.getline Unix.stdin >>| Stdlib.Option.map String.lowercase_ascii
           >>= function
           | Some ("y" | "yes" | "") | None -> Fiber.return `Accept
           | Some ("n" | "no") -> Fiber.return `Refuse
@@ -18,40 +18,77 @@ let choose = function
         Fmt.pr "Accept from %s [Y/n]: %!" identity;
         asking ()
 
-let save_with_reporter quiet ~config ?g ~identity ~ciphers ~shared_keys sockaddr
-    =
+let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
+    : (Stdbob.bigstring Stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
-  let open Fiber in
-  Transfer.save ?g
+  Transfer.receive
     ~reporter:(Fiber.return <.> reporter)
-    ~identity ~ciphers ~shared_keys sockaddr
-  >>| fun res ->
-  finalise ();
-  res
+    ~finalise ~identity ~ciphers ~shared_keys sockaddr
 
-let extract_with_reporter quiet ~config path =
-  with_reporter ~config quiet counter @@ fun (reporter, finalise) ->
+let extract_with_reporter quiet ~config ?g
+    (from : Stdbob.bigstring Stream.source) =
   let open Fiber in
-  let entries =
-    Pack.first_pass
-      ~reporter:(Fiber.return <.> reporter)
-      (Stream.Source.file path)
-  in
-  Pack.collect entries >>= fun (matrix, oracle) ->
-  finalise ();
-  let total = Array.length matrix in
-  with_reporter ~config quiet (make_verify_bar ~total)
-  @@ fun (reporter, finalise) ->
-  Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path matrix
-  >>= fun () ->
-  finalise ();
-  let entries = Array.to_list matrix in
-  let resolved, unresolved = List.partition Pack.is_resolved entries in
-  match (resolved, unresolved) with
-  | [ file; name ], [] when Pack.kind_of_status name = `D ->
-      Pack.extract_file ~file ~name path >>= fun () -> Fiber.return (Ok ())
-  | _, [] -> assert false
-  | _, _unresolved -> Fiber.return (Error `Incomplete_pack_file)
+  let open Stream in
+  let tmp = Temp.random_temporary_path ?g "pack-%s.pack" in
+  let via = Flow.(save_into tmp << Pack.analyse ignore) in
+  Stream.run ~from ~via ~into:Sink.first >>= function
+  | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
+  | ( Some (`Elt (offset, _status, `Base (`D, _weight)), _decoder, src, off),
+      leftover ) ->
+      Stream.run ~from:(Source.file ~offset tmp)
+        ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+        ~into:Sink.to_string
+      >>= fun (name, source) ->
+      Fiber.Option.iter Source.dispose source >>= fun () ->
+      Fmt.pr ">>> Received a file: %s.\n%!" name;
+      let from =
+        match leftover with
+        | Some leftover when Bigarray.Array1.dim src - off > 0 ->
+            Source.prepend
+              Bigarray.Array1.(sub src off (dim src - off))
+              leftover
+        | Some leftover -> leftover
+        | None -> Source.array [| src |]
+      in
+      Stream.run ~from
+        ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+        ~into:(Sink.file (Fpath.v name))
+      >>= fun ((), _source) ->
+      Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
+  | Some (`Elt entry, decoder, src, off), leftover ->
+      let from =
+        match leftover with
+        | Some leftover when Bigarray.Array1.dim src - off > 0 ->
+            Source.prepend
+              Bigarray.Array1.(sub src off (dim src - off))
+              leftover
+        | Some leftover -> leftover
+        | None -> Source.array [||]
+      in
+      let offset = Bigarray.Array1.dim src - off in
+      let offset = Int64.neg (Int64.of_int offset) in
+      Stream.run ~from
+        ~via:Flow.(save_into ~offset tmp << Pack.analyse ?decoder ignore)
+        ~into:Sink.list
+      >>= fun (entries, source) ->
+      Fiber.Option.iter Source.dispose source >>= fun () ->
+      let[@warning "-8"] entries, _hash =
+        List.partition (function `Elt _, _, _, _ -> true | _ -> false) entries
+      in
+      let entries =
+        List.map
+          (function `Elt elt, _, _, _ -> elt | _ -> assert false)
+          entries
+      in
+      let total = List.length entries + 1 in
+      let entries = Source.list (entry :: entries) in
+      Pack.collect entries >>= fun (status, oracle) ->
+      with_reporter ~config quiet (make_verify_bar ~total)
+      @@ fun (reporter, finalise) ->
+      Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle tmp status
+      >>= fun () ->
+      finalise ();
+      Fiber.return (Ok ())
 
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
@@ -65,14 +102,14 @@ let run_client quiet g sockaddr secure_port password yes =
   >>? fun (identity, ciphers, shared_keys) ->
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
-  save_with_reporter quiet ~config ~g ~identity ~ciphers ~shared_keys sockaddr
+  source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
   >>| Transfer.open_error
-  >>? fun path -> extract_with_reporter quiet ~config path
+  >>? extract_with_reporter quiet ~config ~g
 
 let pp_error ppf = function
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
-  | `Incomplete_pack_file -> Fmt.pf ppf "Your received an incomplete PACK file"
+  | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
 
 let run quiet g sockaddr secure_port password yes =
   match Fiber.run (run_client quiet g sockaddr secure_port password yes) with

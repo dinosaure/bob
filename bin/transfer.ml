@@ -91,8 +91,27 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
       >>| reword_error (fun err ->
               `Crypto (err :> [ Crypto.write_error | Crypto.error ]))
 
-let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
-    ~identity ~ciphers ~shared_keys sockaddr =
+let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
+  let open Fiber in
+  let init () =
+    let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
+    Fiber.return flow
+  in
+  let pull flow =
+    Crypto.recv flow >>= function
+    | Ok (`Data bstr) ->
+        reporter (Bigarray.Array1.dim bstr) >>= fun () ->
+        Fiber.return (Some (bstr, flow))
+    | Ok `End ->
+        finalise ();
+        Fiber.return None
+    | Error _ -> Crypto.close flow >>= fun () -> Fiber.return None
+  in
+  let stop flow = Crypto.close flow in
+  Stream.Source { init; pull; stop }
+
+let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
+    ~shared_keys sockaddr =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
@@ -101,25 +120,6 @@ let save ?g ?(tmp : Temp.pattern = "pack-%s.pack") ?(reporter = Fiber.ignore)
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
-  | Ok () -> (
-      let tmp = Temp.random_temporary_path ?g tmp in
-      Log.debug (fun m -> m "Save the PACK file into: %a." Fpath.pp tmp);
-      let oc = open_out_bin (Fpath.to_string tmp) in
-      let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
-      let rec go () =
-        Crypto.recv flow >>= function
-        | Ok (`Data str) ->
-            reporter (String.length str) >>= fun () ->
-            output_string oc str;
-            go ()
-        | Ok `End -> Crypto.close flow >>= fun () -> Fiber.return (Ok ())
-        | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err
-      in
-      go ()
-      >>| reword_error (fun err ->
-              `Crypto (err :> [ Crypto.write_error | Crypto.error ]))
-      >>= fun res ->
-      close_out oc;
-      match res with
-      | Ok () -> Fiber.return (Ok tmp)
-      | Error _ as err -> Fiber.return err)
+  | Ok () ->
+      Fiber.return
+        (Ok (crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket))

@@ -38,6 +38,10 @@ val ( >>| ) : 'a t -> ('a -> 'b) -> 'b t
 val ( >>? ) :
   ('a, 'e) result t -> ('a -> ('b, 'e) result t) -> ('b, 'e) result t
 
+module Option : sig
+  val iter : ('a -> unit t) -> 'a option -> unit t
+end
+
 module Ivar : sig
   type 'a t
 
