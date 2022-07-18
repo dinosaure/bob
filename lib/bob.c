@@ -1,5 +1,5 @@
 #include <caml/bigarray.h>
-#include <caml/threads.h>
+// #include <caml/threads.h>
 #include <caml/mlvalues.h>
 #include <caml/memory.h>
 #include <caml/unixsupport.h>
@@ -25,6 +25,9 @@ bob_retrieve_error(value unit) {
   res = unix_error_of_code (errno);
   CAMLreturn(res);
 }
+
+extern void caml_enter_blocking_section (void);
+extern void caml_leave_blocking_section (void);
 
 CAMLprim value
 bob_bigstring_read(value fd, value ba, value off, value len) {
