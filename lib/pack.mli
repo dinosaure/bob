@@ -57,11 +57,6 @@ val offset_of_status : status -> int64
 val kind_of_status : status -> [ `A | `B | `C | `D ]
 val uid_of_status : status -> Digestif.SHA1.t
 
-val first_pass :
-  reporter:(int -> unit Fiber.t) ->
-  Stdbob.bigstring Stream.source ->
-  entry Stream.source
-
 val analyse :
   ?decoder:decoder ->
   (int -> unit Fiber.t) ->
@@ -92,8 +87,6 @@ val verify :
   Fpath.t ->
   status array ->
   unit Fiber.t
-
-val extract_file : file:status -> name:status -> Fpath.t -> unit Fiber.t
 
 val create_directory :
   reporter:(int -> unit) ->
