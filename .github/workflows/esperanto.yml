@@ -1,0 +1,52 @@
+name: Cosmopolitan production
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        operating-system: [ubuntu-latest]
+        ocaml-version: ["4.14.0"]
+    runs-on: ${{ matrix.operating-system }}
+    steps:
+    - uses: actions/checkout@v2
+    - uses: ocaml/setup-ocaml@v2
+      with:
+        ocaml-compiler: ${{ matrix.ocaml-version }}
+# See jart/cosmopolitan#3
+    - name: Fix binfmt and Cosmopolitan
+      run: sudo sh -c "echo ':APE:M::MZqFpD::/bin/sh:' >/proc/sys/fs/binfmt_misc/register"
+    - name: Pin & Install workflows
+      run: |
+        opam pin add git+https://github.com/dinosaure/esperanto
+        opam install cosmopolitan esperanto ocamlfind opam-monorepo
+        opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
+    - name: Prepare dune files
+      run: |
+        cat >>dune-workspace <<EOF
+        (context
+         (default
+          (name esperanto)
+          (toolchain esperanto)
+          (merlin)
+          (host default)))
+        EOF
+        cat >>bin/dune <<EOF
+        (rule
+         (target bob.com)
+         (enabled_if
+          (= %{context_name} esperanto))
+         (mode promote)
+         (deps bob.exe)
+         (action
+          (run objcopy -S -O binary %{deps} %{target})))
+        EOF
+    - name: Compilation
+      run: |
+        opam monorepo lock
+        opam monorepo pull
+        opam exec -- dune build ./bin/bob.com
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: bob.com
+        path: bin/bob.com

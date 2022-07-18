@@ -85,9 +85,8 @@ let run_server quiet g compression sockaddr secure_port password path =
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
   let open Fiber in
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
-  Connect.blocking_connect socket sockaddr
-  |> Fiber.return
-  >>| reword_error (fun errno -> `Blocking_connect errno)
+  Fiber.connect socket sockaddr
+  >>| reword_error (fun errno -> `Connect errno)
   >>? fun () ->
   Bob_clear.server socket ~g ~secret >>? fun (identity, ciphers, shared_keys) ->
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in

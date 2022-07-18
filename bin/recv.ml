@@ -121,9 +121,7 @@ let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Connect.blocking_connect socket sockaddr
-  |> Fiber.return
-  >>| reword_error (fun err -> `Blocking_connect err)
+  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in

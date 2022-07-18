@@ -33,6 +33,7 @@
 ;  (action
 ;   (run objcopy -S -O binary %{deps} %{target})))
 ; 
+; 
 ; (rule
 ;  (target cat.com)
 ;  (enabled_if
