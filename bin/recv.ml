@@ -121,7 +121,9 @@ let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
+  Connect.blocking_connect socket sockaddr
+  |> Fiber.return
+  >>| reword_error (fun err -> `Blocking_connect err)
   >>? fun () ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in
@@ -134,6 +136,7 @@ let run_client quiet g sockaddr secure_port password yes =
   >>? extract_with_reporter quiet ~config ~g
 
 let pp_error ppf = function
+  | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"

@@ -42,9 +42,11 @@ end)
 type error =
   [ Bob_unix.error
   | `Connect of Unix.error
+  | `Blocking_connect of Connect.error
   | `Crypto of [ Crypto.write_error | Crypto.error ] ]
 
 let pp_error ppf = function
+  | `Blocking_connect err -> Connect.pp_error ppf err
   | `Connect errno -> Fmt.pf ppf "connect(): %s" (Unix.error_message errno)
   | `Crypto (#Crypto.write_error as err) -> Crypto.pp_write_error ppf err
   | `Crypto (#Crypto.error as err) -> Crypto.pp_error ppf err
@@ -79,7 +81,9 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
+  Connect.blocking_connect socket sockaddr
+  |> Fiber.return
+  >>| reword_error (fun err -> `Blocking_connect err)
   >>? fun () ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
@@ -115,7 +119,9 @@ let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
+  Connect.blocking_connect socket sockaddr
+  |> Fiber.return
+  >>| reword_error (fun err -> `Blocking_connect err)
   >>? fun () ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->

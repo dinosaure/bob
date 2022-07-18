@@ -1,9 +1,9 @@
-let rec connect fd sockaddr =
+let rec blocking_connect fd sockaddr =
   try
     Unix.connect fd sockaddr;
     Ok ()
   with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> connect fd sockaddr
+  | Unix.Unix_error (Unix.EINTR, _, _) -> blocking_connect fd sockaddr
   | Unix.Unix_error (Unix.EACCES, _, _) -> (
       match sockaddr with
       | Unix.ADDR_UNIX _ -> Error `Permission_denied

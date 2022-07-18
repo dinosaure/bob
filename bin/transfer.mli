@@ -1,5 +1,6 @@
 type error =
   [ Bob_unix.error
+  | `Blocking_connect of Connect.error
   | `Connect of Unix.error
   | `Crypto of
     [ `Closed
