@@ -203,15 +203,35 @@ let write fd bstr ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t
       Hashtbl.add pwr fd (`Write ((bstr, off, len), ivar));
       Ivar.read ivar
 
+let pp_sockaddr ppf = function
+  | Unix.ADDR_INET (inet_addr, port) ->
+      Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port
+  | Unix.ADDR_UNIX name -> Fmt.pf ppf "<%s>" name
+
+external is_windows : unit -> bool = "bob_is_windows" [@@noalloc]
+external set_nonblock : Unix.file_descr -> bool -> unit = "bob_set_nonblock"
+
 let connect fd sockaddr : (unit, Unix.error) result t =
   match Hashtbl.find_opt pwr fd with
   | Some (`Connect (_sockaddr', ivar)) ->
       Ivar.read ivar
       (* TODO(dinosaure): we should check if [sockaddr = _sockaddr']. *)
   | _ ->
+      Log.debug (fun m ->
+          m "Call to connect() (operating system: %s)" Sys.os_type);
       let ivar : (unit, Unix.error) result Ivar.t = Ivar.create () in
-      Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
-      Ivar.read ivar
+      if is_windows () then (
+        Log.debug (fun m -> m "Set file-descriptor into a non-blocking mode.");
+        set_nonblock fd true;
+        try
+          Unix.connect fd sockaddr;
+          Log.debug (fun m -> m "Try to connect to %a" pp_sockaddr sockaddr);
+          Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
+          Ivar.read ivar
+        with Unix.Unix_error (errno, _, _) -> return (Error errno))
+      else (
+        Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
+        Ivar.read ivar)
 
 let close fd =
   Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd));
@@ -311,6 +331,15 @@ external bigstring_write :
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with
   | None -> ()
+  | Some (`Connect (sockaddr, ivar)) when is_windows () -> (
+      Hashtbl.remove pwr fd;
+      try
+        Unix.connect fd sockaddr;
+        set_nonblock fd false;
+        Ivar.fill ivar (Ok ())
+      with
+      | Unix.Unix_error (Unix.EISCONN, _, _) -> Ivar.fill ivar (Ok ())
+      | Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
   | Some (`Connect (sockaddr, ivar)) -> (
       Hashtbl.remove pwr fd;
       try

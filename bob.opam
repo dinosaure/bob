@@ -26,8 +26,11 @@ depends: [
   "ipaddr"
   "mirage-crypto"
   "psq"
+  "tls"
   "carton"
   "progress"
+  "dns-client"
+  "happy-eyeballs"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"
@@ -39,4 +42,7 @@ pin-depends: [
   [ "decompress.dev" "git+https://github.com/mirage/decompress.git#4e1eb3cc6b97be64ee6b8cc19df0c7d179bc060e" ]
   [ "digestif.dev" "git+https://github.com/mirage/digestif.git#2e6a40f8b6839dba40965b077d77ba540fc40715" ]
   [ "mirage-crypto.dev" "git+https://github.com/dinosaure/mirage-crypto.git#2c0f519d5b25b45bdac879d64388832d20a8f12d" ]
+  [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#2c0f519d5b25b45bdac879d64388832d20a8f12d" ]
+  [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#2c0f519d5b25b45bdac879d64388832d20a8f12d" ]
+  [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#2c0f519d5b25b45bdac879d64388832d20a8f12d" ]
 ]
