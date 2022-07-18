@@ -12,6 +12,9 @@ jobs:
     - uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: ${{ matrix.ocaml-version }}
+# See jart/cosmopolitan#3
+    - name: Fix binfmt and Cosmopolitan
+      run: sudo sh -c "echo ':APE:M::MZqFpD::/bin/sh:' >/proc/sys/fs/binfmt_misc/register"
     - name: Pin & Install workflows
       run: |
         opam pin add git+https://github.com/dinosaure/esperanto
