@@ -24,15 +24,15 @@
  (libraries progress base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli
    logs.cli fmt.tty logs.fmt bob.password bob.unix bob.pack))
 
-(rule
- (target bob.com)
- (enabled_if
-  (= %{context_name} esperanto))
- (mode promote)
- (deps bob.exe)
- (action
-  (run objcopy -S -O binary %{deps} %{target})))
-
+; (rule
+;  (target bob.com)
+;  (enabled_if
+;   (= %{context_name} esperanto))
+;  (mode promote)
+;  (deps bob.exe)
+;  (action
+;   (run objcopy -S -O binary %{deps} %{target})))
+; 
 ; 
 ; (rule
 ;  (target cat.com)
