@@ -18,6 +18,18 @@ let choose = function
         Fmt.pr "Accept from %s [Y/n]: %!" identity;
         asking ()
 
+let ask_password () =
+  let open Fiber in
+  let rec asking () =
+    Fiber.getline Unix.stdin >>= function
+    | None | Some "" ->
+        Fmt.pr "You must insert a password: %!";
+        asking ()
+    | Some password -> Fiber.return password
+  in
+  Fmt.pr "Your password: %!";
+  asking ()
+
 let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
     : (Stdbob.bigstring Stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
@@ -118,9 +130,13 @@ let extract_with_reporter quiet ~config ?g
       unpack_with_reporter quiet ~config ~total pack name hash
 
 let run_client quiet g sockaddr secure_port password yes =
+  let open Fiber in
+  (match password with
+  | Some password -> Fiber.return password
+  | None -> ask_password ())
+  >>= fun password ->
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
-  let open Fiber in
   Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
@@ -159,7 +175,7 @@ let relay =
 
 let password =
   let doc = "The password to share." in
-  Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"<password>")
+  Arg.(value & pos 0 (some string) None & info [] ~doc ~docv:"<password>")
 
 let yes =
   let doc = "Answer yes to all bob questions without prompting." in
