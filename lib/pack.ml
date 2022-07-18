@@ -112,10 +112,12 @@ let load_file path =
   Log.debug (fun m -> m "Load the file: %a." Fpath.pp path);
   let len = (Unix.stat (Fpath.to_string path)).Unix.st_size in
   Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
-  | Ok fd ->
+  | Ok fd -> (
       let res = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-      full_read fd res 0 len;
-      Fiber.close fd >>| fun () -> Carton.Dec.v ~kind:`C res
+      try
+        full_read fd res 0 len;
+        Fiber.close fd >>| fun () -> Carton.Dec.v ~kind:`C res
+      with exn -> Fiber.close fd >>= fun () -> raise exn)
   | Error errno ->
       Fmt.failwith "openfile(%a): %s" Fpath.pp path (Unix.error_message errno)
 
@@ -487,6 +489,8 @@ let entry_with_filename ?level path =
       ( bigstring_of_string hdr_entry ~off:0 ~len:(String.length hdr_entry),
         Bigarray.Array1.sub output 0 len )
   | _ -> Fmt.failwith "Impossible to compress the entry with filename"
+(* XXX(dinosaure): this case should never occur. Our [output] is large enough
+   to contain deflated contents. *)
 
 let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
@@ -940,5 +944,8 @@ and create_file pack path hash =
       Fiber.return pack
   | Ok fd ->
       let open Fiber in
-      full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= Fiber.close
+      Fiber.catch
+        (fun () ->
+          full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= Fiber.close)
+        (fun exn -> Fiber.close fd >>= fun () -> raise exn)
       >>= fun () -> Fiber.return pack
