@@ -7,34 +7,64 @@ does not work and/or compile, but it's under an active development. You
 probably should take a look on [spoke][spoke] and an [article][article] which
 describe its implementation first. Then, enjoy to read GADTs and comments...
 
+Bob is a **simple**, **secure** and **universal** program for transmitting a
+file or a folder from one person to another. The aim of bob is to offer the
+possibility to share documents without any constraints:
+- security
+- accesibility
+- usage
+
+For this purpose, bob uses [state-of-the-art][article] security,
+[Cosmopolitan][cosmopolitan] to ensure its accessibility on all systems and a
+simplicity that only meets the objective of transmitting a document.
+
 ### A simple example
 
-Currently, the distribution provides a simple binary which can be used as:
-- a relay
-- a peer (which one wants to send a file - the server - and which one wants to
-  receive a file - the client).
-
-You can install `bob` on your computer with:
+You can compile & install bob with [opam][opam]:
 ```sh
-$ opam pin add -y git+https://github.com/dinosaure/bob
+$ opam pin add -y https://github.com/dinosaure/bob
 ```
 
-Then, you can launch a relay, a server and a client:
+Bob has 3 sub-programs, the receiver, the sender and the relay. We will
+concentrate on the first two:
+- `bob recv` requires a password (decided between you and the sender). Take for
+  example: revolucion-para-siempre. This program has several options like
+  accepting any sender (sharing the same password) automatically or the address
+  of the relay. An example of its use is:
+```sh
+$ bob recv revolucion-para-siempre -r $(dig +short osau.re) -y
+>>> Received a file: my_huge_file.txt.
+>>> ⠼   13.5 MiB    2.2 MiB/s
 ```
-$ bob relay
-$ bob send
-Password: giato-fextre
-
-$ bob giato-fextre
-Accept from <server-identity> [Y/n]: Y
-Handshake is done with <server-identity>
+- `bob send` requires a document (a file or a folder) and let you to specify
+  few options: compression, password, relay address.
+```sh
+$ bob send --password revolucion-para-siempre -r $(dig +short osau.re) \
+    --no-compression my_huge_file.txt
+>>> [│████████████████████████████│]   13.5 MiB  / 13.54 MiB
 ```
 
-The current state allow you to talk to with your peer through the relay. Of
-course, the communication is encrypted and the relay is not able to decrypt
-anything. Only peers have shared keys. That mostly means that from a shared
-weak password, we are able to initiate a truly secured communication with
-a peer. The next step will be file transferring.
+As you can see, some information is displayed and the download can begin. You
+can let bob decide on the password if you want with regard to the sender:
+```sh
+$ bob send -r $(dig +short osau.re) my_huge_file.txt
+Password: wei-widwagamboostu
+>>> [│                            │]    0.0 B    / 13.54 MiB
+```
+
+And, by default, we always ask for confirmation from the recipients as to what
+he/she is receiving:
+```sh
+$ bob recv -r $(dig +short osau.re) wei-widwagamboostu
+Accept from 213.245.183.59:55291 [Y/n]:
+```
+
+### Design, Protocol and Implementation
+
+If you are interested in the implementation of bob, the protocol itself or the
+design of the program in general, there are some notes on this in the
+distribution. For future contributions, it is advisable to read these
+documents.
 
 ### Avantage of `bob`
 
@@ -51,6 +81,18 @@ between the two peers.
 The relay is therefore _blind_ to the algorithm used to reach an agreement.
 This feature ensures that there is no compromise between peers via the relay.
 
+The protocol itself does not allow the relay to obtain enough information to
+decrypt your communications. Indeed, the initial exchange (the _handshake_)
+between the peers is an exchange that could be done without a relay. The
+purpose of the relay is:
+- to provide a stable connection
+- allow two peers to communicate with each other when they cannot directly
+  (certainly because of a proxy)
+
+The only packet that the relay introspects is that of the receiver's refusal or
+acceptance in order to allocate a secure communication channel for the two
+peers.
+
 #### OCaml & GADTs
 
 The state machine defined to ensure the exchange uses an aspect of the OCaml
@@ -58,6 +100,39 @@ language: GADT. From this we can encore at type level that a client cannot
 talk to another client and a server cannot talk to another server. In this way,
 we can prune problematic cases as errors upstream, outside the implementation
 of the so-called state machine.
+
+Indeed, the implementation of the state machine utimately focuses only on valid
+cases - namely, a receiver wanting to communicate with a sender and vice-versa.
+The property (the duality between receiver and sender) can be _encoded_ with
+types and GADTs.
+
+```ocaml
+type send = | and recv = | and relay = |
+
+type ('a, 'b) peer =
+  | Send : (send, recv) peer
+  | Recv : (recv, send) peer
+
+type ('from, 'to) src =
+  | Relay : (relay, 'to) src
+  | Peer  : ('from, 'non_from) peer -> ('from, 'non_from) src
+
+type ('from, 'to) dst =
+  | Relay : ('from, relay) dst
+  | Peer  : ('to, 'non_to) peer -> ('non_to, 'to) dst
+
+type ('from, 'to) packet =
+  | Hello_as_a_client : (recv, relay) packet
+  | Hello_as_a_server : (send, relay) packet
+  | Client_validator  : (recv,  send) packet
+  | Server_validator  : (send,  recv) packet
+```
+
+This does not mean that we cannot receive a packet from a sender to a sender,
+but we can (and should) elimimate such cases upstream of the state machine.
+Another property is that we cannot, in OCaml and in this state machine,
+explicitely want to send a packet to a sender if we are recognizsed as a
+sender.
 
 #### Unikernels and [MirageOS][mirage]
 
