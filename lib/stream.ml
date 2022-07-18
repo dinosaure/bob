@@ -1,4 +1,5 @@
 (* Copyright (c) 2020 Rizo I. <rizo@odis.io>
+   Copyright (c) 2022 Romain Calascibetta <romain.calascibetta@gmail.com>
 
    Permission to use, copy, modify, and distribute this software for any
    purpose with or without fee is hereby granted, provided that the above
