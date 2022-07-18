@@ -81,8 +81,7 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let open Fiber in
-  Fiber.connect socket sockaddr
-  >>| reword_error (fun err -> `Connect err)
+  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
