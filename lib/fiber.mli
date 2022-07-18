@@ -20,15 +20,104 @@
                  Exception A appear at line: try do something
     ]}
 
-    The best advise is to limit as possible as we can leak of exception.
+    The best advise is to limit as possible as we can leak of exception. You
+    can use {!val:catch} for that when we try to catch an exception from
+    an {b effect-full} fiber.
+
+    {2: Introduction.}
+
+    A {b fiber} is a placeholder for a single value which might take a long
+    time to compute. Speaking roughly, a fiber is a [ref] that can be filled
+    in later. To make that precise, here is how fibers differ from [ref]s:
+    - A fiber might not have a value yet. A fiber in this state is called a
+      {e pending} fiber.
+    - Writing a value into a fiber is called {e resolving} it. A fiver with a
+      value is called a {e resolved} fiber.
+    - Each fiver can be resolved only once. After a fiber has a value, the
+      fiber is immutable.
+    - It's possible to attach a {b callback} to a fiber. They will run when the
+      fiber has a value, i.e. is resolved. If the fiber is already resolved
+      when a callback is attached, the callback is run (almost) right away. If
+      the promise is pending, the callback is put into a list and waits.
+
+    So, fibers are optional, write-once references, and when they don't yet
+    have a value, they store a list of callbacks that are waiting for the
+    value.
+
+    The waiting callbacks make fibers a natural data type for asynchronous
+    programming. For example, you can ask [Fiber] to {!val:read} a file.
+    [Fiber] immediately returns you a {e fiber} for the data.
+
+    You can neglect this fiber for a while. You can do some other computation,
+    request more I/O, etc. At some point, you might decide to attach a callback
+    to the {!val:read} fiber, maybe several callbacks.
+
+    In the meantime, the {!val:read} operation is running in the background.
+    Once it finishes, [Fiber] {e resolves} the {!val:read} fiber by putting the
+    data into it. [Fiber] then runs the callbacks you attached.
+
+    One of those might take the data, and ask [Fiber] to {!val:write} it to
+    [<stdout>]. [Fiber] gives you a fiber for that, too, and the process
+    repeats.
+
+    {2: Difference with [Lwt]/[Async].}
+
+    [Fiber] wants to be portable for Unix and Windows. Thanks to the
+    [Cosmopolitan] project which provides {i syscalls} for any targets. [Lwt]
+    and [Async] are more complete than [Fiber] but several works are needed
+    to be compatible with [Cosmopolitan].
+
+    For instance, the cancellation does not exist in [Fiber], you can not
+    {i cancel} a fiber which is not yet resolved.
+
+    {2: Internal engine.}
+
+    [Fiber] directly provides {!val:run} unlike [Lwt] which proposes multiple
+    engines ([libev], [pthread] or [Unix.select]). We only use
+    {!val:Unix.select} which is the most portable {i syscalls} for any targets.
 *)
 
 type +'a t
+(** Fibers for values of type ['a].
+
+    A {b fiber} is a memory cell that is always in one of 2 {b states}:
+    - {e fulfilled}, and containing one value of type ['a],
+    - {e pending}, in which case it may become fulfilled later.
+
+    Fibers are typically "read" by attaching {b callbacks} to them. The most
+    basic functions for that are {!val:bind}, which attaches a callback that is
+    called when a promise becomes fulfilled. *)
 
 val return : 'a -> 'a t
+(** [return v] creates a new {{!type:t} fiber} that is {e already fulfilled}
+    with value [v].
+
+    This is needed to satisfy the type system in some cases. For example, in a
+    [match] expression where one case evaluates to a fiber, the other cases
+    have to evaluate to fibers as well:
+
+    {[
+      match need_input with
+      | true -> Fiber.read stdin (* Has type string Fiber.t *)
+      | false -> Fiber.return "" (* ...so wrap empty string in a fiber. *)
+    ]} *)
+
 val ignore : _ -> unit t
 val always : 'a -> _ -> 'a t
+
 val bind : 'a t -> ('a -> 'b t) -> 'b t
+(** [bind t0 f] makes it so that [f] will run when [t0] is
+    {{!t} {e fulfilled}}.
+
+    When [t0] is fulfilled with value [v], the callback [f] is called with that
+    same value [v]. Eventually, after perhaps starting some I/O or other
+    computation, [f] returns fiber [t1].
+
+    {!val:bind} itself returns immediatly. It only attaches the callback [f] to
+    [t0] - it does not wait for [t1]. {e What} {!val:bind} returns is yet a
+    third fiber, [t2]. Rhougly speaking, fulfillment of [t2] represents both
+    [t0] and [t1] becoming fulfilled, one after the other. *)
+
 val both : 'a t -> 'b t -> ('a * 'b) t
 val fork_and_join : (unit -> 'a t) -> (unit -> 'b t) -> ('a * 'b) t
 val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
@@ -113,6 +202,6 @@ val accept : Unix.file_descr -> (Unix.file_descr * Unix.sockaddr) t
 val sleep : float -> unit t
 val getline : Unix.file_descr -> string option t
 
-(* {2: The entry-point to execute a {!t}. *)
+(* {2: The entry-point to execute a {!type:t}. *)
 
 val run : 'a t -> 'a

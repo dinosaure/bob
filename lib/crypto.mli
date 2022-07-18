@@ -1,3 +1,9 @@
+(** {1: Cryptographic exchange.}
+
+    This module implements a really small protocol which allows two peers to
+    exchange data through 2 (possibly differents) ciphers.
+*)
+
 type 'fd t
 
 val make :
