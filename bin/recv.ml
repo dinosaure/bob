@@ -35,6 +35,50 @@ let map (fd, st) ~pos len =
   in
   Bigarray.array1_of_genarray res
 
+let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
+    leftover =
+  let open Fiber in
+  let open Stream in
+  let from =
+    match leftover with
+    | Some leftover when Bigarray.Array1.dim src - off > 0 ->
+        Source.prepend Bigarray.Array1.(sub src off (dim src - off)) leftover
+    | Some leftover -> leftover
+    | None -> Source.array [||]
+  in
+  let offset = Bigarray.Array1.dim src - off in
+  let offset = Int64.neg (Int64.of_int offset) in
+  Stream.run ~from
+    ~via:Flow.(save_into ~offset path << Pack.analyse ?decoder ignore)
+    ~into:Sink.list
+  >>= fun (entries, source) ->
+  Fiber.Option.iter Source.dispose source >>= fun () ->
+  let[@warning "-8"] entries, _hash =
+    List.partition (function `Elt _, _, _, _ -> true | _ -> false) entries
+  in
+  let entries =
+    List.map (function `Elt elt, _, _, _ -> elt | _ -> assert false) entries
+  in
+  let total = List.length entries + 1 in
+  let entries = Source.list (entry :: entries) in
+  Pack.collect entries >>= fun (status, oracle) ->
+  with_reporter ~config quiet (make_verify_bar ~total)
+  @@ fun (reporter, finalise) ->
+  Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path status
+  >>= fun () ->
+  finalise ();
+  Fiber.return status
+
+let unpack_with_reporter quiet ~config ~total pack name hash =
+  let open Fiber in
+  with_reporter ~config quiet (make_extract_bar ~total)
+  @@ fun (reporter, finalise) ->
+  reporter 2;
+  (* XXX(dinosaure): report the commit and the root directory. *)
+  Pack.create_directory ~reporter pack (Fpath.v name) hash >>= fun _ ->
+  finalise ();
+  Fiber.return (Ok ())
+
 let extract_with_reporter quiet ~config ?g
     (from : Stdbob.bigstring Stream.source) =
   let open Fiber in
@@ -65,100 +109,13 @@ let extract_with_reporter quiet ~config ?g
         ~into:(Sink.file (Fpath.v name))
       >>= fun ((), _source) ->
       Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
-  | Some (`Elt entry, decoder, src, off), leftover -> (
-      let from =
-        match leftover with
-        | Some leftover when Bigarray.Array1.dim src - off > 0 ->
-            Source.prepend
-              Bigarray.Array1.(sub src off (dim src - off))
-              leftover
-        | Some leftover -> leftover
-        | None -> Source.array [||]
-      in
-      let offset = Bigarray.Array1.dim src - off in
-      let offset = Int64.neg (Int64.of_int offset) in
-      Stream.run ~from
-        ~via:Flow.(save_into ~offset tmp << Pack.analyse ?decoder ignore)
-        ~into:Sink.list
-      >>= fun (entries, source) ->
-      Fiber.Option.iter Source.dispose source >>= fun () ->
-      let[@warning "-8"] entries, _hash =
-        List.partition (function `Elt _, _, _, _ -> true | _ -> false) entries
-      in
-      let entries =
-        List.map
-          (function `Elt elt, _, _, _ -> elt | _ -> assert false)
-          entries
-      in
-      let total = List.length entries + 1 in
-      let entries = Source.list (entry :: entries) in
-      Pack.collect entries >>= fun (status, oracle) ->
-      with_reporter ~config quiet (make_verify_bar ~total)
-      @@ fun (reporter, finalise) ->
-      Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle tmp status
-      >>= fun () ->
-      finalise ();
-      match
-        Array.find_opt (fun status -> Pack.kind_of_status status = `A) status
-      with
-      | None -> Fiber.return (Error `No_root)
-      | Some root ->
-          let fd =
-            Unix.openfile (Fpath.to_string tmp) Unix.[ O_RDONLY ] 0o644
-          in
-          let st = Unix.LargeFile.stat (Fpath.to_string tmp) in
-          let id =
-            Array.fold_left
-              (fun tbl status ->
-                Hashtbl.add tbl
-                  (Pack.uid_of_status status)
-                  (Pack.offset_of_status status);
-                tbl)
-              (Hashtbl.create 0x100) status
-          in
-          let find uid =
-            Logs.debug (fun m -> m "Try to find: %a." Digestif.SHA1.pp uid);
-            Hashtbl.find id uid
-          in
-          let pack =
-            Carton.Dec.make (fd, st) ~allocate:make_window
-              ~z:(De.bigstring_create De.io_buffer_size)
-              ~uid_ln:Digestif.SHA1.digest_size
-              ~uid_rw:Digestif.SHA1.of_raw_string find
-          in
-          let root =
-            Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null
-              (Pack.offset_of_status root)
-            |> fun weight ->
-            let raw = Carton.Dec.make_raw ~weight in
-            Carton.Dec.of_offset ~map pack raw
-              ~cursor:(Pack.offset_of_status root)
-          in
-          let root =
-            bigstring_to_string
-              (Bigarray.Array1.sub (Carton.Dec.raw root) 0 (Carton.Dec.len root))
-          in
-          let[@warning "-8"] (name :: rest) =
-            String.split_on_char '\000' root
-          in
-          let rest = String.concat "\000" rest in
-          let hash =
-            Digestif.SHA1.of_raw_string
-              (String.sub rest 0 Digestif.SHA1.digest_size)
-          in
-          let total =
-            int_of_string
-              (String.sub rest Digestif.SHA1.digest_size
-                 (String.length rest - Digestif.SHA1.digest_size))
-          in
-          Fmt.pr ">>> Received a directory: %s\n%!" name;
-          with_reporter ~config quiet (make_extract_bar ~total)
-          @@ fun (reporter, finalise) ->
-          reporter 2;
-          (* XXX(dinosaure): the commit and the root directory. *)
-          Pack.create_directory ~reporter pack (Fpath.v name) hash >>= fun _ ->
-          finalise ();
-          Fiber.return (Ok ()))
+  | Some (`Elt entry, decoder, src, off), leftover ->
+      collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
+        leftover
+      >>= Pack.unpack tmp
+      >>? fun (name, total, hash, pack) ->
+      Fmt.pr ">>> Received a folder: %s.\n%!" name;
+      unpack_with_reporter quiet ~config ~total pack name hash
 
 let run_client quiet g sockaddr secure_port password yes =
   let domain = Unix.domain_of_sockaddr sockaddr in

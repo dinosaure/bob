@@ -94,3 +94,14 @@ val create_directory :
   Fpath.t ->
   Digestif.SHA1.t ->
   (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t Fiber.t
+
+val unpack :
+  Fpath.t ->
+  status array ->
+  ( string
+    * int
+    * Digestif.SHA1.t
+    * (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t,
+    [> `No_root ] )
+  result
+  Fiber.t
