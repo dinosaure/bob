@@ -40,8 +40,6 @@ jobs:
          (action
           (run objcopy -S -O binary %{deps} %{target})))
         EOF
-    - name: Find x86intrin.h
-      run: find $(opam var prefix) -name x86intrin.h
     - name: Compilation
       run: |
         opam monorepo lock
