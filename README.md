@@ -11,7 +11,7 @@ Bob is a **simple**, **secure** and **universal** program for transmitting a
 file or a folder from one person to another. The aim of bob is to offer the
 possibility to share documents without any constraints:
 - security
-- accesibility
+- accesibility: we mainly want to provide one binary which works anywhere
 - usage
 
 For this purpose, bob uses [state-of-the-art][article] security,
@@ -95,15 +95,15 @@ peers.
 
 #### OCaml & GADTs
 
-The state machine defined to ensure the exchange uses an aspect of the OCaml
-language: GADT. From this we can encore at type level that a client cannot
+The state machine defined to ensure the exchange uses an feature of the OCaml
+language: GADTs. From this we can encode at type level that a client cannot
 talk to another client and a server cannot talk to another server. In this way,
 we can prune problematic cases as errors upstream, outside the implementation
 of the so-called state machine.
 
 Indeed, the implementation of the state machine utimately focuses only on valid
 cases - namely, a receiver wanting to communicate with a sender and vice-versa.
-The property (the duality between receiver and sender) can be _encoded_ with
+This property (the duality between receiver and sender) can be _encoded_ with
 types and GADTs.
 
 ```ocaml
@@ -131,8 +131,7 @@ type ('from, 'to) packet =
 This does not mean that we cannot receive a packet from a sender to a sender,
 but we can (and should) elimimate such cases upstream of the state machine.
 Another property is that we cannot, in OCaml and in this state machine,
-explicitely want to send a packet to a sender if we are recognizsed as a
-sender.
+explicitely send a packet to a sender if we are recognizsed as a sender.
 
 #### Unikernels and [MirageOS][mirage]
 
@@ -140,7 +139,7 @@ Bob provides 2 implementations of the relay which are very similar. One is a
 part of the executable and the user can launch its own relay _via_ `bob relay`
 and an other implementation exists as an unikernel (see [mirage/][./mirage]).
 
-The last one lets the user to compile a full operating system as a relay and
+The last one lets the user compile a full operating system as a relay and
 virtualize it with KVM for instance. You must have a machine with [KVM][kvm].
 You must install the `mirage` tool and install `bob` first. Then, you should be
 able to craft the operating system with:
