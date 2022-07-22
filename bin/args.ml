@@ -93,26 +93,29 @@ let addr_inet ~default =
   Arg.conv ~docv:"<addr>" (parser, pp)
 
 let addr ~default =
-  let parser str = match Ipaddr.with_port_of_string ~default str with
-    | Ok (ipaddr, port) ->
-      Ok (`Inet (Ipaddr_unix.to_inet_addr ipaddr, port))
-    | Error _ ->
-      let ( >>= ) = Result.bind in
-      match String.split_on_char ':' str with
-      | [ domain_name ] ->
-        Domain_name.of_string domain_name >>= fun domain_name ->
-        Ok (`Domain (domain_name, default))
-      | domain_name :: port ->
-        let port = String.concat ":" port in
-        ( try Domain_name.of_string domain_name >>= fun domain_name ->
+  let parser str =
+    match Ipaddr.with_port_of_string ~default str with
+    | Ok (ipaddr, port) -> Ok (`Inet (Ipaddr_unix.to_inet_addr ipaddr, port))
+    | Error _ -> (
+        let ( >>= ) = Result.bind in
+        match String.split_on_char ':' str with
+        | [ domain_name ] ->
+            Domain_name.of_string domain_name >>= fun domain_name ->
+            Ok (`Domain (domain_name, default))
+        | domain_name :: port -> (
+            let port = String.concat ":" port in
+            try
+              Domain_name.of_string domain_name >>= fun domain_name ->
               Ok (`Domain (domain_name, int_of_string port))
-          with _ -> Error (`Msg "Invalid port") )
-      | _ -> assert false in
+            with _ -> Error (`Msg "Invalid port"))
+        | _ -> assert false)
+  in
   let pp ppf = function
     | `Inet (inet_addr, port) ->
-      Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port
+        Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port
     | `Domain (domain_name, port) ->
-      Fmt.pf ppf "%a:%d" Domain_name.pp domain_name port in
+        Fmt.pf ppf "%a:%d" Domain_name.pp domain_name port
+  in
   Arg.conv ~docv:"<addr>" (parser, pp)
 
 let string_to_int_array str =

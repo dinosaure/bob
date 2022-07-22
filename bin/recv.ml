@@ -135,9 +135,11 @@ let extract_with_reporter quiet ~config ?g
       unpack_with_reporter quiet ~config ~total pack name hash
 
 let run_client quiet g addr secure_port password yes =
-  let sockaddr = match addr with
+  let sockaddr =
+    match addr with
     | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
-    | _ -> assert false in
+    | _ -> assert false
+  in
   let open Fiber in
   (match password with
   | Some password -> Fiber.return password

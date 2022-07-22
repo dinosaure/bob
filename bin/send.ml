@@ -79,9 +79,11 @@ let generate_pack_file quiet ~config ~g compression path =
         ~config store compressed
 
 let run_server quiet g compression addr secure_port password path =
-  let sockaddr = match addr with
+  let sockaddr =
+    match addr with
     | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
-    | _ -> assert false in
+    | _ -> assert false
+  in
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
