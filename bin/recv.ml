@@ -60,10 +60,12 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   in
   let offset = Bigarray.Array1.dim src - off in
   let offset = Int64.neg (Int64.of_int offset) in
+  Logs.debug (fun m -> m "Start to re-analyzed the rest of the PACK file.");
   Stream.run ~from
     ~via:Flow.(save_into ~offset path << Pack.analyse ?decoder ignore)
     ~into:Sink.list
   >>= fun (entries, source) ->
+  Logs.debug (fun m -> m "All objects are analyzed.");
   Fiber.Option.iter Source.dispose source >>= fun () ->
   let[@warning "-8"] entries, _hash =
     List.partition (function `Elt _, _, _, _ -> true | _ -> false) entries
@@ -74,10 +76,12 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   let total = List.length entries + 1 in
   let entries = Source.list (entry :: entries) in
   Pack.collect entries >>= fun (status, oracle) ->
+  Logs.debug (fun m -> m "All objects are collected.");
   with_reporter ~config quiet (make_verify_bar ~total)
   @@ fun (reporter, finalise) ->
   Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path status
   >>= fun () ->
+  Logs.debug (fun m -> m "All objects are verified.");
   finalise ();
   Fiber.return status
 
@@ -122,6 +126,7 @@ let extract_with_reporter quiet ~config ?g
       >>= fun ((), _source) ->
       Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
   | Some (`Elt entry, decoder, src, off), leftover ->
+      Logs.debug (fun m -> m "Got a directory.");
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
         leftover
       >>= Pack.unpack tmp
@@ -129,7 +134,10 @@ let extract_with_reporter quiet ~config ?g
       Fmt.pr ">>> Received a folder: %s.\n%!" name;
       unpack_with_reporter quiet ~config ~total pack name hash
 
-let run_client quiet g sockaddr secure_port password yes =
+let run_client quiet g addr secure_port password yes =
+  let sockaddr = match addr with
+    | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
+    | _ -> assert false in
   let open Fiber in
   (match password with
   | Some password -> Fiber.return password
@@ -167,10 +175,10 @@ open Cmdliner
 open Args
 
 let relay =
-  let doc = "The IP address of the relay." in
+  let doc = "The address of the relay." in
   Arg.(
     value
-    & opt (addr_inet ~default:9000) Unix.(ADDR_INET (inet_addr_loopback, 9000))
+    & opt (addr ~default:9000) (`Inet (Unix.inet_addr_loopback, 9000))
     & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
 
 let password =

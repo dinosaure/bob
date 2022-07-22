@@ -54,4 +54,10 @@
  (public_name bob.dns)
  (modules bob_dns)
  (libraries duration mtime mtime.clock.os dns dns-client ipaddr ipaddr.unix
-   bob.fiber tls happy-eyeballs))
+   bob.fiber bob.tls happy-eyeballs))
+
+(library
+ (name bob_tls)
+ (public_name bob.tls)
+ (modules bob_tls)
+ (libraries tls cstruct bob.fiber))

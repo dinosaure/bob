@@ -20,6 +20,7 @@ jobs:
         opam pin add git+https://github.com/dinosaure/esperanto.git
         opam install cosmopolitan esperanto ocamlfind opam-monorepo
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
+        opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
     - name: Prepare dune files
       run: |
         cat >>dune-workspace <<EOF
@@ -42,9 +43,9 @@ jobs:
         EOF
     - name: Compilation
       run: |
-        opam monorepo lock
+        opam monorepo lock --require-cross-compile
         opam monorepo pull
-        opam exec -- dune build ./bin/bob.com
+        opam exec -- dune build --profile=release ./bin/bob.com
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:

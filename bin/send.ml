@@ -78,7 +78,10 @@ let generate_pack_file quiet ~config ~g compression path =
         ~level:(if compression then 4 else 0)
         ~config store compressed
 
-let run_server quiet g compression sockaddr secure_port password path =
+let run_server quiet g compression addr secure_port password path =
+  let sockaddr = match addr with
+    | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
+    | _ -> assert false in
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
@@ -112,10 +115,10 @@ open Cmdliner
 open Args
 
 let relay =
-  let doc = "The IP address of the relay." in
+  let doc = "The address of the relay." in
   Arg.(
     value
-    & opt (addr_inet ~default:9000) Unix.(ADDR_INET (inet_addr_loopback, 9000))
+    & opt (addr ~default:9000) (`Inet (Unix.inet_addr_loopback, 9000))
     & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
 
 let compression =
