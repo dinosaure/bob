@@ -495,7 +495,9 @@ let entry_with_filename ?level path =
 let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
-  | Error _ as err -> Fiber.return err
+  | Error (`Msg msg) as err ->
+      Log.err (fun m -> m "The file %a does not exists: %s" Fpath.pp path msg);
+      Fiber.return err
   | Ok file ->
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
       let hdr = hdr in
@@ -523,6 +525,11 @@ let make_one ?(level = 4) ~reporter ~finalise path =
       let file =
         Stream.tap
           (fun bstr ->
+            Log.debug (fun m -> m "Calculate the PACK hash with:");
+            Log.debug (fun m ->
+                m "@[<hov>%a@]"
+                  (Hxd_string.pp Hxd.default)
+                  (bigstring_to_string bstr));
             ctx := SHA256.feed_bigstring !ctx bstr;
             Fiber.return ())
           Stream.(singleton hdr_file ++ file)
@@ -535,7 +542,9 @@ let make_one ?(level = 4) ~reporter ~finalise path =
                <.> bigstring_of_string ~off:0 ~len:SHA256.length
                <.> SHA256.to_raw_string <.> SHA256.get)
                  !ctx))
-      |> fun stream -> Fiber.return (Ok stream)
+      |> fun stream ->
+      Log.debug (fun m -> m "The PACK stream is ready to be sent.");
+      Fiber.return (Ok stream)
 
 module First_pass = Carton.Dec.Fp (SHA256)
 module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)

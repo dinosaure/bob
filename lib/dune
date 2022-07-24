@@ -53,8 +53,18 @@
  (name bob_dns)
  (public_name bob.dns)
  (modules bob_dns)
- (libraries duration mtime mtime.clock.os dns dns-client ipaddr ipaddr.unix
-   bob.fiber bob.tls happy-eyeballs))
+ (libraries
+  duration
+  mtime
+  mtime.clock.os
+  dns
+  dns-client
+  ipaddr
+  ipaddr.unix
+  bob.fiber
+  bob.tls
+  mirage-crypto-rng.unix
+  happy-eyeballs))
 
 (library
  (name bob_tls)

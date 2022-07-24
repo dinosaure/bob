@@ -134,13 +134,26 @@ let extract_with_reporter quiet ~config ?g
       Fmt.pr ">>> Received a folder: %s.\n%!" name;
       unpack_with_reporter quiet ~config ~total pack name hash
 
-let run_client quiet g addr secure_port password yes =
-  let sockaddr =
-    match addr with
-    | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
-    | _ -> assert false
-  in
+let run_client quiet g dns addr secure_port password yes =
   let open Fiber in
+  (match addr with
+  | `Inet (inet_addr, port) ->
+      Fiber.return (Ok (Unix.ADDR_INET (inet_addr, port)))
+  | `Domain (domain_name, port) -> (
+      Bob_dns.gethostbyname6 dns domain_name >>= function
+      | Ok ip6 ->
+          Fiber.return
+            (Ok
+               (Unix.ADDR_INET (Ipaddr_unix.to_inet_addr (Ipaddr.V6 ip6), port)))
+      | Error _ -> (
+          Bob_dns.gethostbyname dns domain_name >>= function
+          | Ok ip4 ->
+              Fiber.return
+                (Ok
+                   (Unix.ADDR_INET
+                      (Ipaddr_unix.to_inet_addr (Ipaddr.V4 ip4), port)))
+          | Error _ as err -> Fiber.return err)))
+  >>? fun sockaddr ->
   (match password with
   | Some password -> Fiber.return password
   | None -> ask_password ())
@@ -165,9 +178,10 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
+  | `Msg err -> Fmt.pf ppf "%s." err
 
-let run quiet g sockaddr secure_port password yes =
-  match Fiber.run (run_client quiet g sockaddr secure_port password yes) with
+let run quiet g dns addr secure_port password yes =
+  match Fiber.run (run_client quiet g dns addr secure_port password yes) with
   | Ok () -> `Ok 0
   | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err;
@@ -194,8 +208,8 @@ let yes =
 let term =
   Term.(
     ret
-      (const run $ setup_logs $ setup_random $ relay $ secure_port $ password
-     $ yes))
+      (const run $ setup_logs $ setup_random $ setup_dns $ relay $ secure_port
+     $ password $ yes))
 
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in

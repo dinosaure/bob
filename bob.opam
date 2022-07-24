@@ -31,6 +31,7 @@ depends: [
   "progress"
   "dns-client"
   "happy-eyeballs"
+  "ca-certs"
   "ke"          {>= "0.6"}
   "alcotest"    {with-test}
   "spoke"

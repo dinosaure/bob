@@ -473,6 +473,9 @@ module Flow = struct
         k.init () >>= fun acc -> Fiber.return (encoder, o, acc)
       in
       let push (encoder, o, acc) i =
+        Log.debug (fun m -> m "Deflate:");
+        Log.debug (fun m ->
+            m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string i));
         deflate_zlib_until_await ~push:k.push ~acc
           (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
           o
@@ -707,10 +710,16 @@ module Stream = struct
         let stream (Sink k) =
           let rec go r =
             k.full r >>= function
-            | true -> Fiber.return r
+            | true ->
+                Log.debug (fun m ->
+                    m "The given sink is full, stop to read into: %a." Fpath.pp
+                      path);
+                Fiber.return r
             | false -> (
                 Fiber.read fd >>= function
-                | Ok `End -> Fiber.return r
+                | Ok `End ->
+                    Log.debug (fun m -> m "End of the file: %a" Fpath.pp path);
+                    Fiber.return r
                 | Ok (`Data bstr) -> k.push r bstr >>= go
                 | Error errno ->
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Fpath.pp path

@@ -78,12 +78,26 @@ let generate_pack_file quiet ~config ~g compression path =
         ~level:(if compression then 4 else 0)
         ~config store compressed
 
-let run_server quiet g compression addr secure_port password path =
-  let sockaddr =
-    match addr with
-    | `Inet (inet_addr, port) -> Unix.ADDR_INET (inet_addr, port)
-    | _ -> assert false
-  in
+let run_server quiet g dns compression addr secure_port password path =
+  let open Fiber in
+  (match addr with
+  | `Inet (inet_addr, port) ->
+      Fiber.return (Ok (Unix.ADDR_INET (inet_addr, port)))
+  | `Domain (domain_name, port) -> (
+      Bob_dns.gethostbyname6 dns domain_name >>= function
+      | Ok ip6 ->
+          Fiber.return
+            (Ok
+               (Unix.ADDR_INET (Ipaddr_unix.to_inet_addr (Ipaddr.V6 ip6), port)))
+      | Error _ -> (
+          Bob_dns.gethostbyname dns domain_name >>= function
+          | Ok ip4 ->
+              Fiber.return
+                (Ok
+                   (Unix.ADDR_INET
+                      (Ipaddr_unix.to_inet_addr (Ipaddr.V4 ip4), port)))
+          | Error _ as err -> Fiber.return err)))
+  >>? fun sockaddr ->
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
@@ -102,11 +116,12 @@ let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
+  | `Msg err -> Fmt.pf ppf "%s." err
 
-let run quiet g () compression sockaddr secure_port password path =
+let run quiet g () dns compression addr secure_port password path =
   match
     Fiber.run
-      (run_server quiet g compression sockaddr secure_port password path)
+      (run_server quiet g dns compression addr secure_port password path)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -172,5 +187,5 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ setup_random $ setup_temp $ compression
-       $ relay $ secure_port $ setup_password password $ path))
+        (const run $ setup_logs $ setup_random $ setup_temp $ setup_dns
+       $ compression $ relay $ secure_port $ setup_password password $ path))

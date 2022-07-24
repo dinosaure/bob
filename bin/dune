@@ -19,10 +19,35 @@
 (executable
  (name bob)
  (public_name bob)
- (modules prgrss transfer daemon bob clear bob_clear recv send relay connect
-   args)
- (libraries progress base64 ipaddr ipaddr.unix cmdliner fpath fmt.cli
-   logs.cli fmt.tty logs.fmt bob.password bob.unix bob.pack bob.tls bob.dns))
+ (modules
+  prgrss
+  transfer
+  daemon
+  bob
+  clear
+  bob_clear
+  recv
+  send
+  relay
+  connect
+  args)
+ (libraries
+  ca-certs
+  progress
+  base64
+  ipaddr
+  ipaddr.unix
+  cmdliner
+  fpath
+  fmt.cli
+  logs.cli
+  fmt.tty
+  logs.fmt
+  bob.password
+  bob.unix
+  bob.pack
+  bob.tls
+  bob.dns))
 
 ; (rule
 ;  (target bob.com)

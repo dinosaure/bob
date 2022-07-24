@@ -100,12 +100,13 @@ let addr ~default =
         let ( >>= ) = Result.bind in
         match String.split_on_char ':' str with
         | [ domain_name ] ->
-            Domain_name.of_string domain_name >>= fun domain_name ->
-            Ok (`Domain (domain_name, default))
+            Domain_name.of_string domain_name >>= Domain_name.host
+            >>= fun domain_name -> Ok (`Domain (domain_name, default))
         | domain_name :: port -> (
             let port = String.concat ":" port in
             try
-              Domain_name.of_string domain_name >>= fun domain_name ->
+              Domain_name.of_string domain_name >>= Domain_name.host
+              >>= fun domain_name ->
               Ok (`Domain (domain_name, int_of_string port))
             with _ -> Error (`Msg "Invalid port"))
         | _ -> assert false)
@@ -199,3 +200,57 @@ let temp =
     & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env)
 
 let setup_temp = Term.(const setup_temp $ temp)
+
+let nameserver_of_string str =
+  let ( let* ) = Result.bind in
+  match String.split_on_char ':' str with
+  | "tls" :: rest -> (
+      let str = String.concat ":" rest in
+      match String.split_on_char '!' str with
+      | [ nameserver ] ->
+          let* ipaddr, port =
+            Ipaddr.with_port_of_string ~default:853 nameserver
+          in
+          let* authenticator = Ca_certs.authenticator () in
+          let tls = Tls.Config.client ~authenticator () in
+          Ok (`Tls (tls, ipaddr, port))
+      | nameserver :: authenticator ->
+          let* ipaddr, port =
+            Ipaddr.with_port_of_string ~default:853 nameserver
+          in
+          let authenticator = String.concat "!" authenticator in
+          let* authenticator = X509.Authenticator.of_string authenticator in
+          let time () = Some (Ptime.v (Ptime_clock.now_d_ps ())) in
+          let authenticator = authenticator time in
+          let tls = Tls.Config.client ~authenticator () in
+          Ok (`Tls (tls, ipaddr, port))
+      | [] -> assert false)
+  | "tcp" :: nameserver | nameserver ->
+      let str = String.concat ":" nameserver in
+      let* ipaddr, port = Ipaddr.with_port_of_string ~default:53 str in
+      Ok (`Plaintext (ipaddr, port))
+
+let nameserver =
+  let parser = nameserver_of_string in
+  let pp ppf = function
+    | `Tls (_, ipaddr, 853) ->
+        Fmt.pf ppf "tls:%a!<authenticator>" Ipaddr.pp ipaddr
+    | `Tls (_, ipaddr, port) ->
+        Fmt.pf ppf "tls:%a:%d!<authenticator>" Ipaddr.pp ipaddr port
+    | `Plaintext (ipaddr, 53) -> Fmt.pf ppf "%a" Ipaddr.pp ipaddr
+    | `Plaintext (ipaddr, port) -> Fmt.pf ppf "%a:%d" Ipaddr.pp ipaddr port
+  in
+  Arg.conv (parser, pp) ~docv:"<nameserver>"
+
+let nameservers =
+  let doc = "The nameserver used to resolve domain-names." in
+  let env = Cmd.Env.info "BOB_NAMESERVER" in
+  Arg.(
+    value
+    & opt_all nameserver [ `Plaintext (Ipaddr.of_string "8.8.8.8", 53) ]
+    & info [ "nameserver" ] ~docs:common_options ~doc ~docv:"<nameserver>" ~env)
+
+let setup_dns nameservers =
+  Bob_dns.create ~edns:`Auto ~nameservers:(`Tcp, nameservers) ()
+
+let setup_dns = Term.(const setup_dns $ nameservers)
