@@ -109,7 +109,10 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
         Fiber.return None
     | Error _ -> Crypto.close flow >>= fun () -> Fiber.return None
   in
-  let stop flow = Crypto.close flow in
+  let stop flow =
+    finalise ();
+    Crypto.close flow
+  in
   Stream.Source { init; pull; stop }
 
 let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers

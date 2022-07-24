@@ -73,7 +73,16 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   let entries =
     List.map (function `Elt elt, _, _, _ -> elt | _ -> assert false) entries
   in
-  let total = List.length entries + 1 in
+  let total =
+    let acc =
+      match entry with _, _, `Base _ -> 0 | _, _, (`Ofs _ | `Ref _) -> 1
+    in
+    List.fold_left
+      (fun count -> function
+        | _, _, (`Ofs _ | `Ref _) -> succ count
+        | _, _, `Base _ -> count)
+      acc entries
+  in
   let entries = Source.list (entry :: entries) in
   Pack.collect entries >>= fun (status, oracle) ->
   Logs.debug (fun m -> m "All objects are collected.");

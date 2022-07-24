@@ -477,7 +477,7 @@ let entry_with_filename ?level path =
   let entry = Fpath.basename path in
   let length = String.length entry in
   let output =
-    Bigarray.Array1.create Bigarray.char Bigarray.c_layout (3 * length)
+    Bigarray.Array1.create Bigarray.char Bigarray.c_layout (5 * length)
   in
   match
     Zl.Def.Ns.deflate ?level
@@ -593,6 +593,7 @@ let rec until_await_or_peek :
       if src_len > 0 then Fiber.return (Some decoder, Some (src, src_len), acc)
       else Fiber.return (Some decoder, None, acc)
   | `End hash ->
+      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA256.pp hash);
       push acc (`End hash, None, De.bigstring_empty, 0) >>= fun acc ->
       Fiber.return (None, None, acc)
   | `Malformed err -> failwith err
@@ -703,7 +704,9 @@ let analyse ?decoder reporter =
                 until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc tmp
                   decoder)
     in
-    let full (_, _, acc) = k.full acc in
+    let full (decoder, _, acc) =
+      match decoder with None -> Fiber.return true | Some _ -> k.full acc
+    in
     let stop (_, _, acc) = k.stop acc in
     Stream.Sink { init; stop; full; push }
   in
