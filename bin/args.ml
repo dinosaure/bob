@@ -119,6 +119,17 @@ let addr ~default =
   in
   Arg.conv ~docv:"<addr>" (parser, pp)
 
+let default_relay =
+  let osau_re = Domain_name.(host_exn (of_string_exn "osau.re")) in
+  `Domain (osau_re, 9000)
+
+let relay =
+  let doc = "The address of the relay." in
+  Arg.(
+    value
+    & opt (addr ~default:9000) default_relay
+    & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
+
 let string_to_int_array str =
   let res = Array.make (String.length str / 2) 0 in
   for i = 0 to (String.length str / 2) - 1 do

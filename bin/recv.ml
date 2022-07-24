@@ -199,13 +199,6 @@ let run quiet g dns addr secure_port password yes =
 open Cmdliner
 open Args
 
-let relay =
-  let doc = "The address of the relay." in
-  Arg.(
-    value
-    & opt (addr ~default:9000) (`Inet (Unix.inet_addr_loopback, 9000))
-    & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
-
 let password =
   let doc = "The password to share." in
   Arg.(value & pos 0 (some string) None & info [] ~doc ~docv:"<password>")

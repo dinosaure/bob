@@ -131,13 +131,6 @@ let run quiet g () dns compression addr secure_port password path =
 open Cmdliner
 open Args
 
-let relay =
-  let doc = "The address of the relay." in
-  Arg.(
-    value
-    & opt (addr ~default:9000) (`Inet (Unix.inet_addr_loopback, 9000))
-    & info [ "r"; "relay" ] ~doc ~docv:"<addr>:<port>")
-
 let compression =
   Arg.(
     value
