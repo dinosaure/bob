@@ -247,7 +247,7 @@ let nameservers =
   let env = Cmd.Env.info "BOB_NAMESERVER" in
   Arg.(
     value
-    & opt_all nameserver [ `Plaintext (Ipaddr.of_string "8.8.8.8", 53) ]
+    & opt_all nameserver [ `Plaintext (Ipaddr.of_string_exn "8.8.8.8", 53) ]
     & info [ "nameserver" ] ~docs:common_options ~doc ~docv:"<nameserver>" ~env)
 
 let setup_dns nameservers =
