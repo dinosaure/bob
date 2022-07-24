@@ -32,13 +32,4 @@ let rec getline () =
       getline ()
   | None -> Fiber.return ()
 
-let () =
-  let rec go () =
-    Fmt.pr ">>> %!";
-    match input_line Stdlib.stdin with
-    | line ->
-        Fmt.pr "# %s\n%!" line;
-        go ()
-    | exception End_of_file -> ()
-  in
-  go ()
+let () = Fiber.run (getline ())

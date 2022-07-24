@@ -2,8 +2,6 @@ let () = Printexc.record_backtrace true
 
 open Cmdliner
 
-let default = Term.(ret (const (`Help (`Pager, None))))
-
 let () =
   let doc = "An universal & secure peer-to-peer file-transfer program." in
   let man =

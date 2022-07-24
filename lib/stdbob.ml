@@ -158,6 +158,8 @@ module LList = struct
      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
      SOFTWARE.
   *)
+  [@@@warning "-69"]
+
   type 'a seq = { mutable prev : 'a seq; mutable next : 'a seq }
 
   type 'a node = {
