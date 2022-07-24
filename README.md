@@ -230,13 +230,19 @@ Handshake is done with <server-identity>
 #### [Esperanto][esperanto], [Cosmopolitan][cosmopolitan] and Windows support
 
 Currently, the `bob` executable can be compiled with the `esperanto` toolchain.
-By this way, we are able to delier a `bob.com` which works _anywhere_. The
+By this way, we are able to deliver a `bob.com` which works _anywhere_. The
 status of it is experimental. However, few tweak on some libraries (specially
 `mirage-crypto` and `digestif`) are needed to be able to compile `bob`
 with this _toolchain_.
 
 The final executable, the `bob.com` seems to work on PowerShell (Windows) and
 obviously Linux.
+
+A CI exists which try to compile `bob` with Esperanto and Cosmopolitan. The
+builded artifact is available into the GitHub action which built the
+executable. Any users can download this artifact (see Actions and the last
+green GitHub Action, you will find a `bob.com` artifact) and execute it on
+their computer - there should be no prerequisites.
 
 [spoke]: https://github.com/dinosaure/spoke
 [article]: https://blog.osau.re/articles/spoke.html
@@ -246,3 +252,4 @@ obviously Linux.
 [albatross]: https://github.com/hannesm/albatross
 [esperanto]: https://github.com/dinosaure/esperanto
 [cosmopolitan]: https://github.com/jart/cosmopolitan
+[opam]: https://opam.ocaml.org/

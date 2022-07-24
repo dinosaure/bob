@@ -78,4 +78,44 @@ to handle this kind of packet.
   => New_server (uid, public, identity)
 ```
 
+The client will therefore receive several `New_server` packets and will
+therefore initiate an exchange with each of these servers. The server is
+waiting for the _handshake_ to start from any of the clients.
+
+### The begin of the handshake
+
+At this stage, the client gets the "public" information from a server and can
+compute the first packet of the _handshake_ with a given password:
+`X_and_client_identity`. `X` is calculated using `spoke`:
+```ocaml
+let New_server { uid; public; identity= server_identity; } = packet in
+match Spoke.hello ?g ~public password with
+| Ok (state, _X) ->
+  let packet = X_and_client_identity { _X; identity= client_identity; } in
+  send_to (to_server ~uid) packet
+| Error _ -> ...
+```
+
+The `client_identity` is the one given by the relay at the very beginning
+(see `Client_identity`). You must use the one given by the relay. Indeed, the
+only impartial authority that can identify peers is the relay. The handshake
+needs these "identities" for verification. If you use another identity, you
+will not be able to finalize the handshake (since the peer will surely use
+what the relay says identifies you).
+
+The packet is destined for a server (not the relay). You must therefore specify
+to whom you want to send this packet, its `uid`.
+
+```
+| destination | packet |           data            |
+    [ XXXX ]    [ 07 ]   _X client_identity '\000'
+  => X_and_client_identity (_X, client_identity)
+```
+
+`_X` is always 32 bytes and `client_identity` is delimited by an `\000` (this
+implies that `client_identity` must not contain an `\000`).
+
+A server who received `X_and_client_identity` should respond to the client a
+new packet: `Y_and_server_validator`.
+
 [spoke]: https://github.com/dinosaure/spoke
