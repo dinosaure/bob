@@ -46,4 +46,5 @@ pin-depends: [
   [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#d347b7c0365bb84386ce6002528817cfe7a14837" ]
   [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#d347b7c0365bb84386ce6002528817cfe7a14837" ]
   [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#d347b7c0365bb84386ce6002528817cfe7a14837" ]
+  [ "zarith.dev" "git+https://github.com/mirage/Zarith.git#c59525969db1ea75b1be8fc6e274eac3aff5ebb7" ]
 ]
