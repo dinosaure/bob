@@ -38,7 +38,7 @@
   ipaddr
   ipaddr.unix
   cmdliner
-  fpath
+  bob.fpath
   fmt.cli
   logs.cli
   fmt.tty

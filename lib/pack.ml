@@ -35,10 +35,10 @@ let scheduler =
   }
 
 type store = {
-  store : (SHA256.t, Fpath.t) Hashtbl.t;
-  rstore : (Fpath.t, SHA256.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
+  store : (SHA256.t, Bob_fpath.t) Hashtbl.t;
+  rstore : (Bob_fpath.t, SHA256.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
   root : (SHA256.t * SHA256.t) option;
-  path : Fpath.t;
+  path : Bob_fpath.t;
 }
 
 let length { rstore; _ } =
@@ -50,14 +50,16 @@ let length { rstore; _ } =
 
 module Filesystem = struct
   let readdir =
-    let readdir d = try Sys.readdir (Fpath.to_string d) with _exn -> [||] in
+    let readdir d =
+      try Sys.readdir (Bob_fpath.to_string d) with _exn -> [||]
+    in
     Array.to_list <.> readdir
 
   let rec traverse ~get ~add visited stack ~f acc =
     match stack with
     | [] -> Fiber.return acc
     | x :: r ->
-        if List.exists (Fpath.equal x) visited then
+        if List.exists (Bob_fpath.equal x) visited then
           traverse ~get ~add visited r ~f acc
         else
           let open Fiber in
@@ -67,7 +69,7 @@ module Filesystem = struct
   let fold ?(dotfiles = false) ~f acc paths =
     let dir_child d acc bname =
       if (not dotfiles) && bname.[0] = '.' then acc
-      else Fpath.(d / bname) :: acc
+      else Bob_fpath.(d / bname) :: acc
     in
     let add stack vs = vs @ stack in
     let get path =
@@ -98,9 +100,10 @@ let rec full_write ~path fd bstr off len =
   | Ok len' when len' - len = 0 -> Fiber.return fd
   | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
   | Error `Closed ->
-      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Fpath.pp path
+      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Bob_fpath.pp
+        path
   | Error (`Unix errno) ->
-      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
+      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
         (Unix.error_message errno)
 
 (* XXX(dinosaure): [mmap] can be a solution here but it seems that the kernel
@@ -109,8 +112,8 @@ let rec full_write ~path fd bstr off len =
    (cc XXX(rand)). We will stay simple and see how we can improve that. *)
 let load_file path =
   let open Fiber in
-  Log.debug (fun m -> m "Load the file: %a." Fpath.pp path);
-  let len = (Unix.stat (Fpath.to_string path)).Unix.st_size in
+  Log.debug (fun m -> m "Load the file: %a." Bob_fpath.pp path);
+  let len = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
   Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
   | Ok fd -> (
       let res = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
@@ -119,46 +122,49 @@ let load_file path =
         Fiber.close fd >>| fun () -> Carton.Dec.v ~kind:`C res
       with exn -> Fiber.close fd >>= fun () -> raise exn)
   | Error errno ->
-      Fmt.failwith "openfile(%a): %s" Fpath.pp path (Unix.error_message errno)
+      Fmt.failwith "openfile(%a): %s" Bob_fpath.pp path
+        (Unix.error_message errno)
 
 let serialize_directory entries =
   (* XXX(dinosaure): à la Git. *)
-  let entries = List.sort (fun (a, _) (b, _) -> Fpath.compare a b) entries in
+  let entries =
+    List.sort (fun (a, _) (b, _) -> Bob_fpath.compare a b) entries
+  in
   let open Stream in
   let open Stream in
   Stream.of_list entries >>= fun (p, hash) ->
-  match Fpath.is_dir_path p with
+  match Bob_fpath.is_dir_path p with
   | true ->
       Stream.of_list
         [
           "40000 ";
-          Fpath.(to_string (rem_empty_seg p));
+          Bob_fpath.(to_string (rem_empty_seg p));
           "\x00";
           SHA256.to_raw_string hash;
         ]
       |> Fiber.return
   | false ->
       Stream.of_list
-        [ "100644 "; Fpath.to_string p; "\x00"; SHA256.to_raw_string hash ]
+        [ "100644 "; Bob_fpath.to_string p; "\x00"; SHA256.to_raw_string hash ]
       |> Fiber.return
 
 let load_directory rstore ~root path =
-  Log.debug (fun m -> m "Load directory: %a." Fpath.pp path);
-  let entries = Filesystem.readdir Fpath.(root // path) in
+  Log.debug (fun m -> m "Load directory: %a." Bob_fpath.pp path);
+  let entries = Filesystem.readdir Bob_fpath.(root // path) in
   let entries =
     List.filter_map
       (fun entry ->
-        let key = Fpath.(path / entry) in
-        let key = Fpath.relativize ~root key in
+        let key = Bob_fpath.(path / entry) in
+        let key = Bob_fpath.relativize ~root key in
         Log.debug (fun m ->
-            m "relativize root:%a %a" Fpath.pp root Fpath.pp path);
+            m "relativize root:%a %a" Bob_fpath.pp root Bob_fpath.pp path);
         let key =
-          match key with Some key -> key | None -> Fpath.(path / entry)
+          match key with Some key -> key | None -> Bob_fpath.(path / entry)
         in
-        Log.debug (fun m -> m "Try to find: %a." Fpath.pp key);
+        Log.debug (fun m -> m "Try to find: %a." Bob_fpath.pp key);
         match Hashtbl.find_opt rstore key with
-        | Some (hash, `Dir) -> Some (Fpath.(to_dir_path (v entry)), hash)
-        | Some (hash, `Reg) -> Some (Fpath.v entry, hash)
+        | Some (hash, `Dir) -> Some (Bob_fpath.(to_dir_path (v entry)), hash)
+        | Some (hash, `Reg) -> Some (Bob_fpath.v entry, hash)
         | Some (_, `Root) -> None
         | None -> None)
       entries
@@ -170,7 +176,7 @@ let load_directory rstore ~root path =
     (bigstring_of_string str ~off:0 ~len:(String.length str))
 
 let load_root ~real_length path hash =
-  let basename = Fpath.basename path in
+  let basename = Bob_fpath.basename path in
   let entry =
     Fmt.str "%s\000%s%d" basename (SHA256.to_raw_string hash) real_length
   in
@@ -186,10 +192,10 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
       let real_length = Hashtbl.length store.rstore in
       Scheduler.inj (load_root ~real_length store.path hash_of_tree)
   | Some path, _ -> (
-      let real_path = Fpath.(store.path // path) in
-      let stat = Unix.stat Fpath.(to_string real_path) in
+      let real_path = Bob_fpath.(store.path // path) in
+      let stat = Unix.stat Bob_fpath.(to_string real_path) in
       Log.debug (fun m ->
-          m "Load %a object (%a)." Fpath.pp path Fpath.pp real_path);
+          m "Load %a object (%a)." Bob_fpath.pp path Bob_fpath.pp real_path);
       match stat.Unix.st_kind with
       | Unix.S_REG -> Scheduler.inj (load_file real_path)
       | Unix.S_DIR ->
@@ -355,7 +361,7 @@ let pack ~reporter ?level ~length store =
 let hash_of_filename path =
   let open Fiber in
   let open Stream in
-  let len = Unix.(stat (Fpath.to_string path)).Unix.st_size in
+  let len = Unix.(stat (Bob_fpath.to_string path)).Unix.st_size in
   let hdr = Fmt.str "blob %d\000" len in
   let ctx = SHA256.feed_string SHA256.empty hdr in
   Stream.of_file path >>= function
@@ -367,11 +373,11 @@ let hash_of_directory ~root rstore path =
   let entries =
     List.filter_map
       (fun entry ->
-        let key = Fpath.(path / entry) in
-        let key = Option.get (Fpath.relativize ~root key) in
+        let key = Bob_fpath.(path / entry) in
+        let key = Option.get (Bob_fpath.relativize ~root key) in
         match Hashtbl.find_opt rstore key with
-        | Some (hash, `Dir) -> Some (Fpath.(to_dir_path (v entry)), hash)
-        | Some (hash, `Reg) -> Some (Fpath.v entry, hash)
+        | Some (hash, `Dir) -> Some (Bob_fpath.(to_dir_path (v entry)), hash)
+        | Some (hash, `Reg) -> Some (Bob_fpath.v entry, hash)
         | Some (_, `Root) -> None
         | None -> None)
       entries
@@ -379,14 +385,14 @@ let hash_of_directory ~root rstore path =
   let open Fiber in
   let open Stream in
   Stream.to_string (serialize_directory entries) >>= fun str ->
-  Log.debug (fun m -> m "Serialization of %a:" Fpath.pp path);
+  Log.debug (fun m -> m "Serialization of %a:" Bob_fpath.pp path);
   Log.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
   let hdr = Fmt.str "tree %d\000" (String.length str) in
   Stream.(into (SHA256.sink_string ()) (double hdr str))
 
 let hash_of_root ~real_length ~root hash =
   let str =
-    Fmt.str "%s\000%s%d" (Fpath.basename root)
+    Fmt.str "%s\000%s%d" (Bob_fpath.basename root)
       (SHA256.to_raw_string hash)
       real_length
   in
@@ -395,24 +401,24 @@ let hash_of_root ~real_length ~root hash =
 
 let store root =
   let open Fiber in
-  let rstore : (Fpath.t, SHA256.t * [ `Reg | `Dir | `Root ]) Hashtbl.t =
+  let rstore : (Bob_fpath.t, SHA256.t * [ `Reg | `Dir | `Root ]) Hashtbl.t =
     Hashtbl.create 0x100
   in
   let compute path =
-    Log.debug (fun m -> m "Compute %a." Fpath.pp path);
-    let stat = Unix.stat (Fpath.to_string path) in
+    Log.debug (fun m -> m "Compute %a." Bob_fpath.pp path);
+    let stat = Unix.stat (Bob_fpath.to_string path) in
     match stat.Unix.st_kind with
     | Unix.S_REG ->
         hash_of_filename path >>= fun hash ->
-        let path = Stdlib.Option.get (Fpath.relativize ~root path) in
-        Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
+        let path = Stdlib.Option.get (Bob_fpath.relativize ~root path) in
+        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
-        Log.debug (fun m -> m "Calculate the hash of %a" Fpath.pp path);
+        Log.debug (fun m -> m "Calculate the hash of %a" Bob_fpath.pp path);
         hash_of_directory ~root rstore path >>= fun hash ->
-        let path = Stdlib.Option.get (Fpath.relativize ~root path) in
-        Log.debug (fun m -> m "%a -> %a" Fpath.pp path SHA256.pp hash);
+        let path = Stdlib.Option.get (Bob_fpath.relativize ~root path) in
+        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Dir);
         Fiber.return (Some hash)
     | _ -> Fiber.return None
@@ -428,14 +434,14 @@ let store root =
   let store = Hashtbl.create (Hashtbl.length rstore) in
   Hashtbl.iter (fun v (k, _) -> Hashtbl.add store k v) rstore;
   let hashes_for_directory =
-    if Sys.is_directory (Fpath.to_string root) then (
+    if Sys.is_directory (Bob_fpath.to_string root) then (
       let hash_of_tree, _ = Hashtbl.find rstore root in
       let real_length = Hashtbl.length rstore in
       let hash_of_root = hash_of_root ~real_length ~root hash_of_tree in
       Log.debug (fun m -> m "Hash of root: %a" SHA256.pp hash_of_root);
       Log.debug (fun m ->
-          m "Hash of tree: %a (%a)" SHA256.pp hash_of_tree Fpath.pp root);
-      Hashtbl.add rstore (Fpath.v "./") (hash_of_root, `Root);
+          m "Hash of tree: %a (%a)" SHA256.pp hash_of_tree Bob_fpath.pp root);
+      Hashtbl.add rstore (Bob_fpath.v "./") (hash_of_root, `Root);
       Some (hash_of_root, hash_of_tree))
     else None
   in
@@ -449,7 +455,7 @@ let store root =
     List.fold_left (fun set hash -> Set.add hash set) Set.empty hashes
   in
   let hashes = Set.elements hashes in
-  Log.debug (fun m -> m "Store of %a." Fpath.pp root);
+  Log.debug (fun m -> m "Store of %a." Bob_fpath.pp root);
   Fiber.return
     ( Stream.of_list hashes,
       { store; rstore; root = hashes_for_directory; path = root } )
@@ -474,7 +480,7 @@ let encode_header_of_entry ~kind ~length =
   Buffer.contents buf
 
 let entry_with_filename ?level path =
-  let entry = Fpath.basename path in
+  let entry = Bob_fpath.basename path in
   let length = String.length entry in
   let output =
     Bigarray.Array1.create Bigarray.char Bigarray.c_layout (5 * length)
@@ -496,7 +502,8 @@ let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
   | Error (`Msg msg) as err ->
-      Log.err (fun m -> m "The file %a does not exists: %s" Fpath.pp path msg);
+      Log.err (fun m ->
+          m "The file %a does not exists: %s" Bob_fpath.pp path msg);
       Fiber.return err
   | Ok file ->
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
@@ -509,7 +516,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
       let hdr_name, name = entry_with_filename ~level path in
       let hdr_file =
         encode_header_of_entry ~kind:_C
-          ~length:(Unix.stat (Fpath.to_string path)).Unix.st_size
+          ~length:(Unix.stat (Bob_fpath.to_string path)).Unix.st_size
         |> fun str -> bigstring_of_string str ~off:0 ~len:(String.length str)
       in
       let zlib = Flow.deflate_zlib ~q ~w ~level in
@@ -869,8 +876,8 @@ let collect entries =
 
 let verify ?reporter:(verbose = ignore) ~oracle path matrix =
   let open Fiber in
-  let fd = Unix.openfile (Fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
-  let st = Unix.LargeFile.stat (Fpath.to_string path) in
+  let fd = Unix.openfile (Bob_fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
+  let st = Unix.LargeFile.stat (Bob_fpath.to_string path) in
   let pack =
     Carton.Dec.make (fd, st) ~allocate:make_window
       ~z:(De.bigstring_create De.io_buffer_size)
@@ -895,9 +902,9 @@ let readdir ~path contents =
     let hash = SHA256.of_raw_string (Cstruct.to_string hash) in
     match Cstruct.to_string perm with
     | "40000" ->
-        Some (`Dir (Fpath.(path / Cstruct.to_string name), hash), contents)
+        Some (`Dir (Bob_fpath.(path / Cstruct.to_string name), hash), contents)
     | "100644" ->
-        Some (`Reg (Fpath.(path / Cstruct.to_string name), hash), contents)
+        Some (`Reg (Bob_fpath.(path / Cstruct.to_string name), hash), contents)
     | _ -> failwith "Invalid kind of entry into a tree"
   in
   let pull = Fiber.return <.> pull in
@@ -919,8 +926,8 @@ let rec create_filesystem ~reporter pack =
   Stream.Sink { init; push; full; stop }
 
 and create_directory ~reporter pack path hash =
-  if not (Sys.file_exists (Fpath.to_string path)) then
-    Sys.mkdir (Fpath.to_string path) 0o755;
+  if not (Sys.file_exists (Bob_fpath.to_string path)) then
+    Sys.mkdir (Bob_fpath.to_string path) 0o755;
   let contents =
     Carton.Dec.weight_of_uid ~map pack ~weight:Carton.Dec.null hash
     |> fun weight ->
@@ -952,7 +959,8 @@ and create_file pack path hash =
   >>= function
   | Error errno ->
       Log.err (fun m ->
-          m "Impossible to save %a: %s" Fpath.pp path (Unix.error_message errno));
+          m "Impossible to save %a: %s" Bob_fpath.pp path
+            (Unix.error_message errno));
       Fiber.return pack
   | Ok fd ->
       let open Fiber in
@@ -968,8 +976,10 @@ let unpack path status =
   with
   | None -> Fiber.return (Error `No_root)
   | Some root ->
-      let fd = Unix.openfile (Fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
-      let st = Unix.LargeFile.stat (Fpath.to_string path) in
+      let fd =
+        Unix.openfile (Bob_fpath.to_string path) Unix.[ O_RDONLY ] 0o644
+      in
+      let st = Unix.LargeFile.stat (Bob_fpath.to_string path) in
       let id =
         Array.fold_left
           (fun tbl status ->

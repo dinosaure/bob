@@ -100,7 +100,7 @@ let unpack_with_reporter quiet ~config ~total pack name hash =
   @@ fun (reporter, finalise) ->
   reporter 2;
   (* XXX(dinosaure): report the commit and the root directory. *)
-  Pack.create_directory ~reporter pack (Fpath.v name) hash >>= fun _ ->
+  Pack.create_directory ~reporter pack (Bob_fpath.v name) hash >>= fun _ ->
   finalise ();
   Fiber.return (Ok ())
 
@@ -131,7 +131,7 @@ let extract_with_reporter quiet ~config ?g
       in
       Stream.run ~from
         ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-        ~into:(Sink.file (Fpath.v name))
+        ~into:(Sink.file (Bob_fpath.v name))
       >>= fun ((), _source) ->
       Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
   | Some (`Elt entry, decoder, src, off), leftover ->
@@ -189,7 +189,7 @@ let pp_error ppf = function
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s." err
 
-let run quiet g dns addr secure_port password yes =
+let run quiet g () dns addr secure_port password yes =
   match Fiber.run (run_client quiet g dns addr secure_port password yes) with
   | Ok () -> `Ok 0
   | Error err ->
@@ -203,15 +203,11 @@ let password =
   let doc = "The password to share." in
   Arg.(value & pos 0 (some string) None & info [] ~doc ~docv:"<password>")
 
-let yes =
-  let doc = "Answer yes to all bob questions without prompting." in
-  Arg.(value & flag & info [ "y"; "yes" ] ~doc)
-
 let term =
   Term.(
     ret
-      (const run $ setup_logs $ setup_random $ setup_dns $ relay $ secure_port
-     $ password $ yes))
+      (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
+     $ term_setup_dns $ relay $ secure_port $ password $ yes))
 
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in

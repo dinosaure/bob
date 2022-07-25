@@ -176,7 +176,7 @@ val parallel_iter : f:('a -> unit t) -> 'a list -> unit t
 (* {2: Unix operations.} *)
 
 val openfile :
-  Fpath.t ->
+  Bob_fpath.t ->
   Unix.open_flag list ->
   int ->
   (Unix.file_descr, Unix.error) result t

@@ -5,6 +5,13 @@
  (libraries ke))
 
 (library
+ (name bob_fpath)
+ (public_name bob.fpath)
+ (modules bob_fpath)
+ (flags :standard -w -6-27-32-33-39)
+ (libraries astring result))
+
+(library
  (name bob)
  (public_name bob)
  (modules crypto state protocol bob)
@@ -23,19 +30,19 @@
  (foreign_stubs
   (language c)
   (names bob))
- (libraries bob.std fpath ke bheap logs unix))
+ (libraries bob.std bob.fpath ke bheap logs unix))
 
 (library
  (name stream)
  (public_name bob.stream)
  (modules stream)
- (libraries hxd.core hxd.string fpath decompress.zl bob.std bob.fiber))
+ (libraries hxd.core hxd.string bob.fpath decompress.zl bob.std bob.fiber))
 
 (library
  (name temp)
  (public_name bob.temp)
  (modules temp)
- (libraries fmt fpath))
+ (libraries fmt bob.fpath))
 
 (library
  (name pack)

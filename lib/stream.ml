@@ -39,7 +39,7 @@ module Source = struct
     let init () =
       Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
       | Error errno ->
-          Fmt.failwith "openfile(%a): %s" Fpath.pp path
+          Fmt.failwith "openfile(%a): %s" Bob_fpath.pp path
             (Unix.error_message errno)
       | Ok fd -> (
           match offset with
@@ -54,7 +54,7 @@ module Source = struct
       | Ok `End -> Fiber.return None
       | Ok (`Data str) -> Fiber.return (Some (str, fd))
       | Error errno ->
-          Fmt.failwith "read(%d|%a): %s" (Obj.magic fd) Fpath.pp path
+          Fmt.failwith "read(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
             (Unix.error_message errno)
     in
     Source { init; stop; pull }
@@ -135,9 +135,10 @@ let rec full_write ~path fd bstr off len =
   | Ok len' when len' - len = 0 -> Fiber.return fd
   | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
   | Error `Closed ->
-      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Fpath.pp path
+      Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Bob_fpath.pp
+        path
   | Error (`Unix errno) ->
-      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Fpath.pp path
+      Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
         (Unix.error_message errno)
 
 module Sink = struct
@@ -314,7 +315,7 @@ module Sink = struct
       Fiber.openfile path flags 0o644 >>= function
       | Ok fd -> Fiber.return fd
       | Error errno ->
-          Fmt.failwith "openfile(%a): %s" Fpath.pp path
+          Fmt.failwith "openfile(%a): %s" Bob_fpath.pp path
             (Unix.error_message errno)
     in
     let stop fd = Fiber.close fd in
@@ -330,7 +331,7 @@ module Sink = struct
   let stdout =
     let init () = Fiber.return () in
     let push () bstr =
-      full_write ~path:(Fpath.v "<stdout>") Unix.stdout bstr 0
+      full_write ~path:(Bob_fpath.v "<stdout>") Unix.stdout bstr 0
         (Bigarray.Array1.dim bstr)
       >>= fun _stdout -> Fiber.return ()
     in
@@ -500,7 +501,7 @@ module Flow = struct
         in
         Fiber.openfile path flags 0o644 >>= function
         | Error errno ->
-            Fmt.failwith "openfile(%a): %s" Fpath.pp path
+            Fmt.failwith "openfile(%a): %s" Bob_fpath.pp path
               (Unix.error_message errno)
         | Ok fd -> (
             match offset with
@@ -705,25 +706,27 @@ module Stream = struct
     | Error errno ->
         Fiber.return
           (Error
-             (msgf "openfile(%a): %s" Fpath.pp path (Unix.error_message errno)))
+             (msgf "openfile(%a): %s" Bob_fpath.pp path
+                (Unix.error_message errno)))
     | Ok fd ->
         let stream (Sink k) =
           let rec go r =
             k.full r >>= function
             | true ->
                 Log.debug (fun m ->
-                    m "The given sink is full, stop to read into: %a." Fpath.pp
-                      path);
+                    m "The given sink is full, stop to read into: %a."
+                      Bob_fpath.pp path);
                 Fiber.return r
             | false -> (
                 Fiber.read fd >>= function
                 | Ok `End ->
-                    Log.debug (fun m -> m "End of the file: %a" Fpath.pp path);
+                    Log.debug (fun m ->
+                        m "End of the file: %a" Bob_fpath.pp path);
                     Fiber.return r
                 | Ok (`Data bstr) -> k.push r bstr >>= go
                 | Error errno ->
-                    Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Fpath.pp path
-                      (Unix.error_message errno))
+                    Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Bob_fpath.pp
+                      path (Unix.error_message errno))
           in
           let stop r = Fiber.close fd >>= fun () -> k.stop r in
           bracket go ~init:k.init ~stop

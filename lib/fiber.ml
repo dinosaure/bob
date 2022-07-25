@@ -140,7 +140,7 @@ let rec parallel_map ~f = function
 
 let openfile fpath flags mode =
   fork (fun () ->
-      try return (Ok (Unix.openfile (Fpath.to_string fpath) flags mode))
+      try return (Ok (Unix.openfile (Bob_fpath.to_string fpath) flags mode))
       with Unix.Unix_error (errno, _, _) -> return (Error errno))
   >>= wait
 

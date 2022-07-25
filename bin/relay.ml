@@ -72,7 +72,7 @@ let backlog =
 let pid =
   let doc = "Write into a file the PID of the relay." in
   let env = Cmd.Env.info "BOB_PID" in
-  let fpath = Arg.conv (Fpath.of_string, Fpath.pp) in
+  let fpath = Arg.conv (Bob_fpath.of_string, Bob_fpath.pp) in
   Arg.(
     value
     & opt (some fpath) None
@@ -82,11 +82,11 @@ let setup_pid = function
   | None -> ()
   | Some fpath ->
       let pid = Unix.getpid () in
-      let oc = open_out_bin (Fpath.to_string fpath) in
+      let oc = open_out_bin (Bob_fpath.to_string fpath) in
       output_string oc (Fmt.str "%d" pid);
       close_out oc
 
-let setup_pid = Term.(const setup_pid $ pid)
+let term_setup_pid = Term.(const setup_pid $ pid)
 
 let cmd =
   let doc = "Launch the Bob relay." in
@@ -103,5 +103,36 @@ let cmd =
     (Cmd.info "relay" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ daemonize $ timeout $ inet_addr $ port
-       $ secure_port $ backlog $ setup_pid))
+        (const run $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
+       $ secure_port $ backlog $ term_setup_pid))
+
+type configuration = {
+  quiet : bool;
+  daemonize : string option;
+  timeout : float;
+  inet_addr : Unix.inet_addr;
+  port : int;
+  secure_port : int;
+  backlog : int;
+}
+
+let setup_relay quiet daemonize timeout inet_addr port secure_port backlog () =
+  { quiet; daemonize; timeout; inet_addr; port; secure_port; backlog }
+
+open Args
+
+let inet_addr =
+  let doc = "Set the source address where the relay will be bound." in
+  Arg.(
+    value
+    & pos 1 inet_addr Unix.inet_addr_any
+    & info [] ~doc ~docv:"<inet-addr>")
+
+let port =
+  let doc = "Set the port where the relay will listen." in
+  Arg.(value & pos 2 int 9000 & info [] ~doc ~docv:"<port>")
+
+let term_setup_relay =
+  Term.(
+    const setup_relay $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
+    $ secure_port $ backlog $ term_setup_pid)

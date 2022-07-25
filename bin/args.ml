@@ -67,7 +67,7 @@ let setup_logs utf_8 style_renderer level =
   Logs.set_reporter reporter;
   Option.is_none level
 
-let setup_logs = Term.(const setup_logs $ utf_8 $ renderer $ verbosity)
+let term_setup_logs = Term.(const setup_logs $ utf_8 $ renderer $ verbosity)
 
 let inet_addr =
   let parser str =
@@ -164,7 +164,7 @@ let setup_random = function
   | None -> Random.State.make_self_init ()
   | Some seed -> Random.State.make seed
 
-let setup_random = Term.(const setup_random $ seed)
+let term_setup_random = Term.(const setup_random $ seed)
 
 let secure_port =
   let doc = "The port of the relay where secured rooms are available." in
@@ -184,8 +184,8 @@ let setup_password quiet g password =
       if not quiet then Fmt.pr "Password: %s\n%!" password;
       password
 
-let setup_password password =
-  Term.(const setup_password $ setup_logs $ setup_random $ password)
+let term_setup_password password =
+  Term.(const setup_password $ term_setup_logs $ term_setup_random $ password)
 
 let setup_temp = Option.iter Temp.set_default_directory
 
@@ -194,23 +194,23 @@ let temp =
   let env = Cmd.Env.info "BOB_TMP" in
   let directory =
     let parser str =
-      match Fpath.of_string str with
+      match Bob_fpath.of_string str with
       | Ok v ->
           if not (Sys.file_exists str) then
-            Error (msgf "%a does not exist" Fpath.pp v)
+            Error (msgf "%a does not exist" Bob_fpath.pp v)
           else if not (Sys.is_directory str) then
-            Error (msgf "%a is not a directory" Fpath.pp v)
-          else Ok (Fpath.to_dir_path v)
+            Error (msgf "%a is not a directory" Bob_fpath.pp v)
+          else Ok (Bob_fpath.to_dir_path v)
       | Error _ as err -> err
     in
-    Arg.conv (parser, Fpath.pp)
+    Arg.conv (parser, Bob_fpath.pp)
   in
   Arg.(
     value
     & opt (some directory) None
     & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env)
 
-let setup_temp = Term.(const setup_temp $ temp)
+let term_setup_temp = Term.(const setup_temp $ temp)
 
 let nameserver_of_string str =
   let ( let* ) = Result.bind in
@@ -264,4 +264,21 @@ let nameservers =
 let setup_dns nameservers =
   Bob_dns.create ~edns:`Auto ~nameservers:(`Tcp, nameservers) ()
 
-let setup_dns = Term.(const setup_dns $ nameservers)
+let term_setup_dns = Term.(const setup_dns $ nameservers)
+
+let compression =
+  Arg.(
+    value
+    & vflag true
+        [
+          (true, info [ "compress" ] ~doc:"Explicitly compress objects");
+          ( false,
+            info [ "no-compression" ]
+              ~doc:
+                "Explicitly store objects as they are (useful for video/image)"
+          );
+        ])
+
+let yes =
+  let doc = "Answer yes to all bob questions without prompting." in
+  Arg.(value & flag & info [ "y"; "yes" ] ~doc)

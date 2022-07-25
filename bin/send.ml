@@ -13,7 +13,7 @@ let compress_with_reporter quiet ~compression ~config store hashes =
   finalise ();
   res
 
-type pack = Stream of Stdbob.bigstring Stream.stream | File of Fpath.t
+type pack = Stream of Stdbob.bigstring Stream.stream | File of Bob_fpath.t
 
 let emit_with_reporter quiet ?g ?level ~config store
     (objects : Digestif.SHA1.t Carton.Enc.q Stream.stream) =
@@ -23,7 +23,7 @@ let emit_with_reporter quiet ?g ?level ~config store
   let open Fiber in
   let open Stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
-  Logs.debug (fun m -> m "Generate the PACK file: %a" Fpath.pp path);
+  Logs.debug (fun m -> m "Generate the PACK file: %a" Bob_fpath.pp path);
   let flow =
     Pack.make ?level
       ~reporter:(Fiber.return <.> reporter <.> Stdbob.always 1)
@@ -34,7 +34,7 @@ let emit_with_reporter quiet ?g ?level ~config store
   Fiber.return (File path)
 
 let emit_one_with_reporter quiet ?level ~config path =
-  let total = Unix.(stat (Fpath.to_string path)).Unix.st_size in
+  let total = Unix.(stat (Bob_fpath.to_string path)).Unix.st_size in
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
@@ -48,7 +48,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
   | Stream stream ->
       Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
-      let total = (Unix.stat (Fpath.to_string path)).Unix.st_size in
+      let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
       with_reporter ~config quiet (make_tranfer_bar ~total)
       @@ fun (reporter, finalise) ->
       let open Fiber in
@@ -131,19 +131,6 @@ let run quiet g () dns compression addr secure_port password path =
 open Cmdliner
 open Args
 
-let compression =
-  Arg.(
-    value
-    & vflag true
-        [
-          (true, info [ "compress" ] ~doc:"Explicitly compress objects");
-          ( false,
-            info [ "no-compression" ]
-              ~doc:
-                "Explicitly store objects as they are (useful for video/image)"
-          );
-        ])
-
 let password =
   let doc = "The password to share." in
   Arg.(
@@ -155,12 +142,12 @@ let path =
   let doc = "Document to archive." in
   let existing_object =
     let parser str =
-      match Fpath.of_string str with
+      match Bob_fpath.of_string str with
       | Ok v when Sys.file_exists str -> Ok v
-      | Ok v -> Error (`Msg (Fmt.str "%a does not exist" Fpath.pp v))
+      | Ok v -> Error (`Msg (Fmt.str "%a does not exist" Bob_fpath.pp v))
       | Error _ as err -> err
     in
-    Arg.conv (parser, Fpath.pp)
+    Arg.conv (parser, Bob_fpath.pp)
   in
   Arg.(
     required & pos 0 (some existing_object) None & info [] ~doc ~docv:"<path>")
@@ -180,5 +167,7 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ setup_logs $ setup_random $ setup_temp $ setup_dns
-       $ compression $ relay $ secure_port $ setup_password password $ path))
+        (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
+       $ term_setup_dns $ compression $ relay $ secure_port
+        $ term_setup_password password
+        $ path))

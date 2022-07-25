@@ -22,7 +22,6 @@ depends: [
   "base64"      {>= "3.5.0"}
   "bigstringaf"
   "cmdliner"
-  "fpath"
   "ipaddr"
   "mirage-crypto"
   "psq"

@@ -1,6 +1,6 @@
 type store
 
-val store : Fpath.t -> (Digestif.SHA1.t Stream.stream * store) Fiber.t
+val store : Bob_fpath.t -> (Digestif.SHA1.t Stream.stream * store) Fiber.t
 (** [store path] aggregates all files and directories from the given path. It
     returns a [store] and a stream of hash of these objects. *)
 
@@ -31,7 +31,7 @@ val make_one :
   ?level:int ->
   reporter:(int -> unit Fiber.t) ->
   finalise:(unit -> unit) ->
-  Fpath.t ->
+  Bob_fpath.t ->
   (Stdbob.bigstring Stream.stream, [> `Msg of string ]) result Fiber.t
 (** [make ?level ~reporter path] returns the path of the generated PACK file
     of the given file. [level] lets the user to choose the [zlib] level
@@ -84,19 +84,19 @@ val collect :
 val verify :
   ?reporter:(unit -> unit) ->
   oracle:Digestif.SHA1.t Carton.Dec.oracle ->
-  Fpath.t ->
+  Bob_fpath.t ->
   status array ->
   unit Fiber.t
 
 val create_directory :
   reporter:(int -> unit) ->
   (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t ->
-  Fpath.t ->
+  Bob_fpath.t ->
   Digestif.SHA1.t ->
   (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t Fiber.t
 
 val unpack :
-  Fpath.t ->
+  Bob_fpath.t ->
   status array ->
   ( string
     * int

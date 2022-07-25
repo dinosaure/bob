@@ -23,7 +23,7 @@ type 'a source =
       -> 'a source
 
 module Source : sig
-  val file : ?offset:int64 -> Fpath.t -> Stdbob.bigstring source
+  val file : ?offset:int64 -> Bob_fpath.t -> Stdbob.bigstring source
   val array : 'a array -> 'a source
   val list : 'a list -> 'a source
   val fold : ('r -> 'a -> 'r Fiber.t) -> 'r -> 'a source -> 'r Fiber.t
@@ -76,7 +76,7 @@ module Sink : sig
   (** {3: Input & Output.} *)
 
   val stdout : (Stdbob.bigstring, unit) sink
-  val file : ?erase:bool -> Fpath.t -> (Stdbob.bigstring, unit) sink
+  val file : ?erase:bool -> Bob_fpath.t -> (Stdbob.bigstring, unit) sink
 end
 
 type ('a, 'b) flow = { flow : 'r. ('b, 'r) sink -> ('a, 'r) sink } [@@unboxed]
@@ -105,7 +105,7 @@ module Flow : sig
   (** {3: Input & Output.} *)
 
   val save_into :
-    ?offset:int64 -> Fpath.t -> (Stdbob.bigstring, Stdbob.bigstring) flow
+    ?offset:int64 -> Bob_fpath.t -> (Stdbob.bigstring, Stdbob.bigstring) flow
 end
 
 type 'a stream
@@ -146,10 +146,10 @@ module Stream : sig
   (** {3: Input & Output.} *)
 
   val of_file :
-    Fpath.t -> (Stdbob.bigstring stream, [> `Msg of string ]) result Fiber.t
+    Bob_fpath.t -> (Stdbob.bigstring stream, [> `Msg of string ]) result Fiber.t
 
   val stdin : Stdbob.bigstring stream
-  val to_file : Fpath.t -> Stdbob.bigstring stream -> unit Fiber.t
+  val to_file : Bob_fpath.t -> Stdbob.bigstring stream -> unit Fiber.t
   val stdout : Stdbob.bigstring stream -> unit Fiber.t
   val ( >>= ) : 'a stream -> ('a -> 'b stream Fiber.t) -> 'b stream
   val ( ++ ) : 'a stream -> 'a stream -> 'a stream
