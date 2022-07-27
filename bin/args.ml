@@ -271,11 +271,11 @@ let compression =
     value
     & vflag true
         [
-          (true, info [ "compress" ] ~doc:"Explicitly compress objects");
+          (true, info [ "compress" ] ~doc:"Explicitly compress objects.");
           ( false,
             info [ "no-compression" ]
               ~doc:
-                "Explicitly store objects as they are (useful for video/image)"
+                "Explicitly store objects as they are (useful for video/image)."
           );
         ])
 
