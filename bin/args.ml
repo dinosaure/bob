@@ -172,7 +172,7 @@ let secure_port =
 
 let setup_password quiet g password =
   match password with
-  | Some password -> password
+  | Some password -> (quiet, g, password)
   | None ->
       let t = Password.compile Dict.En.words in
       let ps =
@@ -182,7 +182,7 @@ let setup_password quiet g password =
       in
       let password = Fmt.str "%s-%s" ps.(0) ps.(1) in
       if not quiet then Fmt.pr "Password: %s\n%!" password;
-      password
+      (quiet, g, password)
 
 let term_setup_password password =
   Term.(const setup_password $ term_setup_logs $ term_setup_random $ password)
