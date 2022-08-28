@@ -94,18 +94,21 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   finalise ();
   Fiber.return status
 
-let unpack_with_reporter quiet ~config ~total pack name hash =
+let unpack_with_reporter quiet ~config ~total pack ?destination name hash =
   let open Fiber in
   with_reporter ~config quiet (make_extract_bar ~total)
   @@ fun (reporter, finalise) ->
   reporter 2;
   (* XXX(dinosaure): report the commit and the root directory. *)
-  Pack.create_directory ~reporter pack (Bob_fpath.v name) hash >>= fun _ ->
+  let destination =
+    match destination with None -> Bob_fpath.v name | Some v -> v
+  in
+  Pack.create_directory ~reporter pack destination hash >>= fun _ ->
   finalise ();
   Fiber.return (Ok ())
 
 let extract_with_reporter quiet ~config ?g
-    (from : Stdbob.bigstring Stream.source) =
+    (from : Stdbob.bigstring Stream.source) destination =
   let open Fiber in
   let open Stream in
   let tmp = Temp.random_temporary_path ?g "pack-%s.pack" in
@@ -119,7 +122,11 @@ let extract_with_reporter quiet ~config ?g
         ~into:Sink.to_string
       >>= fun (name, source) ->
       Fiber.Option.iter Source.dispose source >>= fun () ->
-      Fmt.pr ">>> Received a file: %s.\n%!" name;
+      (match destination with
+      | None -> Fmt.pr ">>> Received a file: %s.\n%!" name
+      | Some v ->
+          Fmt.pr ">>> Received a file: %s (save into %a).\n%!" name Bob_fpath.pp
+            v);
       let from =
         match leftover with
         | Some leftover when Bigarray.Array1.dim src - off > 0 ->
@@ -129,9 +136,12 @@ let extract_with_reporter quiet ~config ?g
         | Some leftover -> leftover
         | None -> Source.array [| src |]
       in
+      let destination =
+        match destination with None -> Bob_fpath.v name | Some v -> v
+      in
       Stream.run ~from
         ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-        ~into:(Sink.file (Bob_fpath.v name))
+        ~into:(Sink.file destination)
       >>= fun ((), _source) ->
       Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
   | Some (`Elt entry, decoder, src, off), leftover ->
@@ -140,10 +150,14 @@ let extract_with_reporter quiet ~config ?g
         leftover
       >>= Pack.unpack tmp
       >>? fun (name, total, hash, pack) ->
-      Fmt.pr ">>> Received a folder: %s.\n%!" name;
-      unpack_with_reporter quiet ~config ~total pack name hash
+      (match destination with
+      | None -> Fmt.pr ">>> Received a folder: %s.\n%!" name
+      | Some v ->
+          Fmt.pr ">>> Received a folder: %s (save into %a).\n%!" name
+            Bob_fpath.pp v);
+      unpack_with_reporter quiet ~config ~total pack ?destination name hash
 
-let run_client quiet g dns addr secure_port password yes =
+let run_client quiet g dns addr secure_port password yes destination =
   let open Fiber in
   (match addr with
   | `Inet (inet_addr, port) ->
@@ -179,7 +193,7 @@ let run_client quiet g dns addr secure_port password yes =
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
   >>| Transfer.open_error
-  >>? extract_with_reporter quiet ~config ~g
+  >>? fun source -> extract_with_reporter quiet ~config ~g source destination
 
 let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
@@ -189,8 +203,10 @@ let pp_error ppf = function
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s." err
 
-let run quiet g () dns addr secure_port password yes =
-  match Fiber.run (run_client quiet g dns addr secure_port password yes) with
+let run quiet g () dns addr secure_port password yes dst =
+  match
+    Fiber.run (run_client quiet g dns addr secure_port password yes dst)
+  with
   | Ok () -> `Ok 0
   | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err;
@@ -207,7 +223,7 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ relay $ secure_port $ password $ yes))
+     $ term_setup_dns $ relay $ secure_port $ password $ yes $ destination))
 
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in

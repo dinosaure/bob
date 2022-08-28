@@ -282,3 +282,10 @@ let compression =
 let yes =
   let doc = "Answer yes to all bob questions without prompting." in
   Arg.(value & flag & info [ "y"; "yes" ] ~doc)
+
+let destination =
+  let doc = "Destination of the received document (file or folder)." in
+  Arg.(
+    value
+    & opt (some (conv ~docv:"<dst>" (Bob_fpath.of_string, Bob_fpath.pp))) None
+    & info [ "o"; "output" ] ~doc)

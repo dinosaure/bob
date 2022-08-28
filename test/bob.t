@@ -15,10 +15,9 @@ Tests about the bob binary
   $ ./sched.exe <<EOF
   > relay &SIGINT
   > send -r 127.0.0.1 --password toto example
-  > recv -r 127.0.0.1 -y toto
+  > recv -r 127.0.0.1 -y toto -o out
   > EOF
   bob relay &-6 -> EXITED(0)
   bob send -r 127.0.0.1 --password toto example -> EXITED(0)
-  bob recv -r 127.0.0.1 -y toto -> EXITED(0)
-  $ cat example
-  Hello World!
+  bob recv -r 127.0.0.1 -y toto -o out -> EXITED(0)
+  $ diff example out
