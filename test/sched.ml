@@ -54,6 +54,14 @@ type command =
       ec : string option;
     }
 
+let signal_of_string str =
+  match String.lowercase_ascii str with
+  | "sigint" -> Sys.sigint
+  | _ -> Fmt.invalid_arg "Invalid signal: %S" str
+
+let signal_to_string n =
+  if n = Sys.sigint then "SIGINT" else Fmt.to_to_string (Fmt.fmt "%02d") n
+
 let pp_command ppf = function
   | Stop_itself { args; ic; oc; ec } ->
       Fmt.pf ppf "%a%a%a%a"
@@ -66,9 +74,9 @@ let pp_command ppf = function
         Fmt.(option (const string " 2>" ++ string))
         ec
   | Stop_with_signal { args; signal; ic; oc; ec } ->
-      Fmt.pf ppf "%a &%d%a%a%a"
+      Fmt.pf ppf "%a &%s%a%a%a"
         Fmt.(list ~sep:(any " ") string)
-        args signal
+        args (signal_to_string signal)
         Fmt.(option (const string " <" ++ string))
         ic
         Fmt.(option (const string " 1>" ++ string))
@@ -159,14 +167,6 @@ let is_prefix prefix str =
     else false
   in
   if String.length prefix <= String.length str then go 0 else false
-
-let signal_of_string str =
-  match String.lowercase_ascii str with
-  | "sigint" -> Sys.sigint
-  | _ -> Fmt.invalid_arg "Invalid signal: %S" str
-
-let signal_to_string n =
-  if n = Sys.sigint then "SIGINT" else Fmt.to_to_string (Fmt.fmt "%02d") n
 
 let parse_word str =
   if String.length str = 0 then `Noop
