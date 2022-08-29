@@ -1,4 +1,4 @@
-let run inet_addr port =
+let connect inet_addr port =
   let inet_addr = Unix.inet_addr_of_string inet_addr in
   let port = int_of_string port in
   let sockaddr = Unix.ADDR_INET (inet_addr, port) in
@@ -18,8 +18,12 @@ let run inet_addr port =
 
 let () =
   match Sys.argv with
-  | [| _; inet_addr; port |] ->
-      while run inet_addr port do
+  | [| _; "closed"; inet_addr; port |] ->
+      while connect inet_addr port = true do
         Unix.sleepf 0.01
       done
-  | _ -> Format.eprintf "%s <addr> <port>\n%!" Sys.argv.(0)
+  | [| _; "opened"; inet_addr; port |] ->
+      while connect inet_addr port = false do
+        Unix.sleepf 0.01
+      done
+  | _ -> Format.eprintf "%s [opened|closed] <addr> <port>\n%!" Sys.argv.(0)

@@ -12,8 +12,9 @@ Tests about the bob binary
   $ cat >example <<EOF
   > Hello World!
   > EOF
-  $ ./free.exe 127.0.0.1 9000
+  $ ./free.exe closed 127.0.0.1 9000
   $ bob relay -p pid &
+  $ ./free.exe opened 127.0.0.1 9000
   $ ./sched.exe <<EOF
   > send --password toto example
   > recv -y toto -o out
