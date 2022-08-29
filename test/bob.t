@@ -12,13 +12,13 @@ Tests about the bob binary
   $ cat >example <<EOF
   > Hello World!
   > EOF
-  $ ./free.exe 127.0.0.1 65315
+  $ ./free.exe 127.0.0.1 9000
+  $ bob relay -p pid &
   $ ./sched.exe <<EOF
-  > relay 127.0.0.1 65315 &SIGINT
-  > send -r 127.0.0.1:65315 --password toto example
-  > recv -r 127.0.0.1:65315 -y toto -o out
+  > send --password toto example
+  > recv -y toto -o out
   > EOF
-  bob relay 127.0.0.1 65315 &SIGINT -> EXITED(0)
-  bob send -r 127.0.0.1:65315 --password toto example -> EXITED(0)
-  bob recv -r 127.0.0.1:65315 -y toto -o out -> EXITED(0)
+  bob send --password toto example -> EXITED(0)
+  bob recv -y toto -o out -> EXITED(0)
   $ diff example out
+  $ kill -INT $(cat pid)

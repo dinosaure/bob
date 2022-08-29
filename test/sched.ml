@@ -125,8 +125,7 @@ let run programs =
   in
   let to_wait, to_signal =
     List.partition
-      (function
-        | _pid, Stop_itself _ -> true | _pid, Stop_with_signal _ -> false)
+      (function _pid, Stop_itself _ -> true | _pid, _ -> false)
       programs
   in
   let rec wait results = function
@@ -138,10 +137,10 @@ let run programs =
   let r0 = wait [] to_wait in
   let rec kill = function
     | [] -> ()
-    | (_pid, Stop_itself _) :: rest -> kill rest
     | (pid, (Stop_with_signal { signal; _ } as _command)) :: rest ->
         Unix.kill pid signal;
         kill rest
+    | (_pid, _) :: rest -> kill rest
   in
   kill to_signal;
   let r1 = wait [] to_signal in
@@ -219,9 +218,7 @@ let () =
   if Array.length Sys.argv > 1 then bob := Sys.argv.(1);
   let rec go programs =
     match input_line stdin with
-    | str ->
-        let command = parse_line str in
-        go (command :: programs)
+    | str -> go (parse_line str :: programs)
     | exception End_of_file -> List.rev programs
   in
   let results = run (go []) in
