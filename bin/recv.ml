@@ -122,9 +122,10 @@ let extract_with_reporter quiet ~config ?g
         ~into:Sink.to_string
       >>= fun (name, source) ->
       Fiber.Option.iter Source.dispose source >>= fun () ->
-      (match destination with
-      | None -> Fmt.pr ">>> Received a file: %s.\n%!" name
-      | Some v ->
+      (match (quiet, destination) with
+      | true, _ -> ()
+      | false, None -> Fmt.pr ">>> Received a file: %s.\n%!" name
+      | false, Some v ->
           Fmt.pr ">>> Received a file: %s (save into %a).\n%!" name Bob_fpath.pp
             v);
       let from =
@@ -150,9 +151,10 @@ let extract_with_reporter quiet ~config ?g
         leftover
       >>= Pack.unpack tmp
       >>? fun (name, total, hash, pack) ->
-      (match destination with
-      | None -> Fmt.pr ">>> Received a folder: %s.\n%!" name
-      | Some v ->
+      (match (quiet, destination) with
+      | true, _ -> ()
+      | false, None -> Fmt.pr ">>> Received a folder: %s.\n%!" name
+      | false, Some v ->
           Fmt.pr ">>> Received a folder: %s (save into %a).\n%!" name
             Bob_fpath.pp v);
       unpack_with_reporter quiet ~config ~total pack ?destination name hash
@@ -209,7 +211,7 @@ let run quiet g () dns addr secure_port password yes dst =
   with
   | Ok () -> `Ok 0
   | Error err ->
-      Fmt.epr "%s: %a.\n%!" Sys.executable_name pp_error err;
+      Fmt.epr "%s: %a.\n%!" Sys.argv.(0) pp_error err;
       `Ok 1
 
 open Cmdliner

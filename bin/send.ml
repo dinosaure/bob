@@ -125,7 +125,7 @@ let run () dns compression addr secure_port (quiet, g, password) path =
   with
   | Ok () -> `Ok 0
   | Error err ->
-      Fmt.epr "%s: %a\n%!" Sys.executable_name pp_error err;
+      Fmt.epr "%s: %a.\n%!" Sys.argv.(0) pp_error err;
       `Ok 1
 
 open Cmdliner
