@@ -118,7 +118,7 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s." err
 
-let run quiet g () dns compression addr secure_port password path =
+let run () dns compression addr secure_port (quiet, g, password) path =
   match
     Fiber.run
       (run_server quiet g dns compression addr secure_port password path)
@@ -167,7 +167,7 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-       $ term_setup_dns $ compression $ relay $ secure_port
+        (const run $ term_setup_temp $ term_setup_dns $ compression $ relay
+       $ secure_port
         $ term_setup_password password
         $ path))

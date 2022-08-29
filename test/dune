@@ -1,5 +1,17 @@
 (cram
- (deps %{bin:bob} ../bin/cat.exe))
+ (enabled_if
+  (= %{context_name} "default"))
+ (deps %{bin:bob} sched.exe free.exe ../bin/cat.exe))
+
+(executable
+ (name sched)
+ (modules sched)
+ (libraries fmt fpath unix))
+
+(executable
+ (name free)
+ (modules free)
+ (libraries unix))
 
 (executable
  (name protocol)

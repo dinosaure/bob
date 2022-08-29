@@ -1,13 +1,12 @@
 let () = Printexc.record_backtrace true
 
-let run quiet g temp dns compression addr secure_port yes = function
+let run quiet g temp dns compression addr secure_port yes dst = function
   | Some path when Sys.file_exists path ->
       let password = Args.setup_password quiet g None in
-      Send.run quiet g temp dns compression addr secure_port password
-        (Bob_fpath.v path)
+      Send.run temp dns compression addr secure_port password (Bob_fpath.v path)
   | Some password ->
-      Recv.run quiet g temp dns addr secure_port (Some password) yes
-  | None -> Recv.run quiet g temp dns addr secure_port None yes
+      Recv.run quiet g temp dns addr secure_port (Some password) yes dst
+  | None -> Recv.run quiet g temp dns addr secure_port None yes dst
 
 open Cmdliner
 open Args
@@ -20,7 +19,7 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ compression $ relay $ secure_port $ yes
+     $ term_setup_dns $ compression $ relay $ secure_port $ yes $ destination
      $ path_or_password))
 
 let cmd =

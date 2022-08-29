@@ -49,15 +49,6 @@
   bob.tls
   bob.dns))
 
-; (rule
-;  (target bob.com)
-;  (enabled_if
-;   (= %{context_name} esperanto))
-;  (mode promote)
-;  (deps bob.exe)
-;  (action
-;   (run objcopy -S -O binary %{deps} %{target})))
-; 
 ; 
 ; (rule
 ;  (target cat.com)
