@@ -12,6 +12,7 @@ Tests about the bob binary
   $ cat >example <<EOF
   > Hello World!
   > EOF
+  $ ./free.exe 127.0.0.1 9000
   $ ./sched.exe <<EOF
   > relay &SIGINT
   > send -r 127.0.0.1 --password toto example
