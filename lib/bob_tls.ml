@@ -38,7 +38,7 @@ let rec read_react t =
         | Ok () -> read_react t
         | Error err ->
             t.state <- `Error (err :> error);
-            raise (Tls (err :> error)))
+            Fiber.return (`Error (err :> error)))
     | Ok (state', `Response resp, `Data data) -> (
         let state' =
           match state' with
@@ -55,10 +55,10 @@ let rec read_react t =
             | Ok () -> Fiber.return (`Ok data)
             | Error err ->
                 t.state <- `Error (err :> error);
-                raise (Tls (err :> error))))
+                Fiber.return (`Error (err :> error))))
   in
   match t.state with
-  | `Error err -> raise (Tls err)
+  | `Error err -> Fiber.return (`Error err)
   | `End -> Fiber.return `End
   | `Active _ -> (
       Fiber.read t.fd >>= fun data ->
@@ -71,8 +71,8 @@ let rec read_react t =
           handle tls cs
       | _, Error errno ->
           t.state <- `Error (`Unix errno);
-          raise (Tls (`Unix errno))
-      | `Error err, _ -> raise (Tls err)
+          Fiber.return (`Error (`Unix errno))
+      | `Error err, _ -> Fiber.return (`Error err)
       | `End, _ -> Fiber.return `End)
 
 let rec read t buf =
@@ -85,12 +85,13 @@ let rec read t buf =
     Fiber.return max
   in
   match t.linger with
-  | Some res -> write_out res
+  | Some res -> write_out res >>| fun v -> Ok v
   | None -> (
       read_react t >>= function
-      | `End -> Fiber.return 0
-      | `Ok None -> read t buf
-      | `Ok (Some res) -> write_out res)
+      | `End -> Fiber.return (Ok 0)
+      | `Ok None -> read t buf >>? fun v -> Fiber.return (Ok v)
+      | `Ok (Some res) -> write_out res >>| fun v -> Ok v
+      | `Error err -> Fiber.return (Error err))
 
 let writev t css =
   match t.state with
@@ -119,10 +120,11 @@ let rec drain_handshake t =
   in
   match t.state with
   | `Active tls when not (Tls.Engine.handshake_in_progress tls) ->
-      Fiber.return t
+      Fiber.return (Ok t)
   | _ -> (
       read_react t >>= function
-      | `End -> raise (Tls `Closed)
+      | `Error err -> Fiber.return (Error err)
+      | `End -> Fiber.return (Error `Closed)
       | `Ok cs ->
           push_linger t cs;
           drain_handshake t)
@@ -147,7 +149,7 @@ let client_of_file_descr config ?host fd =
   let tls, { Cstruct.buffer; off; len } = Tls.Engine.client config in
   let t = { t with state = `Active tls } in
   full_write t.fd buffer ~off ~len >>= function
-  | Ok () -> drain_handshake t
+  | Ok () -> Fiber.catch (fun () -> drain_handshake t) (fun exn -> raise exn)
   | Error err ->
       t.state <- `Error (err :> error);
       raise (Tls (err :> error))

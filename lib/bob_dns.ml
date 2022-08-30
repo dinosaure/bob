@@ -192,9 +192,13 @@ module Transport :
         | Ok (`Data data) ->
             let data = Cstruct.of_bigarray data in
             Fiber.return (Cstruct.length data, data))
-    | `Tls fd ->
+    | `Tls fd -> (
         let buf = Cstruct.create 2048 in
-        Bob_tls.read fd buf >>| fun len -> (len, Cstruct.sub buf 0 len))
+        Bob_tls.read fd buf >>= function
+        | Ok len -> Fiber.return (len, Cstruct.sub buf 0 len)
+        | Error err ->
+            Log.err (fun m -> m "TLS read failed: %a" Bob_tls.pp_error err);
+            Fiber.return (0, Cstruct.empty)))
     >>= function
     | 0, _ ->
         (match fd with
@@ -285,33 +289,28 @@ module Transport :
         let config = find_ns (nameserver_ips t.nameservers) addr in
         match config with
         | `Plaintext _ -> continue (`Plain socket)
-        | `Tls (tls_cfg, _, _) ->
-            Fiber.catch
-              (fun () ->
-                Bob_tls.client_of_file_descr tls_cfg socket >>= fun fd ->
-                continue (`Tls fd))
-              (function
-                | Bob_tls.Tls err -> (
-                    Log.warn (fun m ->
-                        m "TLS handshake with %a:%d failed: %a" Ipaddr.pp
-                          (fst addr) (snd addr) Bob_tls.pp_error err);
-                    match
-                      List.filter
-                        (function
-                          | `Tls (_, ip, port) ->
-                              not
-                                (Ipaddr.compare ip (fst addr) = 0
-                                && port = snd addr)
-                          | _ -> true)
-                        nameservers
-                    with
-                    | [] ->
-                        Fiber.Condition.broadcast connected_condition;
-                        t.connected_condition <- None;
-                        Fiber.return
-                          (Error (`Msg "No further nameservers configured"))
-                    | ns' -> connect_to_ns_list t connected_condition ns')
-                | exn -> raise exn))
+        | `Tls (tls_cfg, _, _) -> (
+            Bob_tls.client_of_file_descr tls_cfg socket >>= function
+            | Ok fd -> continue (`Tls fd)
+            | Error err -> (
+                Log.warn (fun m ->
+                    m "TLS handshake with %a:%d failed: %a" Ipaddr.pp (fst addr)
+                      (snd addr) Bob_tls.pp_error err);
+                match
+                  List.filter
+                    (function
+                      | `Tls (_, ip, port) ->
+                          not
+                            (Ipaddr.compare ip (fst addr) = 0 && port = snd addr)
+                      | _ -> true)
+                    nameservers
+                with
+                | [] ->
+                    Fiber.Condition.broadcast connected_condition;
+                    t.connected_condition <- None;
+                    Fiber.return
+                      (Error (`Msg "No further nameservers configured"))
+                | ns' -> connect_to_ns_list t connected_condition ns')))
 
   and connect_via_tcp_to_ns (t : t) : (unit, [ `Msg of string ]) result Fiber.t
       =

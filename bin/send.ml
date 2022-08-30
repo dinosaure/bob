@@ -116,7 +116,7 @@ let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
-  | `Msg err -> Fmt.pf ppf "%s." err
+  | `Msg err -> Fmt.pf ppf "%s" err
 
 let run () dns compression addr secure_port (quiet, g, password) path =
   match

@@ -203,7 +203,7 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
-  | `Msg err -> Fmt.pf ppf "%s." err
+  | `Msg err -> Fmt.pf ppf "%s" err
 
 let run quiet g () dns addr secure_port password yes dst =
   match
