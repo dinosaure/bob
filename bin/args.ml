@@ -53,7 +53,7 @@ let reporter ppf =
       Fmt.kpf k ppf
         ("[%6d]%a[%a]: " ^^ fmt ^^ "\n%!")
         pid pp_header (level, header)
-        Fmt.(styled `Magenta (fmt "%10s"))
+        Fmt.(styled `Magenta (fmt "%20s"))
         (Logs.Src.name src)
     in
     msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt
@@ -253,12 +253,26 @@ let nameserver =
   in
   Arg.conv (parser, pp) ~docv:"<nameserver>"
 
+let unicast_censurfridns_dk = Ipaddr.of_string_exn "89.233.43.71"
+
+let unicast_censurfridns_dk =
+  let time () = Some (Ptime.v (Ptime_clock.now_d_ps ())) in
+  let authenticator =
+    X509.Authenticator.of_string
+      "key-fp:sha256:INSZEZpDoWKiavosV2/xVT8O83vk/RRwS+LTiL+IpHs="
+    |> Result.get_ok
+  in
+  let cfg = Tls.Config.client ~authenticator:(authenticator time) () in
+  `Tls (cfg, unicast_censurfridns_dk, 853)
+
+let google_com = `Plaintext (Ipaddr.of_string_exn "8.8.8.8", 53)
+
 let nameservers =
   let doc = "The nameserver used to resolve domain-names." in
   let env = Cmd.Env.info "BOB_NAMESERVER" in
   Arg.(
     value
-    & opt_all nameserver [ `Plaintext (Ipaddr.of_string_exn "8.8.8.8", 53) ]
+    & opt_all nameserver [ unicast_censurfridns_dk; google_com ]
     & info [ "nameserver" ] ~docs:common_options ~doc ~docv:"<nameserver>" ~env)
 
 let setup_dns nameservers =
@@ -288,4 +302,4 @@ let destination =
   Arg.(
     value
     & opt (some (conv ~docv:"<dst>" (Bob_fpath.of_string, Bob_fpath.pp))) None
-    & info [ "o"; "output" ] ~doc)
+    & info [ "o"; "output" ] ~doc ~docv:"<dst>")
