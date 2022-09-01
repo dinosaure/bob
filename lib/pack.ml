@@ -148,19 +148,13 @@ let serialize_directory entries =
         [ "100644 "; Bob_fpath.to_string p; "\x00"; SHA256.to_raw_string hash ]
       |> Fiber.return
 
-let load_directory rstore ~root path =
+let load_directory rstore path =
   Log.debug (fun m -> m "Load directory: %a." Bob_fpath.pp path);
-  let entries = Filesystem.readdir Bob_fpath.(root // path) in
+  let entries = Filesystem.readdir path in
   let entries =
     List.filter_map
       (fun entry ->
         let key = Bob_fpath.(path / entry) in
-        let key = Bob_fpath.relativize ~root key in
-        Log.debug (fun m ->
-            m "relativize root:%a %a" Bob_fpath.pp root Bob_fpath.pp path);
-        let key =
-          match key with Some key -> key | None -> Bob_fpath.(path / entry)
-        in
         Log.debug (fun m -> m "Try to find: %a." Bob_fpath.pp key);
         match Hashtbl.find_opt rstore key with
         | Some (hash, `Dir) -> Some (Bob_fpath.(to_dir_path (v entry)), hash)
@@ -192,14 +186,13 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
       let real_length = Hashtbl.length store.rstore in
       Scheduler.inj (load_root ~real_length store.path hash_of_tree)
   | Some path, _ -> (
-      let real_path = Bob_fpath.(store.path // path) in
-      let stat = Unix.stat Bob_fpath.(to_string real_path) in
+      let real_path = Bob_fpath.(normalize (store.path // path)) in
+      let stat = Unix.stat (Bob_fpath.to_string real_path) in
       Log.debug (fun m ->
-          m "Load %a object (%a)." Bob_fpath.pp path Bob_fpath.pp real_path);
+          m "Load %a object (%a)." Bob_fpath.pp real_path Bob_fpath.pp path);
       match stat.Unix.st_kind with
       | Unix.S_REG -> Scheduler.inj (load_file real_path)
-      | Unix.S_DIR ->
-          Scheduler.inj (load_directory store.rstore ~root:store.path path)
+      | Unix.S_DIR -> Scheduler.inj (load_directory store.rstore real_path)
       | _ -> failwith "Invalid kind of object")
   | None, (Some _ | None) ->
       Log.err (fun m -> m "The object %a does not exists." SHA256.pp hash);
@@ -368,13 +361,12 @@ let hash_of_filename path =
   | Error (`Msg err) -> Fmt.failwith "%s." err
   | Ok stream -> Stream.(into (SHA256.sink_bigstring ~ctx ()) stream)
 
-let hash_of_directory ~root rstore path =
+let hash_of_directory ~root:_ rstore path =
   let entries = Filesystem.readdir path in
   let entries =
     List.filter_map
       (fun entry ->
         let key = Bob_fpath.(path / entry) in
-        let key = Option.get (Bob_fpath.relativize ~root key) in
         match Hashtbl.find_opt rstore key with
         | Some (hash, `Dir) -> Some (Bob_fpath.(to_dir_path (v entry)), hash)
         | Some (hash, `Reg) -> Some (Bob_fpath.v entry, hash)
@@ -410,14 +402,12 @@ let store root =
     match stat.Unix.st_kind with
     | Unix.S_REG ->
         hash_of_filename path >>= fun hash ->
-        let path = Stdlib.Option.get (Bob_fpath.relativize ~root path) in
         Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
         Log.debug (fun m -> m "Calculate the hash of %a" Bob_fpath.pp path);
         hash_of_directory ~root rstore path >>= fun hash ->
-        let path = Stdlib.Option.get (Bob_fpath.relativize ~root path) in
         Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
         Hashtbl.add rstore path (hash, `Dir);
         Fiber.return (Some hash)
@@ -432,7 +422,11 @@ let store root =
   (* XXX(dinosaure): populate [rstore] and [store]. *)
   Stream.to_list hashes >>= fun hashes ->
   let store = Hashtbl.create (Hashtbl.length rstore) in
-  Hashtbl.iter (fun v (k, _) -> Hashtbl.add store k v) rstore;
+  Hashtbl.iter
+    (fun v (k, _) ->
+      let v = Stdlib.Option.get (Bob_fpath.relativize ~root v) in
+      Hashtbl.add store k v)
+    rstore;
   let hashes_for_directory =
     if Sys.is_directory (Bob_fpath.to_string root) then (
       let hash_of_tree, _ = Hashtbl.find rstore root in
