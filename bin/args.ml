@@ -298,8 +298,16 @@ let yes =
   Arg.(value & flag & info [ "y"; "yes" ] ~doc)
 
 let destination =
-  let doc = "Destination of the received document (file or folder)." in
-  Arg.(
-    value
-    & opt (some (conv ~docv:"<dst>" (Bob_fpath.of_string, Bob_fpath.pp))) None
-    & info [ "o"; "output" ] ~doc ~docv:"<dst>")
+  let doc =
+    "Destination of the received document (file or folder). We accept only a \
+     concrete destination ($(b,.) and $(b,..) are not allowed)."
+  in
+  let name =
+    let parser = function
+      | "." | ".." -> Error (`Msg "Invalid destination")
+      | str -> Bob_fpath.of_string str
+    in
+    let pp = Bob_fpath.pp in
+    Arg.conv (parser, pp)
+  in
+  Arg.(value & opt (some name) None & info [ "o"; "output" ] ~doc ~docv:"<dst>")
