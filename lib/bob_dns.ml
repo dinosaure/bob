@@ -151,12 +151,10 @@ module Transport :
 
   let send_query fd tx =
     match fd with
-    | `Tls fd ->
-        Fiber.catch
-          (fun () -> Bob_tls.write fd tx >>| Result.ok)
-          (function
-            | Bob_tls.Tls err -> Fiber.return (Error (msgf "%a" pp_error err))
-            | exn -> raise exn)
+    | `Tls fd -> (
+        Bob_tls.write fd tx >>= function
+        | Ok _ as v -> Fiber.return v
+        | Error err -> Fiber.return (Error (msgf "%a" pp_error err)))
     | `Plain fd -> (
         let { Cstruct.buffer; off; len } = tx in
         Fiber.write fd buffer ~off ~len >>= function

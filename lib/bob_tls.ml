@@ -95,8 +95,8 @@ let rec read t buf =
 
 let writev t css =
   match t.state with
-  | `Error err -> raise (Tls err)
-  | `End -> raise (Tls `Closed)
+  | `Error err -> Fiber.return (Error err)
+  | `End -> Fiber.return (Error `Closed)
   | `Active tls -> (
       match Tls.Engine.send_application_data tls css with
       | None -> Fmt.invalid_arg "Socket is not ready"
@@ -104,10 +104,10 @@ let writev t css =
           t.state <- `Active tls;
           let { Cstruct.buffer; off; len } = data in
           full_write t.fd buffer ~off ~len >>= function
-          | Ok () -> Fiber.return ()
+          | Ok () -> Fiber.return (Ok ())
           | Error err ->
               t.state <- `Error (err :> error);
-              raise (Tls (err :> error))))
+              Fiber.return (Error (err :> error))))
 
 let write t cs = writev t [ cs ]
 
