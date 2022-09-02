@@ -474,23 +474,48 @@ let encode_header_of_entry ~kind ~length =
   Buffer.contents buf
 
 let entry_with_filename ?level path =
-  let entry = Bob_fpath.basename path in
-  let length = String.length entry in
-  let output =
-    Bigarray.Array1.create Bigarray.char Bigarray.c_layout (5 * length)
+  let rec deflate zl buf output =
+    match Zl.Def.encode zl with
+    | `Await zl -> deflate (Zl.Def.src zl De.bigstring_empty 0 0) buf output
+    | `Flush zl ->
+        let len = De.bigstring_length output - Zl.Def.dst_rem zl in
+        let str = Stdbob.bigstring_substring ~off:0 ~len output in
+        Buffer.add_string buf str;
+        deflate (Zl.Def.dst zl output 0 (De.bigstring_length output)) buf output
+    | `End zl ->
+        let len = De.bigstring_length output - Zl.Def.dst_rem zl in
+        let str = Stdbob.bigstring_substring ~off:0 ~len output in
+        Buffer.add_string buf str;
+        Buffer.contents buf
   in
-  match
-    Zl.Def.Ns.deflate ?level
-      (bigstring_of_string entry ~off:0 ~len:length)
-      output
-  with
-  | Ok len ->
-      let hdr_entry = encode_header_of_entry ~kind:_D ~length in
-      ( bigstring_of_string hdr_entry ~off:0 ~len:(String.length hdr_entry),
-        Bigarray.Array1.sub output 0 len )
-  | _ -> Fmt.failwith "Impossible to compress the entry with filename"
-(* XXX(dinosaure): this case should never occur. Our [output] is large enough
-   to contain deflated contents. *)
+  let entry = Bob_fpath.basename path in
+  let deflated =
+    let q = De.Queue.create 0x1000 in
+    let w = De.Lz77.make_window ~bits:15 in
+    let o = De.bigstring_create 0x100 in
+    let z =
+      Zl.Def.encoder ~q ~w
+        ~level:(Option.value ~default:4 level)
+        `Manual `Manual
+    in
+    let z =
+      Zl.Def.src z
+        (Stdbob.bigstring_of_string entry ~off:0 ~len:(String.length entry))
+        0 (String.length entry)
+    in
+    let z = Zl.Def.dst z o 0 (De.bigstring_length o) in
+    deflate z (Buffer.create 0x100) o
+  in
+  let deflated =
+    Stdbob.bigstring_of_string deflated ~off:0 ~len:(String.length deflated)
+  in
+  let hdr_entry =
+    encode_header_of_entry ~kind:_D ~length:(String.length entry)
+  in
+  let hdr_entry =
+    bigstring_of_string hdr_entry ~off:0 ~len:(String.length hdr_entry)
+  in
+  (hdr_entry, deflated)
 
 let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
