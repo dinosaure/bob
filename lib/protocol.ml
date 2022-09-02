@@ -3,7 +3,7 @@ let src = Logs.Src.create "bob.protocol"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 type ctx = {
-  ic_buffer : bytes;
+  mutable ic_buffer : bytes;
   mutable ic_pos : int;
   mutable ic_max : int;
   oc_buffer : bytes;
@@ -42,14 +42,24 @@ let save ctx = function
         Bytes.blit_string str off ctx.ic_buffer ctx.ic_max len;
         ctx.ic_max <- ctx.ic_max + len)
       else
-        Log.err (fun m ->
-            m "We lost @[<hov>%a@]"
-              (Hxd_string.pp Hxd.default)
-              (String.sub str off len))
-(* XXX(dinosaure): the last case (where we don't have enough spaces to save
-   [data] shoud never occur according to our protocol. Indeed, [save] is called
-   only when we found an agreement between two peers. That mostly means that
-   they should not exchange something else: [data] should be empty. *)
+        let plus = len - free in
+        let ic_buffer = Bytes.create (Bytes.length ctx.ic_buffer + plus) in
+        Bytes.blit ctx.ic_buffer 0 ic_buffer 0 ctx.ic_max;
+        Bytes.blit_string str off ic_buffer ctx.ic_max len;
+        ctx.ic_buffer <- ic_buffer;
+        ctx.ic_max <- ctx.ic_max + len
+(* XXX(dinosaure): this is the worst case where something pending into the
+   [ic_buffer] & the flow but we must save it for whatever reason. We probably
+   want to break the control flow to:
+   1) ask the client what he/she wants to do from an Agreement
+   2) do the same for the relay where a secure room allocation is required
+
+   A possible attack exists so which leads to an [Out_of_memory] if the user
+   spams the relay with multiples packets and an agreement is found. However,
+   according to our implementation [ic_buffer] should not be bigger than
+   65535 byte(s) (the length of the buffer's flow) and OCaml is able to
+   handle it _nicely_ - however, if we reach an [Out_of_memory] from this
+   place, what I just said is wrong... *)
 
 let make () =
   {

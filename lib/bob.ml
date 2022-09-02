@@ -260,6 +260,7 @@ module Relay = struct
               match result with
               | `Agreement _ as agreement ->
                   Protocol.save ctx data;
+                  (* TODO(dinosaure): dragoon here! *)
                   Hashtbl.replace t.ics identity (Protocol.recv ctx);
                   agreement
               | `Continue ->
