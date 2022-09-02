@@ -31,13 +31,52 @@ very few C implementations.
 
 It is important to understand that there are 2 compilation paths:
 - the usual path (`dune build`)
-- the path with Cosmopolitan
+- the path with Cosmopolitan (systematically tested with GitHub actions)
 
 Both must always work! The first one is the easier one. The second one is a
 static build: thus, both Bob and its dependencies (as well as transitive
 dependencies) must compile with Cosmopolitan. It may happen that the first one
 works while the second one fails. In this case, it is certainly because of a
 (transitive) dependency.
+
+### Build and test `bob`
+
+You can easily build and test `bob` via OPAM:
+```sh
+$ git clone https://github.com/dinosaure/bob
+$ cd bob
+$ opam pin add -yn .
+$ opam install --deps-only bob
+$ dune build
+$ dune runtest
+```
+
+To test the Cosmopolitan target, you must install [esperanto][esperanto] and
+tweak a bit `dune` files:
+```sh
+$ opam install esperanto
+$ cat >>bin/dune <<EOF
+(rule
+ (target bob.com)
+ (enabled_if
+  (= %{context_name} esperanto))
+ (mode promote)
+ (deps bob.exe)
+ (action
+  (run objcopy -S -O binary %{deps} %{target})))
+EOF
+$ cat >>dune-workspace <<EOF
+(context
+ (default
+  (name esperanto)
+  (toolchain esperanto)
+  (merlin)
+  (host default)))
+$ dune build ./bin/bob.com
+```
+
+For more details about Cosmopolitan & Esperanto, you should see the repository
+as well as the Cosmopolitan website.
 
 ## Simplicity
 
@@ -74,5 +113,53 @@ that the user should make his own.
 
 ## Security
 
+Bob relies mainly on [Spoke][spoke] for the handshake and mirage-crypto for the
+transmission of the document. For the former library, the implementation of the
+calculations comes from [`libsodium`][libsodium] - the required primitives are
+not available with `mirage-crypto`.
+
+If a security hole exists in the handshake or transfer, it is best to create an
+issue on these repositories.
+
+More specifically, the security aspect of bob must be **systematic**. That is
+to say that this question must be asked at all levels of interaction between
+the software and the outside world:
+- when it comes to resolving a domain name
+- when initiating the _handshake_
+- when it comes to transferring the document
+
+In this, we prioritise a connection to a DNS resolver via DoT for example. The
+"default values" (relay, name resolver, etc.) are chosen according to high
+criteria.
+- The DNS resolver is [unicast.censurfridns.dk][censurfridns.dk] with TLS
+- The relay is administered by yours truly ([osau.re][osau.re])
+
+Security also means that the user can choose (and thus have full control) over
+all interactions that bob can have. Implementing a new feature therefore
+implies that it is transparent at all levels up to the end user.
+
+## How to contribute?
+
+Like any project on GitHub, you can participate in development through
+pull-requests and issues. For the first method, an addition of code must pass
+the CI:
+- the code must be formatted correctly (you can reformat your code with
+  `dune build @fmt --auto`)
+- the code must compile (with or without Cosmopolitan)
+
+We don't expect a special format in the issues or in the pull-requests but just
+politeness and kindness. Finally, even if you do not receive a response,
+someone somewhere has surely seen your contribution and will participate in due
+course. So don't expect the maintainers to pay particular attention to your
+contribution, it will happen sooner or later.
+
 [robur.io]: https://robur.io/
 [donate]: https://robur.io/Donate
+[osau.re]: https://din.osau.re/
+[censurfridns.dk]: https://blog.uncensoreddns.org/
+[libsodium]: https://github.com/jedisct1/libsodium
+[cosmopolitan]: https://github.com/jart/cosmopolitan
+[esperanto]: https://github.com/dinosaure/esperanto
+[mirage-crypto]: https://github.com/mirage/mirage-crypto
+[lwt]: https://github.com/ocsigen/lwt
+[spoke]: https://github.com/dinosaure/spoke
