@@ -363,7 +363,7 @@ module Server = struct
     | Peer (Client, uid), Spoke_failure (Client, err) ->
         (match Hashtbl.find_opt t.clients uid with
         | Some _ ->
-            Log.err (fun m -> m "[%04x]: %a" uid Spoke.pp_error err);
+            Log.debug (fun m -> m "[%04x]: %a" uid Spoke.pp_error err);
             Hashtbl.remove t.clients uid
         | None -> Log.warn (fun m -> m "[%04x] does not exist" uid));
         `Continue
@@ -482,7 +482,7 @@ module Client = struct
     | Peer (Server, uid), Spoke_failure (Server, err) ->
         (match Hashtbl.find_opt t.servers uid with
         | Some _ ->
-            Log.err (fun m -> m "[%04x]: %a" uid Spoke.pp_error err);
+            Log.debug (fun m -> m "[%04x]: %a" uid Spoke.pp_error err);
             Hashtbl.remove t.servers uid
         | None -> Log.warn (fun m -> m "[%04x] does not exist" uid));
         `Continue
