@@ -19,6 +19,7 @@ val deltify :
     generates a stream of objects uncompressed between them. *)
 
 val make :
+  ?len:int ->
   ?level:int ->
   reporter:(unit -> unit Fiber.t) ->
   store ->
@@ -28,6 +29,7 @@ val make :
    [zlib] level compression (between [0] and [9]). *)
 
 val make_one :
+  ?len:int ->
   ?level:int ->
   reporter:(int -> unit Fiber.t) ->
   finalise:(unit -> unit) ->

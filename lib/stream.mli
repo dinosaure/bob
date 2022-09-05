@@ -97,9 +97,10 @@ module Flow : sig
   (** {3: Compression.} *)
 
   val deflate_zlib :
+    ?len:int ->
     q:De.Queue.t ->
     w:De.Lz77.window ->
-    level:int ->
+    int ->
     (Stdbob.bigstring, Stdbob.bigstring) flow
 
   (** {3: Input & Output.} *)
@@ -146,7 +147,9 @@ module Stream : sig
   (** {3: Input & Output.} *)
 
   val of_file :
-    Bob_fpath.t -> (Stdbob.bigstring stream, [> `Msg of string ]) result Fiber.t
+    ?len:int ->
+    Bob_fpath.t ->
+    (Stdbob.bigstring stream, [> `Msg of string ]) result Fiber.t
 
   val stdin : Stdbob.bigstring stream
   val to_file : Bob_fpath.t -> Stdbob.bigstring stream -> unit Fiber.t

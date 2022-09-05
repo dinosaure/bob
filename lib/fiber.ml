@@ -146,15 +146,16 @@ let openfile fpath flags mode =
 
 let prd = Hashtbl.create 0x100
 
-let read fd : ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t =
+let read ?(len = Stdbob.io_buffer_size) fd :
+    ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t =
   match Hashtbl.find_opt prd fd with
-  | Some (`Read ivar) -> Ivar.read ivar
+  | Some (`Read (ivar, _)) -> Ivar.read ivar
   | _ ->
       let ivar :
           ([ `Data of Stdbob.bigstring | `End ], Unix.error) result Ivar.t =
         Ivar.create ()
       in
-      Hashtbl.add prd fd (`Read ivar);
+      Hashtbl.add prd fd (`Read (ivar, len));
       Ivar.read ivar
 
 let really_read fd len :
@@ -239,7 +240,7 @@ let close fd =
    with Unix.Unix_error (errno, f, arg) ->
      Log.err (fun m -> m "%s(%s): %s" f arg (Unix.error_message errno)));
   (match Hashtbl.find_opt prd fd with
-  | Some (`Read ivar) ->
+  | Some (`Read (ivar, _)) ->
       Hashtbl.remove prd fd;
       Ivar.fill ivar (Ok `End)
   | Some (`Really_read (ivar, _, _, _)) ->
@@ -281,12 +282,10 @@ external retrieve_error : unit -> Unix.error = "bob_retrieve_error"
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
-  | Some (`Read ivar) -> (
-      let bstr =
-        Bigarray.Array1.create Bigarray.char Bigarray.c_layout io_buffer_size
-      in
+  | Some (`Read (ivar, len)) -> (
+      let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
       Hashtbl.remove prd fd;
-      match bigstring_read fd bstr 0 io_buffer_size with
+      match bigstring_read fd bstr 0 len with
       | 0 -> Ivar.fill ivar (Ok `End)
       | ret when ret < 0 ->
           let errno = retrieve_error () in
@@ -366,7 +365,7 @@ let sigwr fd =
 let sigexcept fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
-  | Some (`Read ivar) ->
+  | Some (`Read (ivar, _len)) ->
       Hashtbl.remove prd fd;
       Ivar.fill ivar (Ok `End)
   | Some (`Really_read (ivar, _, _, _)) ->

@@ -9,6 +9,6 @@ let pp_write_error ppf = function
   | `Unix errno -> Fmt.pf ppf "%s" (Unix.error_message errno)
 
 let of_file_descr fd = Fiber.return (Ok fd)
-let recv = Fiber.read
+let recv = Fiber.read ?len:None
 let send = Fiber.write
 let close = Fiber.close

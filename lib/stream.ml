@@ -465,12 +465,12 @@ module Flow = struct
         deflate_zlib_until_await ~push ~acc encoder o
     | `End _ -> assert false
 
-  let deflate_zlib ~q ~w ~level =
+  let deflate_zlib ?(len = Stdbob.io_buffer_size) ~q ~w level =
     let flow (Sink k) =
       let init () =
         let encoder = Zl.Def.encoder ~q ~w ~level `Manual `Manual in
-        let o = De.bigstring_create io_buffer_size in
-        let encoder = Zl.Def.dst encoder o 0 io_buffer_size in
+        let o = De.bigstring_create len in
+        let encoder = Zl.Def.dst encoder o 0 len in
         k.init () >>= fun acc -> Fiber.return (encoder, o, acc)
       in
       let push (encoder, o, acc) i =
@@ -701,7 +701,7 @@ module Stream = struct
 
   (* Input & Output *)
 
-  let of_file path =
+  let of_file ?(len = Stdbob.io_buffer_size) path =
     Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
     | Error errno ->
         Fiber.return
@@ -718,7 +718,7 @@ module Stream = struct
                       Bob_fpath.pp path);
                 Fiber.return r
             | false -> (
-                Fiber.read fd >>= function
+                Fiber.read ~len fd >>= function
                 | Ok `End ->
                     Log.debug (fun m ->
                         m "End of the file: %a" Bob_fpath.pp path);

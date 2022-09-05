@@ -24,7 +24,7 @@ let identity x = x
 let always x _ = x
 let ( <.> ) f g x = f (g x)
 let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
-let io_buffer_size = 65536
+let io_buffer_size = 65536 (* 0x10000 & = De.io_buffer_size *)
 let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 let never _ = assert false
 

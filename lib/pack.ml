@@ -270,7 +270,7 @@ let rec encode_target t ~push ~acc encoder =
       encode_target t ~push ~acc encoder
   | `End -> Fiber.return acc
 
-let pack ~reporter ?level ~length store =
+let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
   let flow (Stream.Sink k) =
     let init () =
       Log.debug (fun m -> m "Start to encode a PACK file.");
@@ -283,8 +283,7 @@ let pack ~reporter ?level ~length store =
       let b =
         {
           Carton.Enc.o =
-            Bigarray.Array1.create Bigarray.char Bigarray.c_layout
-              io_buffer_size;
+            Bigarray.Array1.create Bigarray.char Bigarray.c_layout len;
           Carton.Enc.i =
             Bigarray.Array1.create Bigarray.char Bigarray.c_layout
               io_buffer_size;
@@ -454,9 +453,9 @@ let store root =
     ( Stream.of_list hashes,
       { store; rstore; root = hashes_for_directory; path = root } )
 
-let make ?level ~reporter store =
+let make ?len ?level ~reporter store =
   let length = length store in
-  pack ~reporter ?level ~length store
+  pack ?len ~reporter ?level ~length store
 
 let _C = 0b011
 let _D = 0b100
@@ -517,7 +516,8 @@ let entry_with_filename ?level path =
   in
   (hdr_entry, deflated)
 
-let make_one ?(level = 4) ~reporter ~finalise path =
+let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
+    path =
   let open Fiber in
   Stream.Stream.of_file path >>= function
   | Error (`Msg msg) as err ->
@@ -538,7 +538,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
           ~length:(Unix.stat (Bob_fpath.to_string path)).Unix.st_size
         |> fun str -> bigstring_of_string str ~off:0 ~len:(String.length str)
       in
-      let zlib = Flow.deflate_zlib ~q ~w ~level in
+      let zlib = Flow.deflate_zlib ~len ~q ~w level in
       let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
       let file = Stream.via zlib file in
       let name =

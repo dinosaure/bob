@@ -116,11 +116,23 @@ let symmetric_of_key_nonce_and_cipher key_nonce (Spoke.AEAD aead) =
   let nonce = Cstruct.of_string ~off:key_len ~len:nonce_len key_nonce in
   Symmetric { key; nonce; impl = (module Cipher_block) }
 
+(* XXX(dinosaure): [0xffffff] is not chosen randomly. It's a length which can
+   speed-up the file transfer but is small enough to work on a small machine
+   with 4Go. *)
+
 let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
   let recv = symmetric_of_key_nonce_and_cipher k0 cipher0 in
   let send = symmetric_of_key_nonce_and_cipher k1 cipher1 in
-  let recv_queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
-  let send_queue = Ke.Rke.create ~capacity:0x1000 Bigarray.char in
+  let recv_queue =
+    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
+    let max_packet = 2 + 0xffff + Cipher_block.tag_size in
+    Ke.Rke.create ~capacity:(max_packet * 2) Bigarray.char
+  in
+  let send_queue =
+    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
+    let max_packet = 2 + 0xffff + Cipher_block.tag_size in
+    Ke.Rke.create ~capacity:(max_packet * 2) Bigarray.char
+  in
   let recv_record =
     let (Symmetric { impl = (module Cipher_block); _ }) = recv in
     Cstruct.create (2 + 0xffff + Cipher_block.tag_size)

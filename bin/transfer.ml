@@ -9,6 +9,9 @@ let sockaddr_with_secure_port sockaddr secure_port =
   | Unix.ADDR_INET (inet_addr, _) -> Unix.ADDR_INET (inet_addr, secure_port)
   | Unix.ADDR_UNIX _ -> invalid_arg "Invalid sockaddr"
 
+let max_data = 0xffff
+let max_packet = 2 + max_data + 16 (* header + data + tag_size *)
+
 module Crypto = Bob_unix.Crypto.Make (struct
   include Bob_unix.Fiber
 
@@ -23,7 +26,7 @@ module Crypto = Bob_unix.Crypto.Make (struct
     | `Unix errno -> Fmt.string ppf (Unix.error_message errno)
 
   let read fd =
-    Fiber.read fd >>= function
+    Fiber.read ~len:(max_packet * 2) fd >>= function
     | Error _ as err -> Fiber.return err
     | Ok `End -> Fiber.return (Ok `Eof)
     | Ok (`Data bstr) -> Fiber.return (Ok (`Data (Cstruct.of_bigarray bstr)))

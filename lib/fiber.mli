@@ -182,7 +182,9 @@ val openfile :
   (Unix.file_descr, Unix.error) result t
 
 val read :
-  Unix.file_descr -> ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t
+  ?len:int ->
+  Unix.file_descr ->
+  ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t
 
 val write :
   Unix.file_descr ->

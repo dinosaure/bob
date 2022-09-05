@@ -17,7 +17,7 @@ let compress ic oc =
   let flow =
     Flow.deflate_zlib ~q:(De.Queue.create 0x1000)
       ~w:(De.Lz77.make_window ~bits:15)
-      ~level:4
+      4
   in
   Stream.via flow ic |> oc
 
