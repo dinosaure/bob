@@ -94,15 +94,12 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   finalise ();
   Fiber.return status
 
-let unpack_with_reporter quiet ~config ~total pack ?destination name hash =
+let unpack_with_reporter quiet ~config ~total pack destination hash =
   let open Fiber in
   with_reporter ~config quiet (make_extract_bar ~total)
   @@ fun (reporter, finalise) ->
   reporter 2;
   (* XXX(dinosaure): report the commit and the root directory. *)
-  let destination =
-    match destination with None -> Bob_fpath.v name | Some v -> v
-  in
   Pack.create_directory ~reporter pack destination hash >>= fun _ ->
   finalise ();
   Fiber.return (Ok ())
@@ -116,7 +113,7 @@ let extract_with_reporter quiet ~config ?g
   Stream.run ~from ~via ~into:Sink.first >>= function
   | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
   | ( Some (`Elt (offset, _status, `Base (`D, _weight)), _decoder, src, off),
-      leftover ) ->
+      leftover ) -> (
       Stream.run ~from:(Source.file ~offset tmp)
         ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
         ~into:Sink.to_string
@@ -137,15 +134,27 @@ let extract_with_reporter quiet ~config ?g
         | Some leftover -> leftover
         | None -> Source.array [| src |]
       in
-      let destination =
-        match destination with None -> Bob_fpath.v name | Some v -> v
-      in
-      Stream.run ~from
-        ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-        ~into:(Sink.file destination)
-      >>= fun ((), _source) ->
-      Fiber.Option.iter Source.dispose source >>= fun () -> Fiber.return (Ok ())
-  | Some (`Elt entry, decoder, src, off), leftover ->
+      match (destination, Bob_fpath.of_string name) with
+      | None, Ok _ when Sys.file_exists name ->
+          Fiber.return
+            (Error
+               (msgf "'%s' already exists (we saved received file into: %a)"
+                  name Bob_fpath.pp tmp))
+      | Some destination, _ | None, Ok destination ->
+          Stream.run ~from
+            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+            ~into:(Sink.file destination)
+          >>= fun ((), _source) ->
+          Fiber.Option.iter Source.dispose source >>= fun () ->
+          Fiber.return (Ok ())
+      | None, Error _ ->
+          Fiber.return
+            (Error
+               (msgf
+                  "Received an invalid name '%s' (we saved received file into: \
+                   %a)"
+                  name Bob_fpath.pp tmp)))
+  | Some (`Elt entry, decoder, src, off), leftover -> (
       Logs.debug (fun m -> m "Got a directory.");
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
         leftover
@@ -157,7 +166,25 @@ let extract_with_reporter quiet ~config ?g
       | false, Some v ->
           Fmt.pr ">>> Received a folder: %s (save into %a).\n%!" name
             Bob_fpath.pp v);
-      unpack_with_reporter quiet ~config ~total pack ?destination name hash
+      match (destination, Bob_fpath.of_string name) with
+      | None, Ok _ when Sys.file_exists name ->
+          let destination = Temp.random_temporary_path ?g "bob-%s" in
+          Logs.err (fun m ->
+              m
+                "We received a name '%s' which already exists, we will save \
+                 received folder into: %a"
+                name Bob_fpath.pp destination);
+          unpack_with_reporter quiet ~config ~total pack destination hash
+      | Some destination, _ | None, Ok destination ->
+          unpack_with_reporter quiet ~config ~total pack destination hash
+      | None, Error _ ->
+          let destination = Temp.random_temporary_path ?g "bob-%s" in
+          Logs.err (fun m ->
+              m
+                "We received an invalid name '%s' (we will save received \
+                 folder into: %a)"
+                name Bob_fpath.pp destination);
+          unpack_with_reporter quiet ~config ~total pack destination hash)
 
 let run_client quiet g dns addr secure_port password yes destination =
   let open Fiber in

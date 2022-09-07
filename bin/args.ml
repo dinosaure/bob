@@ -305,7 +305,12 @@ let destination =
   let name =
     let parser = function
       | "." | ".." -> Error (`Msg "Invalid destination")
-      | str -> Bob_fpath.of_string str
+      | str -> (
+          match Bob_fpath.of_string str with
+          | Ok v when not (Sys.file_exists str) ->
+              Error (msgf "'%a' already exists" Bob_fpath.pp v)
+          | Ok _ as v -> v
+          | Error _ as error -> error)
     in
     let pp = Bob_fpath.pp in
     Arg.conv (parser, pp)
