@@ -22,6 +22,7 @@ Tests about the bob binary
   bob send -r 127.0.0.1 --password toto example -> EXITED(0)
   bob recv -r 127.0.0.1 -y toto -o out -> EXITED(0)
   $ diff example out
+  $ rm out
   $ ./sched.exe <<EOF
   > send -r 127.0.0.1 --password toto -q example 1>stdout.send
   > recv -r 127.0.0.1 -y toto --quiet -o out 1>stdout.recv
@@ -30,4 +31,5 @@ Tests about the bob binary
   bob recv -r 127.0.0.1 -y toto --quiet -o out 1>stdout.recv -> EXITED(0)
   $ cat stdout.send
   $ cat stdout.recv
+  $ rm out
   $ kill -INT $(cat pid)

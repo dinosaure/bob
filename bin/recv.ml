@@ -136,10 +136,16 @@ let extract_with_reporter quiet ~config ?g
       in
       match (destination, Bob_fpath.of_string name) with
       | None, Ok _ when Sys.file_exists name ->
-          Fiber.return
-            (Error
-               (msgf "'%s' already exists (we saved received file into: %a)"
-                  name Bob_fpath.pp tmp))
+          let destination = Temp.random_temporary_path ?g "bob-%s" in
+          Logs.err (fun m ->
+              m "'%s' already exists (we saved received file into: %a)" name
+                Bob_fpath.pp destination);
+          Stream.run ~from
+            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+            ~into:(Sink.file destination)
+          >>= fun ((), _source) ->
+          Fiber.Option.iter Source.dispose source >>= fun () ->
+          Fiber.return (Ok ())
       | Some destination, _ | None, Ok destination ->
           Stream.run ~from
             ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
@@ -148,12 +154,18 @@ let extract_with_reporter quiet ~config ?g
           Fiber.Option.iter Source.dispose source >>= fun () ->
           Fiber.return (Ok ())
       | None, Error _ ->
-          Fiber.return
-            (Error
-               (msgf
-                  "Received an invalid name '%s' (we saved received file into: \
-                   %a)"
-                  name Bob_fpath.pp tmp)))
+          let destination = Temp.random_temporary_path ?g "bob-%s" in
+          Logs.err (fun m ->
+              m
+                "We received an invalid name '%s' (we will save received file \
+                 into: %a)"
+                name Bob_fpath.pp destination);
+          Stream.run ~from
+            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+            ~into:(Sink.file destination)
+          >>= fun ((), _source) ->
+          Fiber.Option.iter Source.dispose source >>= fun () ->
+          Fiber.return (Ok ()))
   | Some (`Elt entry, decoder, src, off), leftover -> (
       Logs.debug (fun m -> m "Got a directory.");
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off

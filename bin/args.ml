@@ -307,7 +307,7 @@ let destination =
       | "." | ".." -> Error (`Msg "Invalid destination")
       | str -> (
           match Bob_fpath.of_string str with
-          | Ok v when not (Sys.file_exists str) ->
+          | Ok v when Sys.file_exists str ->
               Error (msgf "'%a' already exists" Bob_fpath.pp v)
           | Ok _ as v -> v
           | Error _ as error -> error)
