@@ -113,7 +113,7 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
     | Error _ -> Crypto.close flow >>= fun () -> Fiber.return None
   in
   let stop flow =
-    finalise ();
+    ( try finalise (); with _ -> ()) ;
     Crypto.close flow
   in
   Stream.Source { init; pull; stop }
