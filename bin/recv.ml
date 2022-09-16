@@ -143,14 +143,14 @@ let extract_with_reporter quiet ~config ?g
           Stream.run ~from
             ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
             ~into:(Sink.file destination)
-          >>= fun ((), _source) ->
+          >>= fun ((), source) ->
           Fiber.Option.iter Source.dispose source >>= fun () ->
           Fiber.return (Ok ())
       | Some destination, _ | None, Ok destination ->
           Stream.run ~from
             ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
             ~into:(Sink.file destination)
-          >>= fun ((), _source) ->
+          >>= fun ((), source) ->
           Fiber.Option.iter Source.dispose source >>= fun () ->
           Fiber.return (Ok ())
       | None, Error _ ->
