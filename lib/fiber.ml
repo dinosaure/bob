@@ -210,6 +210,7 @@ let pp_sockaddr ppf = function
   | Unix.ADDR_UNIX name -> Fmt.pf ppf "<%s>" name
 
 external is_windows : unit -> bool = "bob_is_windows" [@@noalloc]
+external is_freebsd : unit -> bool = "bob_is_freebsd" [@@noalloc]
 external set_nonblock : Unix.file_descr -> bool -> unit = "bob_set_nonblock"
 
 let connect fd sockaddr : (unit, Unix.error) result t =
@@ -221,15 +222,24 @@ let connect fd sockaddr : (unit, Unix.error) result t =
       Log.debug (fun m ->
           m "Call to connect() (operating system: %s)" Sys.os_type);
       let ivar : (unit, Unix.error) result Ivar.t = Ivar.create () in
-      if is_windows () then (
+      if is_windows () || is_freebsd () then (
         Log.debug (fun m -> m "Set file-descriptor into a non-blocking mode.");
         set_nonblock fd true;
         try
-          Unix.connect fd sockaddr;
           Log.debug (fun m -> m "Try to connect to %a" pp_sockaddr sockaddr);
+          Unix.connect fd sockaddr;
           Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
           Ivar.read ivar
-        with Unix.Unix_error (errno, _, _) -> return (Error errno))
+        with
+        | Unix.Unix_error (Unix.EINPROGRESS, _, _) when is_freebsd () ->
+            Log.debug (fun m -> m "Connection is in progress.");
+            Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
+            Ivar.read ivar
+        | Unix.Unix_error (errno, _, _) ->
+            Log.err (fun m ->
+                m "Got an error for a non-blocking connect(): %s."
+                  (Unix.error_message errno));
+            return (Error errno))
       else (
         Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
         Ivar.read ivar)
@@ -339,6 +349,15 @@ let sigwr fd =
       with
       | Unix.Unix_error (Unix.EISCONN, _, _) -> Ivar.fill ivar (Ok ())
       | Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
+  | Some (`Connect (_sockaddr, ivar)) when is_freebsd () ->
+      Log.debug (fun m -> m "Event from connect() (FreeBSD).");
+      (* TODO(dinosaure): we probably should verify the connection with
+         [getpeername], see https://cr.yp.to/docs/connect.html for more
+         details about how to retrieve possible error from connect()
+         with FreeBSD. *)
+      Hashtbl.remove pwr fd;
+      set_nonblock fd false;
+      Ivar.fill ivar (Ok ())
   | Some (`Connect (sockaddr, ivar)) -> (
       Hashtbl.remove pwr fd;
       try

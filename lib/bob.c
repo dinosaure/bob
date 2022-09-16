@@ -67,13 +67,42 @@ bob_is_windows(__unit ()) {
 #endif
 }
 
-/* XXX(dinosaure): this function is used only on Windows for [connect()].
- * Indeed, despite Linux, we must set a socket as a non-blocking socket and
- * execute [connect()] on it. Then, use [select()] to signal us when the socket
- * is ready. On Linux, it's different when the socket is already writable. In
- * such case, [select()] tells to us that the socket is already ready to
- * [connect()]. Moreover, the semantic of our [Fiber.connect] is not so
- * clear and we should specify it more strictly. TODO! */
+/* XXX(dinosaure): Unlike Windows, FreeBSD recognition is **static**. This
+ * means that code compiled on Linux will recognize itself for Linux (and not
+ * for FreeBSD). Only Cosmopolitan can really recognize FreeBSD dynamically.
+ *
+ * This difference is due to `OCAML_OS_TYPE` which recognises Linux **and**
+ * FreeBSD as Unix. */
+CAMLprim value
+bob_is_freebsd(__unit ()) {
+#if defined(__ESPERANTO__)
+#include "cosmopolitan.h"
+  return Val_bool (IsFreebsd());
+#elif defined(__FreeBSD__)
+  return Val_true;
+#else
+  return Val_false;
+#endif
+}
+
+extern void uerror (const char *, value);
+
+/* XXX(dinosaure): this function is used only on Windows & FreeBSD for
+ * [connect()]. Indeed, despite Linux, we must set a socket as a non-blocking
+ * socket and execute [connect()] on it. Then, use [select()] to signal us when
+ * the socket is ready. On Linux, it's different when the socket is already
+ * writable. In such case, [select()] tells to us that the socket is already
+ * ready to [connect()]. Moreover, the semantic of our [Fiber.connect] is not
+ * so clear and we should specify it more strictly. TODO!
+ *
+ * About Windows, [bob_set_nonblock] is effectful only with Cosmopolitan! If
+ * you compile Bob on Windows, the programm **will not work**!
+ *
+ * Another precision about FreeBSD, the execution path is resolved at the
+ * compilation time. That mostly means that a compilation on Linux and a
+ * transfer of the binary into a FreeBSD system **will not work**! Only the
+ * Cosmopolitan target gives to us the ability to recognize the FreeBSD system
+ * dynamically. */
 CAMLprim value
 bob_set_nonblock(value fd, value mode) {
 #if defined(__ESPERANTO__)
@@ -82,6 +111,13 @@ bob_set_nonblock(value fd, value mode) {
     uint32_t opt = Bool_val (mode);
     __sys_ioctlsocket_nt(Int_val (fd), FIONBIO, &opt);
   }
+#elif defined(__FreeBSD__)
+#include <fcntl.h>
+  int ret;
+  ret = fcntl(Int_val (fd), F_GETFL, 0);
+  long opt = (Bool_val (mode)) ? O_NONBLOCK : 0 ;
+  if (ret == -1 || fcntl(Int_val (fd), F_SETFL, ret | opt) == -1)
+    uerror("set_nonblock", 0 /* Nothing */);
 #endif
   return Val_unit;
 }
