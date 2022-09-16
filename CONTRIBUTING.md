@@ -39,6 +39,14 @@ dependencies) must compile with Cosmopolitan. It may happen that the first one
 works while the second one fails. In this case, it is certainly because of a
 (transitive) dependency.
 
+Another aspect of Bob is the use of hearts. Historically, Bob only uses one
+core. It is possible that some parts could be optimised to use multiple cores.
+However, the inherent complexity of using multiple cores, as well as the notion
+of portability, pushes us to a certain conservatism on this issue.
+
+In this respect, and in order not to make the code more complex for a gain that
+is difficult to measure, we do not want to use several cores.
+
 ### Build and test `bob`
 
 You can easily build and test `bob` via OPAM:
