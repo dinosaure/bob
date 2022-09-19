@@ -442,13 +442,16 @@ let pipe fd0 fd1 =
   in
   let close () =
     Fiber.wait closed >>= fun `Closed ->
+    Log.debug (fun m -> m "Close connections into the secure room.");
     Fiber.close fd0 >>= fun () ->
     Fiber.close fd1 >>= fun () -> Fiber.return ()
   in
   fork_and_join
     (fun () -> fork_and_join (transmit fd0 fd1) (transmit fd1 fd0))
     close
-  >>= fun (((), ()), ()) -> Fiber.return ()
+  >>= fun (((), ()), ()) ->
+  Log.debug (fun m -> m "The secure room is done.");
+  Fiber.return ()
 
 let only_if_not_closed ivar fn =
   match Fiber.Ivar.get ivar with

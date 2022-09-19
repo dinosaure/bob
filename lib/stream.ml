@@ -519,6 +519,33 @@ module Flow = struct
       Sink { init; stop; full; push }
     in
     { flow }
+
+  let with_digest :
+      type ctx.
+      (module Digestif.S with type ctx = ctx) ->
+      ctx ref ->
+      (Stdbob.bigstring, Stdbob.bigstring) flow =
+   fun (module Digestif) ctx ->
+    let flow (Sink k) =
+      let init () = k.init () in
+      let push acc bstr =
+        k.push acc bstr >>= fun acc ->
+        k.full acc >>= function
+        | true -> Fiber.return acc
+        | false ->
+            Log.debug (fun m -> m "Digest:");
+            Log.debug (fun m ->
+                m "@[<hov>%a@]"
+                  (Hxd_string.pp Hxd.default)
+                  (Stdbob.bigstring_to_string bstr));
+            ctx := Digestif.feed_bigstring !ctx bstr;
+            Fiber.return acc
+      in
+      let full acc = k.full acc in
+      let stop acc = k.stop acc in
+      Sink { init; stop; full; push }
+    in
+    { flow }
 end
 
 type 'a stream = { stream : 'r. ('a, 'r) sink -> 'r Fiber.t } [@@unboxed]

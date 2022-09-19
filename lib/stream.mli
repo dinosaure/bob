@@ -90,6 +90,13 @@ module Flow : sig
   val ( >> ) : ('b, 'c) flow -> ('a, 'b) flow -> ('a, 'c) flow
   val tap : ('a -> unit Fiber.t) -> ('a, 'a) flow
 
+  (** {3: Computation.} *)
+
+  val with_digest :
+    (module Digestif.S with type ctx = 'ctx) ->
+    'ctx ref ->
+    (Stdbob.bigstring, Stdbob.bigstring) flow
+
   (** {3: Buffering.} *)
 
   val bigbuffer : int -> (string, Stdbob.bigstring) flow
