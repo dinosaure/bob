@@ -544,6 +544,11 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
       let name =
         Stream.tap
           (fun bstr ->
+            Log.debug (fun m -> m "Calculate the PACK hash with:");
+            Log.debug (fun m ->
+                m "@[<hov>%a@]"
+                  (Hxd_string.pp Hxd.default)
+                  (bigstring_to_string bstr));
             ctx := SHA256.feed_bigstring !ctx bstr;
             Fiber.return ())
           (Stream.double hdr_name name)
@@ -564,10 +569,15 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
         singleton hdr ++ name ++ file
         ++ of_fiber (fun () ->
                finalise ();
-               (Fiber.return
-               <.> bigstring_of_string ~off:0 ~len:SHA256.length
-               <.> SHA256.to_raw_string <.> SHA256.get)
-                 !ctx))
+               let hash = SHA256.get !ctx in
+               Log.debug (fun m ->
+                   m "Hash of the PACK file: %a." SHA256.pp hash);
+               let hash =
+                 (bigstring_of_string ~off:0 ~len:SHA256.length
+                 <.> SHA256.to_raw_string)
+                   hash
+               in
+               Fiber.return hash))
       |> fun stream ->
       Log.debug (fun m -> m "The PACK stream is ready to be sent.");
       Fiber.return (Ok stream)
@@ -589,6 +599,7 @@ type entry =
       * Carton.Dec.weight
       * Carton.Dec.weight ]
 
+let ctx = First_pass.ctx
 let is_base = Verify.is_base
 let is_resolved = Verify.is_resolved
 let offset_of_status = Verify.offset_of_status

@@ -53,6 +53,7 @@ type entry =
       * Carton.Dec.weight
       * Carton.Dec.weight ]
 
+val ctx : decoder -> Digestif.SHA1.ctx
 val is_base : status -> bool
 val is_resolved : status -> bool
 val offset_of_status : status -> int64

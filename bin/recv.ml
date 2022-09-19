@@ -104,6 +104,82 @@ let unpack_with_reporter quiet ~config ~total pack destination hash =
   finalise ();
   Fiber.return (Ok ())
 
+let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
+  let open Fiber in
+  let open Stream in
+  let ctx =
+    Stdlib.Option.(value ~default:Digestif.SHA1.empty (map Pack.ctx decoder))
+  in
+  let ctx = ref ctx in
+  (* XXX(dinosaure): this is fragile but we are sure that we already feed
+     the [ctx] with the first entry of the PACK file. The next [Stream.run]
+     below will inflate this entry and we don't need to re-calculate the
+     [ctx] again. However, the next entry (the file) must complete the
+     [ctx] (see [with_digest]). *)
+  Stream.run ~from:(Source.file ~offset tmp)
+    ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
+    ~into:Sink.to_string
+  >>= fun (name, source) ->
+  Fiber.Option.iter Source.dispose source >>= fun () ->
+  (match (quiet, destination) with
+  | true, _ -> ()
+  | false, None -> Fmt.pr ">>> Received a file: %s.\n%!" name
+  | false, Some v ->
+      Fmt.pr ">>> Received a file: %s (save into %a).\n%!" name Bob_fpath.pp v);
+  let from =
+    match leftover with
+    | Some leftover when Bigarray.Array1.dim src - off > 0 ->
+        Source.prepend Bigarray.Array1.(sub src off (dim src - off)) leftover
+    | Some leftover -> leftover
+    | None -> Source.array [| src |]
+  in
+  let destination =
+    match (destination, Bob_fpath.of_string name) with
+    | None, Ok _ when Sys.file_exists name ->
+        let destination = Temp.random_temporary_path ?g "bob-%s" in
+        Logs.err (fun m ->
+            m "'%s' already exists (we saved received file into: %a)" name
+              Bob_fpath.pp destination);
+        destination
+    | Some destination, _ | None, Ok destination -> destination
+    | None, Error _ ->
+        let destination = Temp.random_temporary_path ?g "bob-%s" in
+        Logs.err (fun m ->
+            m
+              "We received an invalid name '%s' (we will save received file \
+               into: %a)"
+              name Bob_fpath.pp destination);
+        destination
+  in
+  Stream.run ~from
+    ~via:
+      Flow.(
+        with_digest (module Digestif.SHA1) ctx
+        << save_into tmp
+        << Pack.inflate_entry ~reporter:Fiber.ignore)
+    ~into:(Sink.file destination)
+  (* XXX(dinosaure): note that we save the stream into [tmp] BUT the file
+     we don't ensure that [tmp] will be a well-formed PACK file. The only
+     thing interesting into [tmp] is last bytes which permits to verify
+     if we received correctly the file. *)
+  >>=
+  fun ((), source) ->
+  let hash = Digestif.SHA1.get !ctx in
+  Fiber.Option.iter Source.dispose source >>= fun () ->
+  let expected =
+    let open Stdlib in
+    let ic = open_in (Bob_fpath.to_string tmp) in
+    let ln = in_channel_length ic in
+    let tp = Bytes.create Digestif.SHA1.digest_size in
+    if ln < Digestif.SHA1.digest_size then failwith "Corrupted file.";
+    seek_in ic (ln - Digestif.SHA1.digest_size);
+    really_input ic tp 0 Digestif.SHA1.digest_size;
+    close_in ic;
+    Digestif.SHA1.of_raw_string (Bytes.unsafe_to_string tp)
+  in
+  if Digestif.SHA1.equal hash expected then Fiber.return (Ok ())
+  else Fiber.return (Error (msgf "Corrupted file (unexpected hash)"))
+
 let extract_with_reporter quiet ~config ?g
     (from : Stdbob.bigstring Stream.source) destination =
   let open Fiber in
@@ -112,60 +188,9 @@ let extract_with_reporter quiet ~config ?g
   let via = Flow.(save_into tmp << Pack.analyse ignore) in
   Stream.run ~from ~via ~into:Sink.first >>= function
   | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
-  | ( Some (`Elt (offset, _status, `Base (`D, _weight)), _decoder, src, off),
-      leftover ) -> (
-      Stream.run ~from:(Source.file ~offset tmp)
-        ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-        ~into:Sink.to_string
-      >>= fun (name, source) ->
-      Fiber.Option.iter Source.dispose source >>= fun () ->
-      (match (quiet, destination) with
-      | true, _ -> ()
-      | false, None -> Fmt.pr ">>> Received a file: %s.\n%!" name
-      | false, Some v ->
-          Fmt.pr ">>> Received a file: %s (save into %a).\n%!" name Bob_fpath.pp
-            v);
-      let from =
-        match leftover with
-        | Some leftover when Bigarray.Array1.dim src - off > 0 ->
-            Source.prepend
-              Bigarray.Array1.(sub src off (dim src - off))
-              leftover
-        | Some leftover -> leftover
-        | None -> Source.array [| src |]
-      in
-      match (destination, Bob_fpath.of_string name) with
-      | None, Ok _ when Sys.file_exists name ->
-          let destination = Temp.random_temporary_path ?g "bob-%s" in
-          Logs.err (fun m ->
-              m "'%s' already exists (we saved received file into: %a)" name
-                Bob_fpath.pp destination);
-          Stream.run ~from
-            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-            ~into:(Sink.file destination)
-          >>= fun ((), source) ->
-          Fiber.Option.iter Source.dispose source >>= fun () ->
-          Fiber.return (Ok ())
-      | Some destination, _ | None, Ok destination ->
-          Stream.run ~from
-            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-            ~into:(Sink.file destination)
-          >>= fun ((), source) ->
-          Fiber.Option.iter Source.dispose source >>= fun () ->
-          Fiber.return (Ok ())
-      | None, Error _ ->
-          let destination = Temp.random_temporary_path ?g "bob-%s" in
-          Logs.err (fun m ->
-              m
-                "We received an invalid name '%s' (we will save received file \
-                 into: %a)"
-                name Bob_fpath.pp destination);
-          Stream.run ~from
-            ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
-            ~into:(Sink.file destination)
-          >>= fun ((), _source) ->
-          Fiber.Option.iter Source.dispose source >>= fun () ->
-          Fiber.return (Ok ()))
+  | ( Some (`Elt (offset, _status, `Base (`D, _weight)), decoder, src, off),
+      leftover ) ->
+      extract_one quiet ?g tmp ~offset decoder src off ~leftover destination
   | Some (`Elt entry, decoder, src, off), leftover -> (
       Logs.debug (fun m -> m "Got a directory.");
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off

@@ -39,7 +39,7 @@ depends: [
 
 pin-depends: [
   [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#61f4e785d22d6002fd396862f75f515355197002" ]
-  [ "carton.dev" "git+https://github.com/mirage/ocaml-git.git#dd5899020dca9af5fb36c5fd3105142fabf8f29e" ]
+  [ "carton.dev" "git+https://github.com/mirage/ocaml-git.git#3e9f380fde7db3d7654ce81d0cd21509ce6a7240" ]
   [ "digestif.dev" "git+https://github.com/mirage/digestif.git#2e6a40f8b6839dba40965b077d77ba540fc40715" ]
   [ "mirage-crypto.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
   [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]

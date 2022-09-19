@@ -36,7 +36,14 @@
  (name stream)
  (public_name bob.stream)
  (modules stream)
- (libraries hxd.core hxd.string bob.fpath decompress.zl bob.std bob.fiber))
+ (libraries
+  hxd.core
+  hxd.string
+  bob.fpath
+  decompress.zl
+  digestif
+  bob.std
+  bob.fiber))
 
 (library
  (name temp)
