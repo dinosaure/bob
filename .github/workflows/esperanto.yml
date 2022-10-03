@@ -18,7 +18,7 @@ jobs:
     - name: Pin & Install workflows
       run: |
         opam pin add git+https://github.com/dinosaure/esperanto.git
-        opam install cosmopolitan esperanto ocamlfind opam-monorepo
+        opam install esperanto-cosmopolitan esperanto ocamlfind opam-monorepo
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
     - name: Prepare dune files
