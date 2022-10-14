@@ -20,6 +20,19 @@ simplicity that only meets the objective of transmitting a document.
 
 ### A simple example
 
+#### On Windows,
+
+This is a simple animation of how to use `bob.com` on Windows:
+<div align="center">
+How to send a file:<br />
+<img src="./img/send.gif" alt="send" width="50%" />
+
+How to receive a file (with the same password):<br />
+<img src="./img/receive.gif" alt="receive" width="50%" />
+</div>
+
+#### On other platforms,
+
 You can compile & install bob with [opam][opam]:
 ```sh
 $ opam pin add -y https://github.com/dinosaure/bob
