@@ -85,6 +85,18 @@ bob_is_freebsd(__unit ()) {
 #endif
 }
 
+CAMLprim value
+bob_is_linux(__unit ()) {
+#if defined(__ESPERANTO__)
+#include "cosmopolitan.h"
+  return Val_bool (IsLinux());
+#elif defined(__linux__)
+  return Val_true;
+#else
+  return Val_false;
+#endif
+}
+
 extern void uerror (const char *, value);
 
 /* XXX(dinosaure): this function is used only on Windows & FreeBSD for
@@ -110,8 +122,12 @@ bob_set_nonblock(value fd, value mode) {
   if (IsWindows()) {
     uint32_t opt = Bool_val (mode);
     __sys_ioctlsocket_nt(Int_val (fd), FIONBIO, &opt);
+    return Val_unit; /* Don't do the rest of the code. */
   }
-#elif defined(__FreeBSD__)
+#elif defined(__FreeBSD__) \
+   || defined(__OpenBSD__) \
+   || defined(__NetBSD__) \
+   || (defined(__APPLE__) && defined(__MACH__))
 #include <fcntl.h>
   int ret;
   ret = fcntl(Int_val (fd), F_GETFL, 0);

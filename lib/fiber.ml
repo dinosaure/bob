@@ -211,6 +211,7 @@ let pp_sockaddr ppf = function
 
 external is_windows : unit -> bool = "bob_is_windows" [@@noalloc]
 external is_freebsd : unit -> bool = "bob_is_freebsd" [@@noalloc]
+external is_linux : unit -> bool = "bob_is_linux" [@@noalloc]
 external set_nonblock : Unix.file_descr -> bool -> unit = "bob_set_nonblock"
 
 let connect fd sockaddr : (unit, Unix.error) result t =
@@ -222,7 +223,10 @@ let connect fd sockaddr : (unit, Unix.error) result t =
       Log.debug (fun m ->
           m "Call to connect() (operating system: %s)" Sys.os_type);
       let ivar : (unit, Unix.error) result Ivar.t = Ivar.create () in
-      if is_windows () || is_freebsd () then (
+      if is_linux () then (
+        Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
+        Ivar.read ivar)
+      else (
         Log.debug (fun m -> m "Set file-descriptor into a non-blocking mode.");
         set_nonblock fd true;
         try
@@ -231,7 +235,8 @@ let connect fd sockaddr : (unit, Unix.error) result t =
           Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
           Ivar.read ivar
         with
-        | Unix.Unix_error (Unix.EINPROGRESS, _, _) when is_freebsd () ->
+        | Unix.Unix_error (Unix.EINPROGRESS, _, _)
+          when is_freebsd () (* TODO(dinosaure): check for MacOS *) ->
             Log.debug (fun m -> m "Connection is in progress.");
             Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
             Ivar.read ivar
@@ -240,9 +245,6 @@ let connect fd sockaddr : (unit, Unix.error) result t =
                 m "Got an error for a non-blocking connect(): %s."
                   (Unix.error_message errno));
             return (Error errno))
-      else (
-        Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
-        Ivar.read ivar)
 
 let close fd =
   Log.debug (fun m -> m "Close the file-description %d" (Obj.magic fd));
@@ -349,8 +351,14 @@ let sigwr fd =
       with
       | Unix.Unix_error (Unix.EISCONN, _, _) -> Ivar.fill ivar (Ok ())
       | Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
-  | Some (`Connect (_sockaddr, ivar)) when is_freebsd () ->
-      Log.debug (fun m -> m "Event from connect() (FreeBSD).");
+  | Some (`Connect (sockaddr, ivar)) when is_linux () -> (
+      Hashtbl.remove pwr fd;
+      try
+        Unix.connect fd sockaddr;
+        Ivar.fill ivar (Ok ())
+      with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
+  | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () *) ->
+      Log.debug (fun m -> m "Event from connect() (UNIX connect()).");
       (* TODO(dinosaure): we probably should verify the connection with
          [getpeername], see https://cr.yp.to/docs/connect.html for more
          details about how to retrieve possible error from connect()
@@ -358,12 +366,6 @@ let sigwr fd =
       Hashtbl.remove pwr fd;
       set_nonblock fd false;
       Ivar.fill ivar (Ok ())
-  | Some (`Connect (sockaddr, ivar)) -> (
-      Hashtbl.remove pwr fd;
-      try
-        Unix.connect fd sockaddr;
-        Ivar.fill ivar (Ok ())
-      with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
   | Some (`Write ((bstr, off, len), ivar)) -> (
       let ret = bigstring_write fd bstr off len in
       if ret >= 0 then (
