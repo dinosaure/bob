@@ -1,0 +1,39 @@
+diff --git a/bin/dune b/bin/dune
+index 98b0960..488d70c 100644
+--- a/bin/dune
++++ b/bin/dune
+@@ -53,6 +53,15 @@
+   bob.tls
+   bob.dns))
+ 
++(rule
++ (target bob.com)
++ (package bob-com)
++ (enabled_if
++  (= %{context_name} esperanto))
++ (mode promote)
++ (deps bob.exe)
++ (action
++  (run objcopy -S -O binary %{deps} %{target})))
+ ; 
+ ; (rule
+ ;  (target cat.com)
+diff --git a/dune-workspace b/dune-workspace
+index 41234ad..203ef7b 100644
+--- a/dune-workspace
++++ b/dune-workspace
+@@ -1,8 +1,8 @@
+ (lang dune 2.0)
+ (context (default))
+-; (context
+-;  (default
+-;   (name esperanto)
+-;   (toolchain esperanto)
+-;   (merlin)
+-;   (host default)))
++(context
++ (default
++  (name esperanto)
++  (toolchain esperanto)
++  (merlin)
++  (host default)))
