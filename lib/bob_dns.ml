@@ -326,7 +326,7 @@ module Transport :
 
   let connect t =
     connect_via_tcp_to_ns t >>| function
-    | Ok () -> Ok t
+    | Ok () -> Ok (`Tcp, t)
     | Error (`Msg err) -> Error (`Msg err)
 
   let bind = Fiber.bind
