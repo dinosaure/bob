@@ -43,7 +43,7 @@ jobs:
         EOF
     - name: Compilation
       run: |
-        opam monorepo lock --require-cross-compile
+        opam monorepo lock --require-cross-compile bob.com
         opam monorepo pull
         opam exec -- dune build --profile=release ./bin/bob.com
     - name: Upload Artifact
