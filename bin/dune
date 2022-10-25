@@ -1,24 +1,28 @@
 (executable
  (name cat)
  (public_name bob.cat)
+ (package bob)
  (modules cat)
  (libraries fmt.tty logs.fmt bob.fiber))
 
 (executable
  (name getline)
  (public_name bob.getline)
+ (package bob)
  (modules getline)
  (libraries fmt.tty logs.fmt bob.fiber))
 
 (executable
  (name compress)
  (public_name bob.compress)
+ (package bob)
  (modules compress)
  (libraries bob.stream))
 
 (executable
  (name bob)
  (public_name bob)
+ (package bob)
  (modules
   prgrss
   transfer
