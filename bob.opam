@@ -30,7 +30,7 @@ depends: [
   "tls"
   "carton"      {>= "0.5.0"}
   "progress"
-  "dns-client"
+  "dns-client"  {>= "6.4.0"}
   "happy-eyeballs"
   "ca-certs"
   "ke"          {>= "0.6"}
