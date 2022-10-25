@@ -52,8 +52,8 @@ pin-depends: [
 ]
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
-x-mirage-configure: [ "opam monorepo lock bob-com.opam --require-cross-compile" ]
-x-mirage-pre-build: [ "opam monorepo pull" ]
+x-mirage-configure: [ "opam-monorepo lock bob-com.opam --require-cross-compile" ]
+x-mirage-pre-build: [ "opam-monorepo pull" ]
 x-mirage-extra-repo: [
   [ "opam-overlays" "https://github.com/dune-universe/opam-overlays.git" ]
   [ "mirage-overlays" "https://github.com/dune-universe/mirage-opam-overlays.git" ]
