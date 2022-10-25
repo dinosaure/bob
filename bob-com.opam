@@ -55,12 +55,12 @@ patches: [
 ]
 
 extra-files: [
-  [ "esperanto.patch" "sha256=791a99c8104d41beda8598a2ef012287160d481f3ef414a692c48cee29fe1637" ]
+  [ "esperanto.patch" "sha256=57c36d5c3b5e56cb76eef55544d828e9e7214f6bd6b7d17a44a92238f4ccaa83" ]
 ]
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
-x-mirage-configure: []
-x-mirage-pre-build: [ "opam monorepo lock bob-com.opam --require-cross-compile && opam monorepo pull" ]
+x-mirage-configure: [ "opam monorepo lock bob-com.opam --require-cross-compile" ]
+x-mirage-pre-build: [ "opam monorepo pull" ]
 x-mirage-extra-repo: [
   [ "opam-overlays" "https://github.com/dune-universe/opam-overlays.git" ]
   [ "mirage-overlays" "https://github.com/dune-universe/mirage-opam-overlays.git" ]

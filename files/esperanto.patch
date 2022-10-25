@@ -8,7 +8,7 @@ index 98b0960..488d70c 100644
  
 +(rule
 + (target bob.com)
-+ (package bob-com)
++ (package bob)
 + (enabled_if
 +  (= %{context_name} esperanto))
 + (mode promote)
