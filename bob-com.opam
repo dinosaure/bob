@@ -17,31 +17,31 @@ install: [
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
-  "ocaml"          {build & >= "4.13.0"}
-  "dune"           {?monorepo & >= "2.8.0"}
-  "fmt"            {?monorepo & >= "0.9.0"}
-  "hxd"            {?monorepo & >= "0.3.2"}
-  "logs"           {?monorepo & >= "0.7.0"}
-  "bheap"          {?monorepo & >= "2.0.0"}
-  "base64"         {?monorepo & >= "3.5.0"}
-  "decompress"     {?monorepo & >= "1.5.1"}
-  "digestif"       {?monorepo & >= "1.1.3"}
-  "opam-monorepo"  {build}
-  "esperanto"      {build}
-  "bigstringaf"    {?monorepo}
-  "cmdliner"       {?monorepo}
-  "ipaddr"         {?monorepo}
-  "mirage-crypto"  {?monorepo & >= "dev"}
-  "psq"            {?monorepo}
-  "tls"            {?monorepo}
-  "carton"         {?monorepo & >= "0.5.0"}
-  "progress"       {?monorepo}
-  "dns-client"     {?monorepo}
-  "happy-eyeballs" {?monorepo}
-  "ca-certs"       {?monorepo}
-  "ke"             {?monorepo & >= "0.6"}
-  "alcotest"       {with-test}
-  "spoke"          {?monorepo}
+  "ocaml"          { build & >= "4.13.0" }
+  "dune"           { ?monorepo & >= "2.8.0" }
+  "fmt"            { ?monorepo & >= "0.9.0" }
+  "hxd"            { ?monorepo & >= "0.3.2" }
+  "logs"           { ?monorepo & >= "0.7.0" }
+  "bheap"          { ?monorepo & >= "2.0.0" }
+  "base64"         { ?monorepo & >= "3.5.0" }
+  "decompress"     { ?monorepo & >= "1.5.1" }
+  "digestif"       { ?monorepo & >= "1.1.3" }
+  "opam-monorepo"  { build }
+  "esperanto"      { build }
+  "bigstringaf"    { ?monorepo }
+  "cmdliner"       { ?monorepo }
+  "ipaddr"         { ?monorepo }
+  "mirage-crypto"  { ?monorepo & >= "dev" }
+  "psq"            { ?monorepo }
+  "tls"            { ?monorepo }
+  "carton"         { ?monorepo & >= "0.5.0" }
+  "progress"       { ?monorepo }
+  "dns-client"     { ?monorepo }
+  "happy-eyeballs" { ?monorepo }
+  "ca-certs"       { ?monorepo }
+  "ke"             { ?monorepo & >= "0.6" }
+  "alcotest"       { with-test }
+  "spoke"          { ?monorepo }
 ]
 
 pin-depends: [
@@ -52,8 +52,10 @@ pin-depends: [
 ]
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
-x-mirage-configure: [ "opam-monorepo lock bob-com.opam --require-cross-compile" ]
-x-mirage-pre-build: [ "opam-monorepo pull" ]
+x-mirage-configure: [ "sh" "-exc" "echo Configuration..." ]
+x-mirage-pre-build: [
+ "sh" "-exc" "$(eval opam env) opam monorepo lock bob-com.opam --require-cross-compile && opam monorepo pull"
+]
 x-mirage-extra-repo: [
   [ "opam-overlays" "https://github.com/dune-universe/opam-overlays.git" ]
   [ "mirage-overlays" "https://github.com/dune-universe/mirage-opam-overlays.git" ]
