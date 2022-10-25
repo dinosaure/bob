@@ -17,29 +17,30 @@ install: [
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
-  "ocaml"       {>= "4.13.0"}
-  "dune"        {>= "2.8.0"}
-  "fmt"         {>= "0.9.0"}
-  "hxd"         {>= "0.3.2"}
-  "logs"        {>= "0.7.0"}
-  "bheap"       {>= "2.0.0"}
-  "base64"      {>= "3.5.0"}
-  "decompress"  {>= "1.5.1"}
-  "digestif"    {>= "1.1.3"}
-  "bigstringaf"
-  "cmdliner"
-  "ipaddr"
-  "mirage-crypto"
-  "psq"
-  "tls"
-  "carton"      {>= "0.5.0"}
-  "progress"
-  "dns-client"
-  "happy-eyeballs"
-  "ca-certs"
-  "ke"          {>= "0.6"}
-  "alcotest"    {with-test}
-  "spoke"
+  "ocaml"          {build & >= "4.13.0"}
+  "dune"           {?monorepo & >= "2.8.0"}
+  "fmt"            {?monorepo & >= "0.9.0"}
+  "hxd"            {?monorepo & >= "0.3.2"}
+  "logs"           {?monorepo & >= "0.7.0"}
+  "bheap"          {?monorepo & >= "2.0.0"}
+  "base64"         {?monorepo & >= "3.5.0"}
+  "decompress"     {?monorepo & >= "1.5.1"}
+  "digestif"       {?monorepo & >= "1.1.3"}
+  "opam-monorepo"  {build}
+  "bigstringaf"    {?monorepo}
+  "cmdliner"       {?monorepo}
+  "ipaddr"         {?monorepo}
+  "mirage-crypto"  {?monorepo & >= "dev"}
+  "psq"            {?monorepo}
+  "tls"            {?monorepo}
+  "carton"         {?monorepo & >= "0.5.0"}
+  "progress"       {?monorepo}
+  "dns-client"     {?monorepo}
+  "happy-eyeballs" {?monorepo}
+  "ca-certs"       {?monorepo}
+  "ke"             {?monorepo & >= "0.6"}
+  "alcotest"       {with-test}
+  "spoke"          {?monorepo}
 ]
 
 pin-depends: [
@@ -59,10 +60,7 @@ extra-files: [
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
 x-mirage-configure: []
-x-mirage-pre-build: [
-  [ "opam monorepo lock bob-com.opam --require-cross-compile" ]
-  [ "opam monorepo pull" ]
-]
+x-mirage-pre-build: [ "opam monorepo lock bob-com.opam --require-cross-compile && opam monorepo pull" ]
 x-mirage-extra-repo: [
   [ "opam-overlays" "https://github.com/dune-universe/opam-overlays.git" ]
   [ "mirage-overlays" "https://github.com/dune-universe/mirage-opam-overlays.git" ]
