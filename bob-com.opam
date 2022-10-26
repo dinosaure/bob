@@ -31,7 +31,7 @@ depends: [
   "bigstringaf"    { ?monorepo }
   "cmdliner"       { ?monorepo }
   "ipaddr"         { ?monorepo }
-  "mirage-crypto"  { ?monorepo & >= "dev" }
+  "mirage-crypto"  { ?monorepo }
   "psq"            { ?monorepo }
   "tls"            { ?monorepo }
   "carton"         { ?monorepo & >= "0.5.0" }
@@ -52,9 +52,10 @@ pin-depends: [
 ]
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
-x-mirage-configure: [ "sh" "-exc" "echo Configuration..." ]
+x-mirage-configure: [
+  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile bob-com" ]
 x-mirage-pre-build: [
- "sh" "-exc" "$(eval opam env) opam monorepo lock bob-com.opam --require-cross-compile && opam monorepo pull"
+  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull"
 ]
 x-mirage-extra-repo: [
   [ "opam-overlays" "https://github.com/dune-universe/opam-overlays.git" ]
