@@ -53,7 +53,7 @@ pin-depends: [
 
 x-mirage-opam-lock-location: "bob-com.opam.locked"
 x-mirage-configure: [
-  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile bob-com" ]
+  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version $(ocamlc --version) bob-com" ]
 x-mirage-pre-build: [
   "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull"
 ]
