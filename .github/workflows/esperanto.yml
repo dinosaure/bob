@@ -23,7 +23,7 @@ jobs:
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
     - name: Compilation
       run: |
-        env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version $(ocamlc --version) com
+        env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version ${{ matrix.ocaml-version }} com
         env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull
         opam exec -- dune build -x esperanto -p bob bin/bob.exe
         objcopy -S -O binary _build/default.esperanto/bin/bob.exe bob.com
