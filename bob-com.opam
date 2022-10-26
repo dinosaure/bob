@@ -17,7 +17,7 @@ install: [
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
-  "ocaml"          { build & >= "4.13.0" }
+  "ocaml"          { build & >= "4.13.0" & < "5.0.0" }
   "dune"           { ?monorepo & >= "2.8.0" }
   "fmt"            { ?monorepo & >= "0.9.0" }
   "hxd"            { ?monorepo & >= "0.3.2" }
@@ -33,6 +33,7 @@ depends: [
   "ipaddr"         { ?monorepo }
   "mirage-crypto"  { ?monorepo }
   "psq"            { ?monorepo }
+  "lru"            { ?monorepo & <= "0.3.0" }
   "tls"            { ?monorepo }
   "carton"         { ?monorepo & >= "0.5.0" }
   "progress"       { ?monorepo }
