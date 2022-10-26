@@ -33,7 +33,7 @@ depends: [
   "ipaddr"         { ?monorepo }
   "mirage-crypto"  { ?monorepo }
   "psq"            { ?monorepo }
-  "lru"            { ?monorepo & <= "0.3.0" }
+  "lru"            { ?monorepo & >= "0.3.1" }
   "tls"            { ?monorepo }
   "carton"         { ?monorepo & >= "0.5.0" }
   "progress"       { ?monorepo }
