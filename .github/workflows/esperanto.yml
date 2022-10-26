@@ -21,29 +21,9 @@ jobs:
         opam install esperanto-cosmopolitan esperanto ocamlfind opam-monorepo
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
-    - name: Prepare dune files
-      run: |
-        cat >>dune-workspace <<EOF
-        (context
-         (default
-          (name esperanto)
-          (toolchain esperanto)
-          (merlin)
-          (host default)))
-        EOF
-        cat >>bin/dune <<EOF
-        (rule
-         (target bob.com)
-         (enabled_if
-          (= %{context_name} esperanto))
-         (mode promote)
-         (deps bob.exe)
-         (action
-          (run objcopy -S -O binary %{deps} %{target})))
-        EOF
     - name: Compilation
       run: |
-        opam monorepo lock --require-cross-compile bob.com
+        opam monorepo lock --require-cross-compile bob-com
         opam monorepo pull
         opam exec -- dune build --profile=release ./bin/bob.com
     - name: Upload Artifact
