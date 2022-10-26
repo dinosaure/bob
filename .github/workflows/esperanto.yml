@@ -17,17 +17,18 @@ jobs:
       run: sudo sh -c "echo ':APE:M::MZqFpD::/bin/sh:' >/proc/sys/fs/binfmt_misc/register"
     - name: Pin & Install workflows
       run: |
-        opam pin add git+https://github.com/dinosaure/esperanto.git
         opam install esperanto-cosmopolitan esperanto ocamlfind opam-monorepo
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
     - name: Compilation
       run: |
-        opam monorepo lock --require-cross-compile bob-com
-        opam monorepo pull
-        opam exec -- dune build --profile=release ./bin/bob.com
+        env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version $(ocamlc --version) com
+        env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull
+        opam exec -- dune build -x esperanto -p bob bin/bob.exe
+        objcopy -S -O binary _build/default.esperanto/bin/bob.exe bob.com
+        strip bob.com
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:
         name: bob.com
-        path: bin/bob.com
+        path: bob.com

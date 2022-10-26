@@ -9,9 +9,9 @@ doc:          "https://dinosaure.github.io/bob/"
 license:      "MIT"
 synopsis:     "A peer-to-peer file-transfer tool"
 
-build: [ "dune" "build" "bin/bob.com" "-j" jobs ]
+build: [ "dune" "-x" "esperanto" "build" "bin/bob.exe" "-j" jobs ]
 install: [
-  [ "cp" "bin/bob.com" "%{bin}%/bob.com" ]
+  [ "objcopy" "-S" "-O" "_build/default.esperanto/bin/bob.exe" "%{bin}%/bob.com" ]
   [ "strip" "%{bin}%/bob.com" ]
 ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
@@ -53,9 +53,9 @@ pin-depends: [
   [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
 ]
 
-x-mirage-opam-lock-location: "bob-com.opam.locked"
+x-mirage-opam-lock-location: "com.opam.locked"
 x-mirage-configure: [
-  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version $(ocamlc --version) bob-com" ]
+  "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version $(ocamlc --version) com" ]
 x-mirage-pre-build: [
   "sh" "-exc" "$(eval opam env) env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull"
 ]
