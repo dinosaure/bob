@@ -9,9 +9,9 @@ doc:          "https://dinosaure.github.io/bob/"
 license:      "MIT"
 synopsis:     "A peer-to-peer file-transfer tool"
 
-build: [ "dune" "-x" "esperanto" "build" "bin/bob.exe" "-j" jobs ]
+build: [ "dune" "build" "-x" "esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
 install: [
-  [ "objcopy" "-S" "-O" "_build/default.esperanto/bin/bob.exe" "%{bin}%/bob.com" ]
+  [ "objcopy" "-S" "-O" "binary" "_build/default.esperanto/bin/bob.exe" "%{bin}%/bob.com" ]
   [ "strip" "%{bin}%/bob.com" ]
 ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
