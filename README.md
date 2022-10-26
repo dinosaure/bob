@@ -2,10 +2,11 @@
 <h4 align="center">A peer-to-peer file-transfer in OCaml</h4>
 <hr>
 
-**Work In Progress**: This repository just help me to save my work. The code
-does not work and/or compile, but it's under an active development. You
-probably should take a look on [spoke][spoke] and an [article][article] which
-describe its implementation first. Then, enjoy to read GADTs and comments...
+**Work In Progress**: This repository just help me to save my work. The project
+is under an active development and it still is experimental. For more
+information, you can take a look on [spoke][spoke] and an [article][article]
+which describe its implementation first. Then, enjoy to read GADTs and
+comments...
 
 Bob is a **simple**, **secure** and **universal** program for transmitting a
 file or a folder from one person to another. The aim of bob is to offer the
@@ -13,6 +14,10 @@ possibility to share documents without any constraints:
 - security
 - accesibility: we mainly want to provide one binary which works anywhere
 - usage
+
+The software is available here: [bob.com][bob-com]. You can use it directly
+without any installation! You can check how we built `bob.com` via our
+website: [builds.osau.re](https://builds.osau.re)
 
 For this purpose, bob uses [state-of-the-art][article] security,
 [Cosmopolitan][cosmopolitan] to ensure its accessibility on all systems and a
@@ -240,6 +245,14 @@ Accept from <server-identity> [Y/n]: Y
 Handshake is done with <server-identity>
 ```
 
+#### Reproducible builds
+
+The version you can download of `bob.com` was produced in such a context that
+you can reproduce the same binary in the same context. This is called software
+reproducibility. We provide an infrastructure (developed by [robur.io][robur])
+[builds.osau.re](https://builds.osau.re) that checks the reproducibility of the
+software every day.
+
 #### [Esperanto][esperanto], [Cosmopolitan][cosmopolitan] and Windows support
 
 Currently, the `bob` executable can be compiled with the `esperanto` toolchain.
@@ -266,3 +279,5 @@ their computer - there should be no prerequisites.
 [esperanto]: https://github.com/dinosaure/esperanto
 [cosmopolitan]: https://github.com/jart/cosmopolitan
 [opam]: https://opam.ocaml.org/
+[robur]: https://robur.io/
+[bob-com]: https://builds.osau.re/job/bob/build/latest/f/bin/bob.com
