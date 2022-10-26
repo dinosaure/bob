@@ -52,7 +52,7 @@
   bob.pack
   bob.tls
   bob.dns))
-; 
+
 ; (rule
 ;  (target cat.com)
 ;  (enabled_if
