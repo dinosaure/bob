@@ -50,6 +50,8 @@ let serve_when_ready :
      in
      stop_result >>= function Ok () | Error `Closed -> Lwt.return_unit)
 
+let always v _ = v
+
 module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
   let service ~port tcp =
     let queue = Queue.create () in
@@ -73,6 +75,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           Lwt_condition.wait condition ~mutex >>= await
         else Lwt.return_unit
       in
+      Logs.debug (fun m -> m "Waiting for a new connection.");
       await () >>= fun () ->
       match Queue.pop queue with
       | flow ->
@@ -98,8 +101,16 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   type outcome = [ `Stop | `Continue ]
 
+  let wait ~until t condition =
+    Lwt_condition.wait condition >|= fun () -> until t
+
+  type writing_event =
+    [ `Write of string * string | `Close of string | `Continue ]
+
   module Make (Flow : Mirage_flow.S) = struct
     let relay ?(timeout = 3600_000_000_000L) ~port ~handshake ?stop tcp rooms =
+      let wr_condition = Lwt_condition.create () in
+      let rd_condition = Lwt_condition.create () in
       let t = Bob.Relay.make () in
       let fds = Hashtbl.create 0x100 in
       let (th_stop : [ `Stop ] Lwt.t), wt_stop = Lwt.wait () in
@@ -107,35 +118,57 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           Lwt.wakeup_later wt_stop `Stop;
           Lwt.return_unit);
       let rec write () =
-        Lwt.pick [ (th_stop :> income Lwt.t); Lwt.return (Bob.Relay.send_to t) ]
+        Logs.debug (fun m ->
+            m "Waiting to write something into the Bob's handshake.");
+        Lwt.pick
+          [
+            (th_stop :> income Lwt.t);
+            wait ~until:Bob.Relay.send_to t wr_condition;
+          ]
         >>= function
         | `Stop -> Lwt.return_unit
-        | `Continue -> Lwt.pause () >>= write
-        | `Close identity ->
-            (match Hashtbl.find_opt fds identity with
-            | Some (fd, _) ->
-                Hashtbl.remove fds identity;
-                Flow.close fd
-            | None -> Lwt.return_unit)
-            >>= write
-        | `Write (identity, str) ->
-            (match Hashtbl.find_opt fds identity with
-            | None ->
-                Bob.Relay.rem_peer t ~identity;
-                write ()
-            | Some (fd, _) -> (
-                Flow.write fd (Cstruct.of_string str) >>= function
-                | Ok () -> Lwt.return_unit
-                | Error _err ->
-                    Hashtbl.remove fds identity;
-                    Flow.close fd))
-            >>= write
+        | `Continue -> write ()
+        | #writing_event as first ->
+            Logs.debug (fun m -> m "Handle writing operations.");
+            let rec go = function
+              | `Continue -> Lwt.return_unit
+              | `Close identity ->
+                  (match Hashtbl.find_opt fds identity with
+                  | Some (fd, _) ->
+                      Hashtbl.remove fds identity;
+                      Flow.close fd
+                  | None -> Lwt.return_unit)
+                  >>= fun () -> go (Bob.Relay.send_to t)
+              | `Write (identity, str) ->
+                  (match Hashtbl.find_opt fds identity with
+                  | None ->
+                      Bob.Relay.rem_peer t ~identity;
+                      Lwt.return_unit
+                  | Some (fd, _) -> (
+                      Flow.write fd (Cstruct.of_string str) >>= function
+                      | Ok () -> Lwt.return_unit
+                      | Error _err ->
+                          Hashtbl.remove fds identity;
+                          Flow.close fd))
+                  >>= fun () -> go (Bob.Relay.send_to t)
+            in
+            go first >>= fun () ->
+            Logs.debug (fun m -> m "Signal to handle next event.");
+            Lwt_condition.signal rd_condition ();
+            write ()
       in
       let rec read () =
-        Lwt.pick [ (th_stop :> outcome Lwt.t); Lwt.return `Continue ]
+        Logs.debug (fun m ->
+            m "Waiting to read something from the Bob's handshake.");
+        Lwt.pick
+          [
+            (th_stop :> outcome Lwt.t);
+            wait ~until:(always `Continue) () rd_condition;
+          ]
         >>= function
         | `Stop -> Lwt.return_unit
         | `Continue ->
+            Logs.debug (fun m -> m "Scan readers.");
             Hashtbl.filter_map_inplace
               (fun identity (fd, th) ->
                 match Lwt.state th with
@@ -146,6 +179,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                       match Hashtbl.mem fds identity with
                       | false -> Lwt.return `Delete
                       | true -> (
+                          Logs.debug (fun m ->
+                              m "Read something from %S." identity);
                           Flow.read fd >>= function
                           | Error _err -> Lwt.return `Delete
                           | Ok `Eof -> Lwt.return `Delete
@@ -154,7 +189,13 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                                 `Data
                                   (Cstruct.to_string cs, 0, Cstruct.length cs)
                               in
-                              match Bob.Relay.receive_from t ~identity data with
+                              let result =
+                                Bob.Relay.receive_from t ~identity data
+                              in
+                              Logs.debug (fun m ->
+                                  m "Signal to handle next event.");
+                              Lwt_condition.signal wr_condition ();
+                              match result with
                               | `Close -> Lwt.return `Delete
                               | `Agreement (peer0, peer1) ->
                                   Bob.Secured.add_peers rooms peer0 peer1;
@@ -163,12 +204,14 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                     in
                     Some (fd, th ()))
               fds;
-            Lwt.pause () >>= read
+            read ()
       in
       let handler (fd, (ipaddr, port)) =
         let identity = Fmt.str "%a:%d" Ipaddr.pp ipaddr port in
         Hashtbl.add fds identity (fd, Lwt.return `Continue);
         Bob.Relay.new_peer t ~identity;
+        Lwt_condition.signal rd_condition ();
+        Lwt_condition.signal wr_condition ();
         Lwt.async (fun () ->
             Time.sleep_ns timeout >>= fun () ->
             if Bob.Relay.exists t ~identity then Bob.Relay.rem_peer t ~identity;
@@ -195,8 +238,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       | `Continue of Bob.Secured.reader
       | `Peer of string * string ]
 
-    let rec loop ~timeout t ready queue
+    let rec loop ~timeout t ready condition queue
         (state : [ `Closed | `Bounded of string * string ] Lwt_mvar.t) fd k =
+      Logs.debug (fun m -> m "Handle the main secure loop.");
       Lwt.pick
         [
           (Lwt_mvar.take state :> income00 Lwt.t);
@@ -209,7 +253,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         ]
       >>= function
       | `Closed | `Bounded _ -> Lwt.return_unit
-      | `Continue k -> loop ~timeout t ready queue state fd k
+      | `Continue k -> loop ~timeout t ready condition queue state fd k
       | `Error _ | `Invalid_peer ->
           if Lwt_mvar.is_empty state then
             Lwt_mvar.put state `Closed >>= fun () ->
@@ -220,8 +264,11 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             queue := Psq.remove peer1 !queue;
             queue :=
               Psq.add peer0 (`Bound peer1) !queue
-              |> Psq.add peer1 (`Bound peer0))
-          else queue := Psq.add peer0 `Ready !queue;
+              |> Psq.add peer1 (`Bound peer0);
+            Lwt_condition.signal condition ())
+          else (
+            queue := Psq.add peer0 `Ready !queue;
+            Lwt_condition.signal condition ());
           if Lwt_mvar.is_empty state then (
             let state' : [ `Closed | `Piped ] Lwt_mvar.t =
               Lwt_mvar.create_empty ()
@@ -240,6 +287,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                 | `Timeout ->
                     queue := Psq.remove peer0 !queue;
                     queue := Psq.remove peer1 !queue;
+                    Lwt_condition.signal condition ();
                     Hashtbl.remove ready peer0;
                     Hashtbl.remove ready peer1;
                     Bob.Secured.rem_peers t peer0 peer1;
@@ -292,8 +340,18 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       | Some `Piped | None -> fn ()
 
     type outcome =
-      [ `Stop
-      | `Pop of ((string * [ `Ready | `Bound of string ]) * Psq.t) option ]
+      [ `Stop | `Pop of (string * [ `Ready | `Bound of string ]) * Psq.t ]
+
+    let wait queue mutex condition =
+      Lwt_mutex.lock mutex >>= fun () ->
+      let rec await () =
+        match Psq.pop !queue with
+        | None -> Lwt_condition.wait condition ~mutex >>= await
+        | Some v -> Lwt.return v
+      in
+      await () >>= fun v ->
+      Lwt_mutex.unlock mutex;
+      Lwt.return (`Pop v)
 
     let secure_room ?(timeout = 3600_000_000_000L) ~port ?stop tcp rooms =
       let queue = ref Psq.empty in
@@ -302,14 +360,15 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       Lwt_switch.add_hook stop (fun () ->
           Lwt.wakeup_later wt_stop `Stop;
           Lwt.return_unit);
+      let condition = Lwt_condition.create () in
+      let mutex = Lwt_mutex.create () in
       let rec create_room () =
-        Lwt.pick
-          [ (th_stop :> outcome Lwt.t); Lwt.return (`Pop (Psq.pop !queue)) ]
+        Logs.debug (fun m -> m "Waiting for a new room.");
+        Lwt.pick [ (th_stop :> outcome Lwt.t); wait queue mutex condition ]
         >>= function
         | `Stop -> Lwt.return_unit
-        | `Pop None -> Lwt.pause () >>= create_room
-        | `Pop (Some ((_, `Ready), _)) -> Lwt.pause () >>= create_room
-        | `Pop (Some ((peer0, `Bound peer1), queue')) -> (
+        | `Pop ((_, `Ready), _) -> Lwt.pause () >>= create_room
+        | `Pop ((peer0, `Bound peer1), queue') -> (
             queue := Psq.remove peer1 queue';
             let fd0, state0 = Hashtbl.find ready peer0 in
             let fd1, state1 = Hashtbl.find ready peer1 in
@@ -337,7 +396,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
           Lwt_mvar.create_empty ()
         in
         Lwt.async (fun () ->
-            loop ~timeout rooms ready queue state fd (Bob.Secured.reader rooms));
+            loop ~timeout rooms ready condition queue state fd
+              (Bob.Secured.reader rooms));
         Lwt.async (fun () ->
             Lwt.pick
               [
