@@ -18,7 +18,7 @@ let bob =
   foreign "Unikernel.Make"
     ~packages:
       [
-        package "bob" ~pin:"https://github.com/dinosaure/bob.git";
+        package "bob" ~pin:"git+https://github.com/dinosaure/bob.git";
         package "spoke" ~sublibs:[ "core" ];
         package "psq";
       ]
