@@ -18,12 +18,8 @@ let bob =
   foreign "Unikernel.Make"
     ~packages:
       [
-        package "bob"
-          ~pin:
-            "git+https://github.com/dinosaure/bob.git#3c85fff2aba1bbf0d0e7f05427d7e41f9b7a7cc3";
-        package "spoke" ~sublibs:[ "core" ]
-          ~pin:
-            "git+https://github.com/dinosaure/spoke.git#61f4e785d22d6002fd396862f75f515355197002";
+        package "bob" ~pin:"https://github.com/dinosaure/bob.git";
+        package "spoke" ~sublibs:[ "core" ];
         package "psq";
       ]
     ~keys:[ Key.v port; Key.v secure_port ]
