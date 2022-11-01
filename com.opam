@@ -12,7 +12,6 @@ synopsis:     "A peer-to-peer file-transfer tool"
 build: [ "dune" "build" "-x" "esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
 install: [
   [ "objcopy" "-S" "-O" "binary" "_build/default.esperanto/bin/bob.exe" "%{bin}%/bob.com" ]
-  [ "strip" "%{bin}%/bob.com" ]
 ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
