@@ -96,6 +96,10 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     in
     (accept, close)
 
+  let until_timeout ~timeout =
+    Time.sleep_ns timeout >>= fun () ->
+    Lwt.return `Timeout
+
   type income =
     [ `Stop | `Continue | `Close of string | `Write of string * string ]
 
@@ -136,6 +140,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                   (match Hashtbl.find_opt fds identity with
                   | Some (fd, _) ->
                       Hashtbl.remove fds identity;
+                      Logs.debug (fun m -> m "Close the connection %S" identity);
                       Flow.close fd
                   | None -> Lwt.return_unit)
                   >>= fun () -> go (Bob.Relay.send_to t)
@@ -149,6 +154,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                       | Ok () -> Lwt.return_unit
                       | Error _err ->
                           Hashtbl.remove fds identity;
+                          Logs.debug (fun m -> m "Close the connection %S" identity);
                           Flow.close fd))
                   >>= fun () -> go (Bob.Relay.send_to t)
             in
@@ -210,6 +216,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         let identity = Fmt.str "%a:%d" Ipaddr.pp ipaddr port in
         Hashtbl.add fds identity (fd, Lwt.return `Continue);
         Bob.Relay.new_peer t ~identity;
+        Logs.debug (fun m -> m "Open a new connection with %S" identity);
         Lwt_condition.signal rd_condition ();
         Lwt_condition.signal wr_condition ();
         Lwt.async (fun () ->
@@ -278,9 +285,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             Lwt.async (fun () ->
                 Lwt.pick
                   [
+                    until_timeout ~timeout;
                     (Lwt_mvar.take state'
                       :> [ `Timeout | `Closed | `Piped ] Lwt.t);
-                    (Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout);
                   ]
                 >>= function
                 | `Piped | `Closed -> Lwt.return_unit
@@ -329,10 +336,12 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       in
       let close () =
         Lwt_mvar.take closed >>= fun _ ->
+        Logs.debug (fun m -> m "Pipe closed.");
         Stack.TCP.close fd0 >>= fun () ->
         Stack.TCP.close fd1 >>= fun () -> Lwt.return_unit
       in
-      Lwt.join [ transmit fd0 fd1; transmit fd1 fd0; close () ]
+      Lwt.join [ transmit fd0 fd1; transmit fd1 fd0; close () ] >>= fun () ->
+      Logs.debug (fun m -> m "Pipe finished."); Lwt.return_unit
 
     let only_if_not_closed state fn =
       match Lwt_mvar.take_available state with
@@ -382,6 +391,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                 Lwt_mvar.take_available state1 )
             with
             | Ok (), Ok (), None, None ->
+                Lwt_mvar.put state0 `Piped >>= fun () ->
+                Lwt_mvar.put state1 `Piped >>= fun () ->
                 Lwt.async (fun () -> pipe fd0 fd1);
                 create_room ()
             | _ ->
@@ -401,9 +412,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         Lwt.async (fun () ->
             Lwt.pick
               [
+                until_timeout ~timeout;
                 (Lwt_mvar.take state
                   :> [ `Closed | `Bounded of string * string | `Timeout ] Lwt.t);
-                (Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout);
               ]
             >>= function
             | `Timeout ->
@@ -411,7 +422,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                   Lwt_mvar.put state `Closed >>= fun () ->
                   Stack.TCP.write fd cs_01 >>= fun _ -> Stack.TCP.close fd
                 else Lwt.return_unit
-            | `Bounded _ -> Lwt.return_unit
+            | `Bounded (a, b) ->
+              Logs.debug (fun m -> m "%s and %s are bounded." a b);
+              Lwt.return_unit
             | `Closed -> Lwt.return_unit);
         Lwt.return_unit
       in
@@ -424,6 +437,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
   end
 
   module Bob_clear = Make (Stack.TCP)
+  module Memtrace = Memtrace.Make(Pclock)(Stack.TCP)
 
   let start _time stack =
     let rooms = Bob.Secured.make () in
