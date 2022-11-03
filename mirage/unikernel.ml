@@ -437,7 +437,6 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
   end
 
   module Bob_clear = Make (Stack.TCP)
-  module Memtrace = Memtrace.Make(Pclock)(Stack.TCP)
 
   let start _time stack =
     let rooms = Bob.Secured.make () in
