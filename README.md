@@ -15,8 +15,8 @@ possibility to share documents without any constraints:
 - accesibility: we mainly want to provide one binary which works anywhere
 - usage
 
-The software is available here: [bob.com][bob-com]. You can use it directly
-without any installation! You can check how we built `bob.com` via our
+The software is available here: [bob.com (x86_64)][bob-com]. You can use it
+directly without any installation! You can check how we built `bob.com` via our
 website: [builds.osau.re](https://builds.osau.re)
 
 For this purpose, bob uses [state-of-the-art][article] security,
