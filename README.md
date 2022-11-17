@@ -180,7 +180,7 @@ An image `bob.hvt` is crafted and it can be launched with [Solo5][solo5] and
 $ wget -q -O - https://apt.robur.coop/gpg.pub | apt-key add -
 $ echo "deb https://apt.robur.coop ubuntu-20.04 main" >> /etc/apt/sources.list
 $ sudo apt update
-$ sudo apt install solo5-hvt albatross
+$ sudo apt install solo5 albatross
 ```
 
 ##### Networks and unikernels
