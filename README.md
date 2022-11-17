@@ -249,7 +249,7 @@ Handshake is done with <server-identity>
 
 The version you can download of `bob.com` was produced in such a context that
 you can reproduce the same binary in the same context. This is called software
-reproducibility. We provide an infrastructure (developed by [robur.io][robur])
+reproducibility. We provide an infrastructure (developed by [robur.coop][robur])
 [builds.osau.re](https://builds.osau.re) that checks the reproducibility of the
 software every day.
 
@@ -279,5 +279,5 @@ their computer - there should be no prerequisites.
 [esperanto]: https://github.com/dinosaure/esperanto
 [cosmopolitan]: https://github.com/jart/cosmopolitan
 [opam]: https://opam.ocaml.org/
-[robur]: https://robur.io/
+[robur]: https://robur.coop/
 [bob-com]: https://builds.osau.re/job/bob/build/latest/f/bin/bob.com
