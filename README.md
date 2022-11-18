@@ -2,15 +2,9 @@
 <h4 align="center">A peer-to-peer file-transfer in OCaml</h4>
 <hr>
 
-**Work In Progress**: This repository just help me to save my work. The project
-is under an active development and it still is experimental. For more
-information, you can take a look on [spoke][spoke] and an [article][article]
-which describe its implementation first. Then, enjoy to read GADTs and
-comments...
-
-Bob is a **simple**, **secure** and **universal** program for transmitting a
-file or a folder from one person to another. The aim of bob is to offer the
-possibility to share documents without any constraints:
+[Bob](https://bob.osau.re/) is a **simple**, **secure** and **universal**
+program for transmitting a file or a folder from one person to another. The aim
+of bob is to offer the possibility to share documents without any constraints:
 - security
 - accesibility: we mainly want to provide one binary which works anywhere
 - usage
