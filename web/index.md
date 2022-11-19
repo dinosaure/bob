@@ -1,5 +1,7 @@
 <html lang="en" charset="utf-8">
 <head>
+  <title>B·o·B</title>
+  <meta name="description" content="An universal & secure peer-to-peer file-transfer in OCaml" />
   <link rel="stylesheet" href="https://unpkg.com/terminal.css@0.7.2/dist/terminal.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
