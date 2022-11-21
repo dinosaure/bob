@@ -97,8 +97,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     (accept, close)
 
   let until_timeout ~timeout =
-    Time.sleep_ns timeout >>= fun () ->
-    Lwt.return `Timeout
+    Time.sleep_ns timeout >>= fun () -> Lwt.return `Timeout
 
   type income =
     [ `Stop | `Continue | `Close of string | `Write of string * string ]
@@ -154,7 +153,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                       | Ok () -> Lwt.return_unit
                       | Error _err ->
                           Hashtbl.remove fds identity;
-                          Logs.debug (fun m -> m "Close the connection %S" identity);
+                          Logs.debug (fun m ->
+                              m "Close the connection %S" identity);
                           Flow.close fd))
                   >>= fun () -> go (Bob.Relay.send_to t)
             in
@@ -341,7 +341,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         Stack.TCP.close fd1 >>= fun () -> Lwt.return_unit
       in
       Lwt.join [ transmit fd0 fd1; transmit fd1 fd0; close () ] >>= fun () ->
-      Logs.debug (fun m -> m "Pipe finished."); Lwt.return_unit
+      Logs.debug (fun m -> m "Pipe finished.");
+      Lwt.return_unit
 
     let only_if_not_closed state fn =
       match Lwt_mvar.take_available state with
@@ -423,8 +424,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
                   Stack.TCP.write fd cs_01 >>= fun _ -> Stack.TCP.close fd
                 else Lwt.return_unit
             | `Bounded (a, b) ->
-              Logs.debug (fun m -> m "%s and %s are bounded." a b);
-              Lwt.return_unit
+                Logs.debug (fun m -> m "%s and %s are bounded." a b);
+                Lwt.return_unit
             | `Closed -> Lwt.return_unit);
         Lwt.return_unit
       in
@@ -438,7 +439,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   module Bob_clear = Make (Stack.TCP)
 
-  let start _time stack =
+  let start _pclock _time stack =
     let rooms = Bob.Secured.make () in
     let handshake socket = Lwt.return (Ok (socket, Stack.TCP.dst socket)) in
     Lwt.join
