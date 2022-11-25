@@ -212,6 +212,7 @@ let pp_sockaddr ppf = function
 external is_windows : unit -> bool = "bob_is_windows" [@@noalloc]
 external is_freebsd : unit -> bool = "bob_is_freebsd" [@@noalloc]
 external is_linux : unit -> bool = "bob_is_linux" [@@noalloc]
+external is_macos : unit -> bool = "bob_is_macos" [@@noalloc]
 external set_nonblock : Unix.file_descr -> bool -> unit = "bob_set_nonblock"
 
 let connect fd sockaddr : (unit, Unix.error) result t =
@@ -236,7 +237,7 @@ let connect fd sockaddr : (unit, Unix.error) result t =
           Ivar.read ivar
         with
         | Unix.Unix_error (Unix.EINPROGRESS, _, _)
-          when is_freebsd () (* TODO(dinosaure): check for MacOS *) ->
+          when is_freebsd () || is_macos () ->
             Log.debug (fun m -> m "Connection is in progress.");
             Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
             Ivar.read ivar
@@ -357,7 +358,7 @@ let sigwr fd =
         Unix.connect fd sockaddr;
         Ivar.fill ivar (Ok ())
       with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
-  | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () *) ->
+  | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () || is_macos () *) ->
       Log.debug (fun m -> m "Event from connect() (UNIX connect()).");
       (* TODO(dinosaure): we probably should verify the connection with
          [getpeername], see https://cr.yp.to/docs/connect.html for more

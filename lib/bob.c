@@ -86,6 +86,18 @@ bob_is_freebsd(__unit ()) {
 }
 
 CAMLprim value
+bob_is_macos(__unit ()) {
+#if defined(__ESPERANTO__)
+#include "cosmopolitan.h"
+  return Val_bool (IsXnu());
+#elif (defined(__APPLE__) && defined(__MACH__))
+  return Val_true;
+#else
+  return Val_false;
+#endif
+}
+
+CAMLprim value
 bob_is_linux(__unit ()) {
 #if defined(__ESPERANTO__)
 #include "cosmopolitan.h"
