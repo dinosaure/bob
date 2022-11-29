@@ -298,7 +298,9 @@ let sigrd fd =
   | Some (`Read (ivar, len)) -> (
       let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
       Hashtbl.remove prd fd;
-      match bigstring_read fd bstr 0 len with
+      let len = bigstring_read fd bstr 0 len in
+      Log.debug (fun m -> m "Got %d byte(s) from %d" len (Obj.magic fd));
+      match len with
       | 0 -> Ivar.fill ivar (Ok `End)
       | ret when ret < 0 ->
           let errno = retrieve_error () in

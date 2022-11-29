@@ -559,7 +559,11 @@ let bracket :
   init () >>= fun acc ->
   Fiber.catch
     (fun () -> f acc >>= stop)
-    (fun exn -> stop acc >>= fun _ -> raise exn)
+    (fun exn ->
+      Log.err (fun m ->
+          m "Got an exception (see Stream.bracket): %S" (Printexc.to_string exn));
+      Log.err (fun m -> m "We will force to unallocate the underlying resource");
+      stop acc >>= fun _ -> raise exn)
 
 module Stream = struct
   let run ~from:(Source src) ~via:{ flow } ~into:snk =
@@ -752,6 +756,9 @@ module Stream = struct
                     Fiber.return r
                 | Ok (`Data bstr) -> k.push r bstr >>= go
                 | Error errno ->
+                    Log.err (fun m ->
+                        m "Got an exception when we tried to read %a: %s"
+                          Bob_fpath.pp path (Unix.error_message errno));
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Bob_fpath.pp
                       path (Unix.error_message errno))
           in
