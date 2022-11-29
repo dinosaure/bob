@@ -390,6 +390,7 @@ let sigexcept fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, _len)) ->
+      Log.warn (fun m -> m "Got an exception from %d" (Obj.magic fd));
       Hashtbl.remove prd fd;
       Ivar.fill ivar (Ok `End)
   | Some (`Really_read (ivar, _, _, _)) ->
@@ -465,7 +466,12 @@ let run fiber =
        via the [except] list of file-descriptors - on Linux, only the
        [rds] list is enough. *)
     let ready_rds, ready_wrs, ready_excepts =
-      try Unix.select rds wrs rds 0.1 with
+      (* TODO(dinosaure): it seems that on MacOS, fds are catched
+         with an exception. Many people say that we should just
+         ignore exceptions and only Windows has a special case
+         for the [connect()] function. However, we really should take
+         a look on that. *)
+      try Unix.select rds wrs [] 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->
           Log.err (fun m ->

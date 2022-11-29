@@ -135,9 +135,14 @@ let rec full_write ~path fd bstr off len =
   | Ok len' when len' - len = 0 -> Fiber.return fd
   | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
   | Error `Closed ->
+      Log.err (fun m ->
+          m "%d (%a) was closed." (Obj.magic fd) Bob_fpath.pp path);
       Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Bob_fpath.pp
         path
   | Error (`Unix errno) ->
+      Log.err (fun m ->
+          m "Got an error when we tried to write into %d (%a): %s"
+            (Obj.magic fd) Bob_fpath.pp path (Unix.error_message errno));
       Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
         (Unix.error_message errno)
 
@@ -558,7 +563,11 @@ let bracket :
  fun ~init ~stop f ->
   init () >>= fun acc ->
   Fiber.catch
-    (fun () -> f acc >>= stop)
+    (fun () ->
+      f acc >>= fun acc ->
+      Log.debug (fun m ->
+          m "The process ends correctly, we finalise the resource");
+      stop acc)
     (fun exn ->
       Log.err (fun m ->
           m "Got an exception (see Stream.bracket): %S" (Printexc.to_string exn));
@@ -762,7 +771,10 @@ module Stream = struct
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Bob_fpath.pp
                       path (Unix.error_message errno))
           in
-          let stop r = Fiber.close fd >>= fun () -> k.stop r in
+          let stop r =
+            Log.debug (fun m -> m "Close the file %a." Bob_fpath.pp path);
+            Fiber.close fd >>= fun () -> k.stop r
+          in
           bracket go ~init:k.init ~stop
         in
         Fiber.return (Ok { stream })
