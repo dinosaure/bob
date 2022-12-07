@@ -13,28 +13,28 @@ build: [ "dune" "build" "-p" name "-j" jobs ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
-  "ocaml"       {>= "4.13.0"}
-  "dune"        {>= "2.8.0"}
-  "fmt"         {>= "0.9.0"}
-  "hxd"         {>= "0.3.2"}
-  "logs"        {>= "0.7.0"}
-  "bheap"       {>= "2.0.0"}
-  "base64"      {>= "3.5.0"}
-  "decompress"  {>= "1.5.1"}
-  "digestif"    {>= "1.1.3"}
+  "ocaml"          {>= "4.13.0"}
+  "dune"           {>= "2.8.0"}
+  "fmt"            {>= "0.9.0"}
+  "hxd"            {>= "0.3.2"}
+  "logs"           {>= "0.7.0"}
+  "bheap"          {>= "2.0.0"}
+  "base64"         {>= "3.5.0"}
+  "decompress"     {>= "1.5.1"}
+  "digestif"       {>= "1.1.3"}
   "bigstringaf"
   "cmdliner"
   "ipaddr"
   "mirage-crypto"
   "psq"
   "tls"
-  "carton"      {>= "0.5.0"}
+  "carton"         {>= "0.5.0"}
   "progress"
-  "dns-client"  {>= "6.4.0"}
-  "happy-eyeballs"
+  "dns-client"     {>= "6.4.0"}
+  "happy-eyeballs" {>= "0.4.0" & < "0.5.0"}
   "ca-certs"
-  "ke"          {>= "0.6"}
-  "alcotest"    {with-test}
+  "ke"             {>= "0.6"}
+  "alcotest"       {with-test}
   "spoke"
 ]
 

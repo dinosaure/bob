@@ -38,7 +38,7 @@ depends: [
   "carton"         { ?monorepo & >= "0.5.0" }
   "progress"       { ?monorepo }
   "dns-client"     { ?monorepo }
-  "happy-eyeballs" { ?monorepo }
+  "happy-eyeballs" { ?monorepo & >= "0.4.0" & < "0.5.0" }
   "ca-certs"       { ?monorepo }
   "ke"             { ?monorepo & >= "0.6" }
   "alcotest"       { with-test }

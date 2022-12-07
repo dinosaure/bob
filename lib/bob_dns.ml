@@ -28,6 +28,7 @@ module Transport :
     mutable requests :
       (Cstruct.t * (Cstruct.t, [ `Msg of string ]) result Fiber.Ivar.t) IM.t;
     mutable he : Happy_eyeballs.t;
+    mutable cancel_connecting : unit Fiber.Ivar.t Happy_eyeballs.Waiter_map.t;
     mutable waiters :
       ((Ipaddr.t * int) * Unix.file_descr, [ `Msg of string ]) result
       Fiber.Ivar.t
@@ -40,9 +41,11 @@ module Transport :
 
   let nameserver_ips = function Static nameservers -> nameservers
 
-  let handle_action' t action =
-    match action with
+  let handle_one_action t = function
     | Happy_eyeballs.Connect (host, id, (ip, port)) -> (
+        let cancel = Fiber.Ivar.create () in
+        t.cancel_connecting <-
+          Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
         let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
         let fam =
           match ip with
@@ -51,38 +54,60 @@ module Transport :
         in
         let socket = Unix.socket fam Unix.SOCK_STREAM p_proto in
         let addr = Unix.ADDR_INET (Ipaddr_unix.to_inet_addr ip, port) in
-        Fiber.connect socket addr >>= function
-        | Error _errno ->
-            Fiber.return
-              (Some (Happy_eyeballs.Connection_failed (host, id, (ip, port))))
-        | Ok () -> (
-            let waiters, r =
+        Fiber.pick
+          (fun () ->
+            Fiber.connect socket addr >>= function
+            | Error errno ->
+                Fiber.return
+                  (Error
+                     (msgf "Error %s connecting to nameserver %a:%d"
+                        (Unix.error_message errno) Ipaddr.pp ip port))
+            | Ok _ as v -> Fiber.return v)
+          (fun () -> Fiber.wait cancel >>| fun () -> Error (msgf "Cancelled"))
+        >>= fun result ->
+        t.cancel_connecting <-
+          Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
+        match result with
+        | Error (`Msg err) ->
+            Fiber.close socket >>| fun () ->
+            Some (Happy_eyeballs.Connection_failed (host, id, (ip, port), err))
+        | Ok () ->
+            let waiters, v =
               Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
             in
             t.waiters <- waiters;
-            match r with
+            (match v with
             | Some waiter ->
                 Fiber.Ivar.fill waiter (Ok ((ip, port), socket));
-                Fiber.return
-                  (Some (Happy_eyeballs.Connected (host, id, (ip, port))))
-            | None ->
-                Fiber.close socket >>= fun () ->
-                Fiber.return
-                  (Some (Happy_eyeballs.Connected (host, id, (ip, port))))))
-    | Happy_eyeballs.Connect_failed (_host, id) ->
-        let waiters, r =
+                Fiber.return ()
+            | None -> Fiber.close socket)
+            >>| fun () -> Some (Happy_eyeballs.Connected (host, id, (ip, port)))
+        )
+    | Connect_failed (host, id, reason) ->
+        let waiters, v =
           Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
         in
         t.waiters <- waiters;
-        Stdlib.Option.iter
-          (fun waiter ->
-            Fiber.Ivar.fill waiter (Error (`Msg "Connection failed")))
-          r;
+        (match v with
+        | Some waiter ->
+            let err =
+              msgf "Connection to %a failed: %s" Domain_name.pp host reason
+            in
+            Fiber.Ivar.fill waiter (Error err)
+        | None -> ());
         Fiber.return None
-    | _action -> Fiber.return None
+    | Connect_cancelled (_host, id) -> (
+        match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
+        | None -> Fiber.return None
+        | Some cancel ->
+            Fiber.Ivar.fill cancel ();
+            Fiber.return None)
+    | (Resolve_a _ | Resolve_aaaa _) as a ->
+        Log.warn (fun m -> m "Ignoring action %a" Happy_eyeballs.pp_action a);
+        Fiber.return None
 
   let rec handle_action t action =
-    handle_action' t action >>= function
+    handle_one_action t action >>= function
     | None -> Fiber.return ()
     | Some event ->
         let he, actions =
@@ -125,6 +150,7 @@ module Transport :
         connected_condition = None;
         requests = IM.empty;
         he = Happy_eyeballs.create (Mtime_clock.elapsed_ns ());
+        cancel_connecting = Happy_eyeballs.Waiter_map.empty;
         waiters = Happy_eyeballs.Waiter_map.empty;
         timer_mutex = Fiber.Mutex.create ();
         timer_condition = Fiber.Condition.create ();
