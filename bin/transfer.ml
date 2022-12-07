@@ -86,6 +86,12 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
   let open Fiber in
   Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
+  Unix.setsockopt socket Unix.TCP_NODELAY true;
+  (* XXX(dinosaure): be sure to send and flush everything on any systems
+     (specially on MacOS where the nagle algorithm seems to bufferize
+     TCP/IP packets. Unix.close seems to not waiting that everything
+     was sended and abruptely close the connection. The relay/receiver
+     then has such signal but did not complete the transmission/download. *)
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
