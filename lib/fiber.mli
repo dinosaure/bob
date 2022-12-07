@@ -31,9 +31,9 @@
     in later. To make that precise, here is how fibers differ from [ref]s:
     - A fiber might not have a value yet. A fiber in this state is called a
       {e pending} fiber.
-    - Writing a value into a fiber is called {e resolving} it. A fiver with a
+    - Writing a value into a fiber is called {e resolving} it. A fiber with a
       value is called a {e resolved} fiber.
-    - Each fiver can be resolved only once. After a fiber has a value, the
+    - Each fiber can be resolved only once. After a fiber has a value, the
       fiber is immutable.
     - It's possible to attach a {b callback} to a fiber. They will run when the
       fiber has a value, i.e. is resolved. If the fiber is already resolved
