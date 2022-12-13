@@ -444,7 +444,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   module Bob_clear = Make (Stack.TCP)
 
-  let start _pclock _time stack =
+  let start _time stack =
     let rooms = Bob.Secured.make () in
     let handshake socket = Lwt.return (Ok (socket, Stack.TCP.dst socket)) in
     Lwt.join
