@@ -384,16 +384,18 @@ let sigwr fd =
             Hashtbl.remove pwr fd;
             Ivar.fill ivar (Error (`Unix errno)))
 
+let bstr_empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
+
 let sigexcept fd =
+  Log.warn (fun m -> m "Got an exception from %d" (Obj.magic fd));
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, _len)) ->
-      Log.warn (fun m -> m "Got an exception from %d" (Obj.magic fd));
       Hashtbl.remove prd fd;
-      Ivar.fill ivar (Ok `End)
+      Ivar.fill ivar (Ok (`Data bstr_empty))
   | Some (`Really_read (ivar, _, _, _)) ->
       Hashtbl.remove prd fd;
-      Ivar.fill ivar (Error `End)
+      Ivar.fill ivar (Ok (`Data bstr_empty))
   | Some (`Accept _) -> Hashtbl.remove prd fd
   | Some (`Getline (queue, ivar)) -> (
       match line_of_queue queue with
@@ -469,7 +471,7 @@ let run fiber =
          ignore exceptions and only Windows has a special case
          for the [connect()] function. However, we really should take
          a look on that. *)
-      try Unix.select rds wrs [] 0.1 with
+      try Unix.select rds wrs rds 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->
           Log.err (fun m ->
