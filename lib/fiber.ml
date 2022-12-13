@@ -359,7 +359,7 @@ let sigwr fd =
         Ivar.fill ivar (Ok ())
       with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
   | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () || is_macos () *) ->
-      Log.debug (fun m -> m "Event from connect() (UNIX connect()).");
+      Log.debug (fun m -> m "Event from connect() (*BSD connect()).");
       (* TODO(dinosaure): we probably should verify the connection with
          [getpeername], see https://cr.yp.to/docs/connect.html for more
          details about how to retrieve possible error from connect()

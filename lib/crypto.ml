@@ -132,8 +132,8 @@ let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
     Cstruct.create (2 + max_packet + Cipher_block.tag_size)
   in
   let send_record =
-    let (Symmetric { impl = (module Cipher_block); _ }) = send in
-    Cstruct.create max_packet
+    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
+    Cstruct.create (2 + max_packet + Cipher_block.tag_size)
   in
   {
     fd;
@@ -154,14 +154,14 @@ let get_record record queue symmetric =
   | 0 | 1 -> `Await_hdr
   | 2 | _ -> (
       let { Cstruct.buffer = record_buffer; off = record_off; _ } = record in
-      Qe.keep queue record_buffer ~off:record_off ~len:2;
+      Qe.keep queue ~off:record_off ~len:2 record_buffer;
       let packet = Cstruct.BE.get_uint16 record 0 in
       match packet with
       | 0xffff -> `Close
       | len ->
           let required = 2 + len + Cipher_block.tag_size in
           if Qe.size queue >= required then (
-            Qe.keep queue record_buffer ~off:record_off ~len:required;
+            Qe.keep queue ~off:record_off ~len:required record_buffer;
             Qe.shift queue required;
             `Record (Cstruct.sub record 2 (len + Cipher_block.tag_size)))
           else `Await_rec)
@@ -173,7 +173,7 @@ let record ~dst ~seq queue symmetric =
   let buf = encrypt symmetric seq (Cstruct.sub dst 2 len) in
   Qe.shift queue len;
   Cstruct.BE.set_uint16 dst 0 len;
-  Cstruct.blit buf 0 dst 2 len (* XXX(dinosaure): assert = Cstruct.length buf *);
+  Cstruct.blit buf 0 dst 2 (Cstruct.length buf);
   Cstruct.sub dst 0 (2 + Cstruct.length buf)
 
 module type FLOW = sig
@@ -279,5 +279,5 @@ module Make (Flow : FLOW) = struct
               pp_write_error err)
     | Ok () -> ());
     flow.closed <- true;
-    Flow.close flow.fd
+    Flow.return ()
 end
