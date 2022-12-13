@@ -268,20 +268,4 @@ module Make (Flow : FLOW) = struct
     flush flow >>? fun () -> Flow.return (Ok len)
 
   let close { fd; _ } = Flow.close fd
-
-  let rec getline queue flow =
-    match Stdbob.line_of_queue queue with
-    | Some line -> Flow.return (Some line)
-    | None -> (
-        recv flow >>= function
-        | Ok `End -> Flow.return None
-        | Ok (`Data bstr) ->
-            let blit src src_off dst dst_off len =
-              Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
-            in
-            Ke.Rke.N.push queue ~blit ~length:Bigarray.Array1.dim bstr;
-            getline queue flow
-        | Error err ->
-            Log.err (fun m -> m "Error while reading a line: %a" pp_error err);
-            Flow.return None)
 end

@@ -97,10 +97,6 @@ module Flow : sig
     'ctx ref ->
     (Stdbob.bigstring, Stdbob.bigstring) flow
 
-  (** {3: Buffering.} *)
-
-  val bigbuffer : int -> (string, Stdbob.bigstring) flow
-
   (** {3: Compression.} *)
 
   val deflate_zlib :

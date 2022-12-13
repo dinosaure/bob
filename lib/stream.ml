@@ -381,66 +381,6 @@ module Flow = struct
     in
     { flow }
 
-  (* Buffering *)
-
-  let flush_if_full ~push ~acc ke capacity =
-    if Ke.Rke.Weighted.length ke = capacity then (
-      let vs = Ke.Rke.Weighted.N.peek ke in
-      let rec go acc = function
-        | [] -> Fiber.return acc
-        | x :: r -> push acc x >>= fun acc -> go acc r
-      in
-      go acc vs >>= fun acc ->
-      Ke.Rke.Weighted.N.shift_exn ke (Ke.Rke.Weighted.length ke);
-      Fiber.return acc)
-    else Fiber.return acc
-
-  let flush ~push ~acc ke capacity =
-    if Ke.Rke.Weighted.available ke = capacity then Fiber.return acc
-    else
-      let vs = Ke.Rke.Weighted.N.peek ke in
-      let rec go acc = function
-        | [] -> Fiber.return acc
-        | x :: r -> push acc x >>= fun acc -> go acc r
-      in
-      go acc vs >>= fun acc ->
-      Ke.Rke.Weighted.N.shift_exn ke (Ke.Rke.Weighted.length ke);
-      Fiber.return acc
-
-  let rec push_until_empty ~push ~acc ke capacity str ~off ~len =
-    flush_if_full ~push ~acc ke capacity >>= fun acc ->
-    let max = min (Ke.Rke.Weighted.available ke) len in
-    let _ =
-      Ke.Rke.Weighted.N.push_exn ke ~blit:bigstring_blit_from_string
-        ~length:String.length str ~off ~len:max
-    in
-    if len - max = 0 then Fiber.return (ke, capacity, acc)
-    else
-      push_until_empty ~push ~acc ke capacity str ~off:(off + max)
-        ~len:(len - max)
-
-  and bigstring_blit_from_string src src_off dst dst_off len =
-    Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
-
-  let bigbuffer capacity =
-    let flow (Sink k) =
-      let init () =
-        k.init () >>= fun acc ->
-        let ke, capacity = Ke.Rke.Weighted.create ~capacity Bigarray.char in
-        Fiber.return (ke, capacity, acc)
-      in
-      let push (ke, capacity, acc) str =
-        push_until_empty ~push:k.push ~acc ke capacity str ~off:0
-          ~len:(String.length str)
-      in
-      let full (_, _, acc) = k.full acc in
-      let stop (ke, capacity, acc) =
-        flush ~push:k.push ~acc ke capacity >>= k.stop
-      in
-      Sink { init; stop; full; push }
-    in
-    { flow }
-
   (* Zlib *)
 
   let rec deflate_zlib_until_end ~push ~acc encoder o =
