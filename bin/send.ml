@@ -1,6 +1,11 @@
 open Stdbob
 open Prgrss
 
+let () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+(* XXX(dinosaure): if the receiver close abruptely the connection, a SIGPIPE
+   is raised by the system to our binary. We ignore that and prefer to get
+   the EPIPE error on the [write()] syscall. *)
+
 let compress_with_reporter quiet ~compression ~config store hashes =
   with_reporter ~config quiet
     (make_compression_progress ~total:(Pack.length store))
