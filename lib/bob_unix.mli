@@ -49,28 +49,31 @@ module Make (IO : IO) : sig
 
   val server :
     IO.fd ->
+    ?reproduce:bool ->
     g:Random.State.t ->
-    secret:Spoke.secret ->
+    Spoke.secret ->
     ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
       [> error ] )
     result
     Fiber.t
-  (** [server socket ~g ~secret] tries to find {i via} a relay (represented by
-      the given [socket]), a peer which shares the same password as you. *)
+  (** [server ?reproduce socket ~g ~secret] tries to find {i via} a relay
+      (represented by the given [socket]), a peer which shares the same password
+      as you. *)
 
   val client :
     IO.fd ->
+    ?reproduce:bool ->
     choose:(string -> [ `Accept | `Refuse ] Fiber.t) ->
     g:Random.State.t ->
-    password:string ->
+    string ->
     ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
       [> error ] )
     result
     Fiber.t
-  (** [client socket ~choose ~g ~password] tries to find {i via} a relay
-      (represented by the given [socket]), a peer which shares the same password
-      as you. When the client found it, the user must fill [choose] to accept
-      or refuse the peer found. *)
+  (** [client ?reproduce socket ~choose ~g ~password] tries to find {i via} a
+      relay (represented by the given [socket]), a peer which shares the same
+      password as you. When the client found it, the user must fill [choose] to
+      accept or refuse the peer found. *)
 
   val relay :
     ?timeout:float ->

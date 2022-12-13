@@ -297,6 +297,13 @@ let yes =
   let doc = "Answer yes to all bob questions without prompting." in
   Arg.(value & flag & info [ "y"; "yes" ] ~doc)
 
+let reproduce =
+  let doc =
+    "Reproduce the generation of packets. This option must only be used for \
+     debugging."
+  in
+  Arg.(value & flag & info [ "reproduce" ] ~doc)
+
 let destination =
   let doc =
     "Destination of the received document (file or folder). We accept only a \

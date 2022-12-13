@@ -49,7 +49,7 @@ val src_and_packet : peer:[ `Server | `Client ] -> int -> raw -> src_rel
 module Server : sig
   type t
 
-  val hello : g:Random.State.t -> secret:Spoke.secret -> t
+  val hello : ?reproduce:bool -> g:Random.State.t -> Spoke.secret -> t
 
   val process_packet :
     t ->
@@ -65,7 +65,9 @@ end
 module Client : sig
   type t
 
-  val hello : g:Random.State.t -> password:string -> identity:string -> t
+  val hello :
+    ?reproduce:bool -> g:Random.State.t -> identity:string -> string -> t
+
   val accept : t -> unit
   val refuse : t -> unit
 
