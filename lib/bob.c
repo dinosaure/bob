@@ -132,7 +132,7 @@ CAMLprim value bob_set_nonblock(value fd, value mode) {
 #include <fcntl.h>
   int ret;
   ret = fcntl(Int_val(fd), F_GETFL, 0);
-  long opt = (Bool_val(mode)) ? O_NONBLOCK : 0;
+  int opt = (Bool_val(mode)) ? O_NONBLOCK : 0;
   if (ret == -1 || fcntl(Int_val(fd), F_SETFL, ret | opt) == -1)
     uerror("set_nonblock", 0 /* Nothing */);
 #endif
