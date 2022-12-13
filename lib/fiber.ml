@@ -371,7 +371,7 @@ let sigwr fd =
       let ret = bigstring_write fd bstr off len in
       if ret >= 0 then (
         Hashtbl.remove pwr fd;
-        Ivar.fill ivar (Ok len))
+        Ivar.fill ivar (Ok ret))
       else
         let errno = retrieve_error () in
         match errno with
@@ -395,7 +395,7 @@ let sigexcept fd =
       Ivar.fill ivar (Ok (`Data bstr_empty))
   | Some (`Really_read (ivar, _, _, _)) ->
       Hashtbl.remove prd fd;
-      Ivar.fill ivar (Ok (`Data bstr_empty))
+      Ivar.fill ivar (Error `End)
   | Some (`Accept _) -> Hashtbl.remove prd fd
   | Some (`Getline (queue, ivar)) -> (
       match line_of_queue queue with
