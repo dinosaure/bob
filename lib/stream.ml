@@ -316,12 +316,7 @@ module Sink = struct
             (Unix.error_message errno)
     in
     let stop fd = Fiber.close fd in
-    let push fd bstr =
-      Log.debug (fun m -> m "Push:");
-      Log.debug (fun m ->
-          m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string bstr));
-      full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr)
-    in
+    let push fd bstr = full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) in
     let full = Fiber.always false in
     Sink { init; stop; full; push }
 
@@ -411,12 +406,11 @@ module Flow = struct
         k.init () >>= fun acc -> Fiber.return (encoder, o, acc)
       in
       let push (encoder, o, acc) i =
-        Log.debug (fun m -> m "Deflate:");
-        Log.debug (fun m ->
-            m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string i));
-        deflate_zlib_until_await ~push:k.push ~acc
-          (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
-          o
+        if Bigarray.Array1.dim i = 0 then Fiber.return (encoder, o, acc)
+        else
+          deflate_zlib_until_await ~push:k.push ~acc
+            (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
+            o
       in
       let full (_, _, acc) = k.full acc in
       let stop (encoder, o, acc) =
