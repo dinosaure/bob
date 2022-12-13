@@ -51,7 +51,7 @@ let reporter ppf =
     in
     let with_metadata header _tags k ppf fmt =
       Fmt.kpf k ppf
-        ("[%6d]%a[%a]: " ^^ fmt ^^ "\n%!")
+        ("[%6d]%a[%a]: @[<hov>" ^^ fmt ^^ "@]\n%!")
         pid pp_header (level, header)
         Fmt.(styled `Magenta (fmt "%20s"))
         (Logs.Src.name src)
