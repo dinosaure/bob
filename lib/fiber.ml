@@ -387,7 +387,7 @@ let sigwr fd =
 let bstr_empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
 
 let sigexcept fd =
-  Log.warn (fun m -> m "Got an exception from %d" (Obj.magic fd));
+  Log.debug (fun m -> m "Got an exception from %d" (Obj.magic fd));
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, _len)) ->
