@@ -96,9 +96,15 @@ module Transport :
             Fiber.Ivar.fill waiter (Error err)
         | None -> ());
         Fiber.return None
-    | Connect_cancelled (_host, id) -> (
+    | Connect_cancelled (host, id) -> (
         match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
-        | None -> Fiber.return None
+        | None ->
+            Log.warn (fun m ->
+                m
+                  "Happy-eyeballs tries to cancel the connection to %a but the \
+                   process does not exist."
+                  Domain_name.pp host);
+            Fiber.return None
         | Some cancel ->
             Fiber.Ivar.fill cancel ();
             Fiber.return None)
