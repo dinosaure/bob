@@ -129,6 +129,7 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
   in
   let stop _flow =
     (try finalise () with _ -> ());
+    (* TODO(dinosaure): should we close? *)
     Fiber.return ()
   in
   Stream.Source { init; pull; stop }

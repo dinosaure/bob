@@ -279,5 +279,6 @@ module Make (Flow : FLOW) = struct
               pp_write_error err)
     | Ok () -> ());
     flow.closed <- true;
+    (* TODO(dinosaure): should we close the underlying flow? *)
     Flow.return ()
 end
