@@ -95,8 +95,9 @@ let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
 
 let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
     sockaddr stream =
+  let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
   let domain = Unix.domain_of_sockaddr sockaddr in
-  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
+  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
   let open Fiber in
   Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
@@ -134,8 +135,9 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
 
 let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
     ~shared_keys sockaddr =
+  let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
   let domain = Unix.domain_of_sockaddr sockaddr in
-  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
+  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
   let open Fiber in
   Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
   >>? fun () ->
