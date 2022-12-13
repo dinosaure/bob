@@ -48,3 +48,5 @@ module Make (Flow : FLOW) : sig
 
   val close : Flow.flow t -> unit Flow.t
 end
+
+val max_packet : int

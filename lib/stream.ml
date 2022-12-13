@@ -273,17 +273,14 @@ module Sink = struct
     Sink { init; push; full; stop }
 
   let bigstring =
-    let bigstring_blit src src_off dst dst_off len =
-      Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
-    in
-    let init () = Fiber.return (Ke.Rke.create ~capacity:128 Bigarray.char) in
+    let init () = Fiber.return (Qe.create 128) in
     let push ke bstr =
-      Ke.Rke.N.push ke ~blit:bigstring_blit ~length:Bigarray.Array1.dim bstr;
+      Qe.push ke bstr;
       Fiber.return ke
     in
     let full = Fiber.always false in
     let stop ke =
-      match Ke.Rke.N.peek ke with
+      match Qe.peek ke with
       | [] -> Fiber.return De.bigstring_empty
       | [ x ] -> Fiber.return x
       | _ ->

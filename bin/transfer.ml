@@ -9,8 +9,8 @@ let sockaddr_with_secure_port sockaddr secure_port =
   | Unix.ADDR_INET (inet_addr, _) -> Unix.ADDR_INET (inet_addr, secure_port)
   | Unix.ADDR_UNIX _ -> invalid_arg "Invalid sockaddr"
 
-let max_data = 0xffff
-let max_packet = 2 + max_data + 16 (* header + data + tag_size *)
+let max_packet =
+  2 + Bob_unix.Crypto.max_packet + 16 (* header + data + tag_size *)
 
 module Crypto = Bob_unix.Crypto.Make (struct
   include Bob_unix.Fiber
@@ -31,15 +31,15 @@ module Crypto = Bob_unix.Crypto.Make (struct
     | Ok `End -> Fiber.return (Ok `Eof)
     | Ok (`Data bstr) -> Fiber.return (Ok (`Data (Cstruct.of_bigarray bstr)))
 
-  let write fd cs =
-    let rec go bstr off len =
-      Fiber.write fd bstr ~off ~len >>= function
-      | Error _ as err -> Fiber.return err
-      | Ok len' when len' = len -> Fiber.return (Ok ())
-      | Ok len' -> go bstr (off + len') (len - len')
-    in
+  let rec write fd cs =
     let { Cstruct.buffer; off; len } = cs in
-    go buffer off len
+    go fd buffer off len
+
+  and go fd bstr off len =
+    Fiber.write fd bstr ~off ~len >>= function
+    | Error _ as err -> Fiber.return err
+    | Ok len' when len' = len -> Fiber.return (Ok ())
+    | Ok len' -> go fd bstr (off + len') (len - len')
 end)
 
 type error =
@@ -57,6 +57,8 @@ let pp_error ppf = function
 
 let open_error = function Ok _ as v -> v | Error #error as v -> v
 
+type crypto_error = [ Crypto.error | Crypto.write_error ]
+
 let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
   let open Fiber in
   let init () =
@@ -65,17 +67,29 @@ let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
   in
   let push state bstr =
     match state with
-    | Error _ as err -> Fiber.return err
+    | Error err -> Fiber.return (Error (err :> crypto_error))
     | Ok flow -> (
         Crypto.send flow bstr ~off:0 ~len:(Bigarray.Array1.dim bstr)
         >>= function
         | Ok len -> reporter len >>= fun () -> Fiber.return (Ok flow)
-        | Error _ as err -> Crypto.close flow >>= fun () -> Fiber.return err)
+        | Error err ->
+            Crypto.close flow >>= fun () ->
+            Fiber.return (Error (err :> crypto_error)))
   in
   let full = Fiber.always false in
   let stop = function
-    | Ok flow -> Crypto.close flow >>| fun () -> Ok ()
-    | Error _ as err -> Fiber.return err
+    | Error err -> Fiber.return (Error (err :> crypto_error))
+    | Ok flow -> (
+        Crypto.recv flow >>= function
+        | Ok `End -> Fiber.return (Ok ())
+        | Ok (`Data bstr) ->
+            Log.err (fun m -> m "Received unexpected payload:");
+            Log.err (fun m ->
+                m "@[<hov>%a@]"
+                  (Hxd_string.pp Hxd.default)
+                  (bigstring_to_string bstr));
+            Fiber.return (Error `Corrupted)
+        | Error err -> Fiber.return (Error (err :> crypto_error)))
   in
   Stream.Sink { init; push; full; stop }
 

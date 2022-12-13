@@ -407,6 +407,8 @@ let map_read = function
   | Ok `End -> `Read `End
   | Error err -> `Error (`Rd err)
 
+let close_packet = bigstring_of_string "\xff\xff\xff\xff" ~off:0 ~len:4
+
 let pipe fd0 fd1 =
   let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
   let rec transmit fd0 fd1 () =
@@ -446,10 +448,10 @@ let pipe fd0 fd1 =
     Fiber.close fd0 >>= fun () ->
     Fiber.close fd1 >>= fun () -> Fiber.return ()
   in
-  fork_and_join
-    (fun () -> fork_and_join (transmit fd0 fd1) (transmit fd1 fd0))
-    close
-  >>= fun (((), ()), ()) ->
+  fork_and_join (transmit fd0 fd1) (transmit fd1 fd0) >>= fun ((), ()) ->
+  Fiber.write fd0 close_packet ~off:0 ~len:4 >>= fun _ ->
+  Fiber.write fd1 close_packet ~off:0 ~len:4 >>= fun _ ->
+  close () >>= fun () ->
   Log.debug (fun m -> m "The secure room is done.");
   Fiber.return ()
 

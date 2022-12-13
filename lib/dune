@@ -5,6 +5,12 @@
  (libraries ke))
 
 (library
+ (name qe)
+ (public_name bob.qe)
+ (modules qe)
+ (libraries logs fmt stdbob))
+
+(library
  (name bob_fpath)
  (public_name bob.fpath)
  (modules bob_fpath)
@@ -15,7 +21,7 @@
  (name bob)
  (public_name bob)
  (modules crypto state protocol bob)
- (libraries bob.std ke mirage-crypto hxd.core hxd.string logs spoke.core))
+ (libraries bob.std bob.qe mirage-crypto hxd.core hxd.string logs spoke.core))
 
 (library
  (name password)
@@ -37,6 +43,7 @@
  (public_name bob.stream)
  (modules stream)
  (libraries
+  bob.qe
   hxd.core
   hxd.string
   bob.fpath

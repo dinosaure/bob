@@ -43,7 +43,7 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ~len:Transfer.max_data ?level
+  Pack.make_one ~len:Bob_unix.Crypto.max_packet ?level
     ~reporter:(Fiber.return <.> reporter)
     ~finalise path
   >>= function
@@ -60,7 +60,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       @@ fun (reporter, finalise) ->
       let open Fiber in
       let open Stream in
-      Stream.of_file ~len:Transfer.max_data path
+      Stream.of_file ~len:Bob_unix.Crypto.max_packet path
       >>| Result.get_ok
       >>= Transfer.transfer
             ~reporter:(Fiber.return <.> reporter)

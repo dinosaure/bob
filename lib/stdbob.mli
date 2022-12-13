@@ -23,6 +23,7 @@ val bigstring_blit_from_string :
 val bigstring_blit_from_bytes :
   bytes -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit
 
+val bigstring_copy : ?off:int -> ?len:int -> bigstring -> bigstring
 val bigstring_of_string : string -> off:int -> len:int -> bigstring
 val bigstring_substring : bigstring -> off:int -> len:int -> string
 val bigstring_to_string : bigstring -> string

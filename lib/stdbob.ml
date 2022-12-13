@@ -44,6 +44,14 @@ let bigstring_blit src ~src_off dst ~dst_off ~len =
     bigstring_set_uint8 dst (dst_off + i) v
   done
 
+let bigstring_copy ?(off = 0) ?len bstr =
+  let len =
+    match len with Some len -> len | None -> Bigarray.Array1.dim bstr - off
+  in
+  let result = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+  bigstring_blit bstr ~src_off:off result ~dst_off:0 ~len;
+  result
+
 let bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len =
   let len0 = len land 3 in
   let len1 = len asr 2 in
