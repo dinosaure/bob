@@ -3,6 +3,7 @@
   <title>B·o·B</title>
   <meta name="description" content="An universal & secure peer-to-peer file-transfer in OCaml" />
   <link rel="stylesheet" href="https://unpkg.com/terminal.css@0.7.2/dist/terminal.min.css" />
+  <link rel="alternate" type="application/atom+xml" href="https//bob.osau.re/feed.xml" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
   <style>
@@ -76,10 +77,115 @@
 .hljs-strong {
   font-weight: bold;
 }
+
+[theme="dark"] {
+       --global-font-size: 15px;
+       --global-line-height: 1.4em;
+       --global-space: 10px;
+       --font-stack: Menlo, Monaco, Lucida Console, Liberation Mono,
+         DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace,
+         serif;
+       --mono-font-stack: Menlo, Monaco, Lucida Console, Liberation Mono,
+         DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace,
+         serif;
+       --background-color: #222225;
+       --page-width: 60em;
+       --font-color: #e8e9ed;
+       --invert-font-color: #222225;
+       --secondary-color: #a3abba;
+       --tertiary-color: #a3abba;
+       --primary-color: #62c4ff;
+       --error-color: #ff3c74;
+       --progress-bar-background: #3f3f44;
+       --progress-bar-fill: #62c4ff;
+       --code-bg-color: #3f3f44;
+       --input-style: solid;
+       --display-h1-decoration: none;
+     }
+
+/*
+.theme-switch-wrapper {
+  display: flex;
+  align-items: center;
+}
+*/
+
+.theme-switch {
+  display: inline-block;
+  height: 17px;
+  position: relative;
+  width: 30px;
+}
+
+.theme-switch input {
+  display:none;
+}
+
+.slider {
+  background-color: #ccc;
+  bottom: 0;
+  cursor: pointer;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transition: .4s;
+}
+
+.slider:before {
+  background-color: #fff;
+  bottom: 2px;
+  content: "";
+  height: 13px;
+  left: 2px;
+  position: absolute;
+  transition: .4s;
+  width: 13px;
+}
+
+input:checked + .slider {
+  background-color: var(--primary-color);
+}
+
+input:checked + .slider:before {
+  transform: translateX(13px);
+}
+
+.slider.round {
+  border-radius: 17px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+.dark-mode {
+  float: right;
+  border: 1px solid var(--secondary-color);
+  padding: var(--global-space);
+  display: flex;
+  align-items: center;
+
+}
+
+.dark-mode em {
+  margin-right: 10px;
+  font-size: 1rem;
+}
   </style>
 </head>
 <body class="terminal">
 <div style="margin: 2% 0 10% 15%; width: 45%;">
+
+<div class="dark-mode">
+<em>dark mode: </em>
+<div class="theme-switch-wrapper">
+<label class="theme-switch" for="checkbox">
+<input type="checkbox" id="checkbox" />
+<div class="slider round"></div>
+</label>
+</div>
+</div>
 
 # B·o·B, an universal & secure peer-to-peer file-transfer in OCaml
 
@@ -98,6 +204,8 @@ The software is available here
 <img style="width: 22px;" height="20" src="https://worker.jart.workers.dev/redbean/openbsd.png" alt="openbsd" />
 <img style="width: 20px;" height="20" src="https://worker.jart.workers.dev/redbean/netbsd2.png" alt="netbsd" />:
 [bob.com (x86\_64)][bob-com]
+
+You can follow the project via [this Atom feed][feed].
 
 <ol class="terminal-toc">
 <li>[How to use it?][]</li>
@@ -545,6 +653,24 @@ follow the steps to build Bob from a "context" described
 
 This method allows us to build a relationship of trust between you and us.
 
+**Q**: If I find a bug, what is the best way to help?
+**A**: Bob has some options for giving information that can really help
+developers. The first is the `-vvv` option which displays Bob's _debug_
+information. The second is `--seed` (which expects a value in Base64 form) which
+allows the same state to be reproduced for all generated values. The third is
+`--reproduce` which admits a predictable reproduction of the shared secret key.
+
+These options **are not** to be used in a real exchange. The predictability of
+Bob's operation can be an important attack beam, it is only for debugging.
+
+Finally, the `--reproduce` option must be used on both sides (of the sender and
+receiver). The seed used must also be the same on both sides.
+
+**Q**: What is the best way to follow the project?
+**A**: We offer an [Atom feed][feed] on our website that keeps you informed of
+all the progress and changes on our relay. For a more detailed tracking, we
+advise you to follow our [GitHub repository][github-repository].
+
 ## Manifest
 
 After this _brief_ introduction, we can really present `bob.com`, its
@@ -747,7 +873,7 @@ that the trust you can place in us does not depend (fortunately) only on the
 usefulness you can find in this software but also on its stability and the
 team's view behind the project.
 
-<p align="right">The Robur Team</p>
+<p align="right">The [Robur][robur] Team</p>
 
 [linux-img]: https://worker.jart.workers.dev/redbean/linux.png
 [windows-img]: https://worker.jart.workers.dev/redbean/windows10.png
@@ -777,8 +903,34 @@ team's view behind the project.
 [tor]: https://www.torproject.org/
 [reproducible-bob]: https://builds.osau.re/job/bob/build/latest
 [mono]: https://www.mono-project.com/
+[feed]: https://bob.osau.re/feed.xml
 
-<script>hljs.highlightAll();</script>
+<script>
+hljs.highlightAll();
+
+const toggleSwitch = document.querySelector('.theme-switch input[type="checkbox"]');
+
+function switchTheme(e) {
+  if (e.target.checked) {
+    document.documentElement.setAttribute('theme', 'dark');
+    localStorage.setItem('theme', 'dark');
+  } else {
+    document.documentElement.setAttribute('theme', 'light');
+    localStorage.setItem('theme', 'light');
+  }
+}
+
+toggleSwitch.addEventListener('change', switchTheme, false);
+
+const currentTheme = localStorage.getItem('theme') ? localStorage.getItem('theme') : null;
+
+if (currentTheme) {
+  document.documentElement.setAttribute('theme', currentTheme);
+
+  if (currentTheme === 'dark')
+    toggleSwitch.checked = true;
+}
+</script>
 </div>
 </body>
 </html>

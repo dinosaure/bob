@@ -1,0 +1,4 @@
+(executable
+ (name syndication)
+ (modules syndication)
+ (libraries fmt uuidm base64 syndic))

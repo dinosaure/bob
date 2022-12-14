@@ -22,6 +22,8 @@ depends: [
   "base64"         {>= "3.5.0"}
   "decompress"     {>= "1.5.1"}
   "digestif"       {>= "1.1.3"}
+  "syndic"
+  "uuidm"
   "bigstringaf"
   "cmdliner"
   "ipaddr"
