@@ -15,12 +15,14 @@ let generate_id g =
   let v = Uuidm.v4_gen g () in
   Uri.of_string (Fmt.str "urn:uuid:%s" (Uuidm.to_string v))
 
+let of_markdown str = Syndic.Atom.Html (None, Omd.to_html (Omd.of_string str))
+
 let entry_2022_12_14_0 g =
   let id = generate_id g in
   let updated = Syndic.Date.of_rfc3339 "2022-12-14 14:00:00+01:00" in
   let content =
-    Syndic.Atom.Text
-      {text|Creation of an ATOM feed for B·o·B
+    of_markdown
+      {markdown|Creation of an ATOM feed for B·o·B
 
 The website https://bob.osau.re/ has an ATOM feed: https://bob.osau.re/feed.xml.
 The idea is to propose a way to notice users about improvements/updates on our
@@ -34,7 +36,7 @@ The purpose of this feed is:
 
 The feed is generated automatically via Syndic (see
 https://github.com/Cumulus/Syndic) and available into our main GitHub
-repository (see https://github.com/dinosaure/bob/tree/main/web).|text}
+repository (see https://github.com/dinosaure/bob/tree/main/web).|markdown}
   in
   Syndic.Atom.entry
     ~authors:Person.(romain_calascibetta, [])
@@ -47,8 +49,8 @@ let entry_2022_12_14_1 g =
   let id = generate_id g in
   let updated = Syndic.Date.of_rfc3339 "2022-12-14 15:00:00+01:00" in
   let content =
-    Syndic.Atom.Text
-      {text|Bugfix on MacOS/FreeBSD
+    of_markdown
+      {markdown|Bugfix on MacOS/FreeBSD
 
 Fabien Dagnat spotted a bug on MacOS and (transitively) on FreeBSD. The problem
 was when we wanted to send a file from this machine. The receiver received a
@@ -80,7 +82,7 @@ the new version of bob.com and bob.hvt which include all of these improvements.
 Old versions of Bob should work but we advise to upgrade your binary with the
 new one available here:
 
-https://builds.osau.re/job/bob/build/latest/f/bin/bob.com|text}
+https://builds.osau.re/job/bob/build/latest/f/bin/bob.com|markdown}
   in
   Syndic.Atom.entry
     ~authors:Person.(romain_calascibetta, [])
