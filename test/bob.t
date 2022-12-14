@@ -1,10 +1,9 @@
 Tests about the bob binary
   $ ./sched.exe <<EOF
-  > send --seed 8H93erb5Kvo= not-found 2>stderr 1>stdout
+  > send --seed 8H93erb5Kvo= -p soarfly-bril not-found 2>stderr 1>stdout
   > EOF
-  bob send --seed 8H93erb5Kvo= not-found 1>stdout 2>stderr -> EXITED(124)
+  bob send --seed 8H93erb5Kvo= -p soarfly-bril not-found 1>stdout 2>stderr -> EXITED(124)
   $ cat stdout
-  Password: soarfly-bril
   $ cat stderr
   send: <path> argument: not-found does not exist
   Usage: send [OPTION]… <path>

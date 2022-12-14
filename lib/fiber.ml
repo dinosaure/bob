@@ -212,6 +212,7 @@ let pp_sockaddr ppf = function
 external is_windows : unit -> bool = "bob_is_windows" [@@noalloc]
 external is_freebsd : unit -> bool = "bob_is_freebsd" [@@noalloc]
 external is_linux : unit -> bool = "bob_is_linux" [@@noalloc]
+external is_macos : unit -> bool = "bob_is_macos" [@@noalloc]
 external set_nonblock : Unix.file_descr -> bool -> unit = "bob_set_nonblock"
 
 let connect fd sockaddr : (unit, Unix.error) result t =
@@ -236,7 +237,7 @@ let connect fd sockaddr : (unit, Unix.error) result t =
           Ivar.read ivar
         with
         | Unix.Unix_error (Unix.EINPROGRESS, _, _)
-          when is_freebsd () (* TODO(dinosaure): check for MacOS *) ->
+          when is_freebsd () || is_macos () ->
             Log.debug (fun m -> m "Connection is in progress.");
             Hashtbl.add pwr fd (`Connect (sockaddr, ivar));
             Ivar.read ivar
@@ -357,8 +358,8 @@ let sigwr fd =
         Unix.connect fd sockaddr;
         Ivar.fill ivar (Ok ())
       with Unix.Unix_error (errno, _, _) -> Ivar.fill ivar (Error errno))
-  | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () *) ->
-      Log.debug (fun m -> m "Event from connect() (UNIX connect()).");
+  | Some (`Connect (_sockaddr, ivar)) (* when is_freebsd () || is_macos () *) ->
+      Log.debug (fun m -> m "Event from connect() (*BSD connect()).");
       (* TODO(dinosaure): we probably should verify the connection with
          [getpeername], see https://cr.yp.to/docs/connect.html for more
          details about how to retrieve possible error from connect()
@@ -370,7 +371,7 @@ let sigwr fd =
       let ret = bigstring_write fd bstr off len in
       if ret >= 0 then (
         Hashtbl.remove pwr fd;
-        Ivar.fill ivar (Ok len))
+        Ivar.fill ivar (Ok ret))
       else
         let errno = retrieve_error () in
         match errno with
@@ -383,12 +384,15 @@ let sigwr fd =
             Hashtbl.remove pwr fd;
             Ivar.fill ivar (Error (`Unix errno)))
 
+let bstr_empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
+
 let sigexcept fd =
+  Log.debug (fun m -> m "Got an exception from %d" (Obj.magic fd));
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, _len)) ->
       Hashtbl.remove prd fd;
-      Ivar.fill ivar (Ok `End)
+      Ivar.fill ivar (Ok (`Data bstr_empty))
   | Some (`Really_read (ivar, _, _, _)) ->
       Hashtbl.remove prd fd;
       Ivar.fill ivar (Error `End)
@@ -462,6 +466,11 @@ let run fiber =
        via the [except] list of file-descriptors - on Linux, only the
        [rds] list is enough. *)
     let ready_rds, ready_wrs, ready_excepts =
+      (* TODO(dinosaure): it seems that on MacOS, fds are catched
+         with an exception. Many people say that we should just
+         ignore exceptions and only Windows has a special case
+         for the [connect()] function. However, we really should take
+         a look on that. *)
       try Unix.select rds wrs rds 0.1 with
       | Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
       | exn ->

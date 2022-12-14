@@ -310,6 +310,8 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       | `Read of [ `Eof | `Data of Cstruct.t ]
       | `Error of Stack.TCP.error ]
 
+    let close_packet = Cstruct.of_string "\xff\xff\xff\xff"
+
     let pipe fd0 fd1 =
       let closed : [> `Closed ] Lwt_mvar.t = Lwt_mvar.create_empty () in
       let rec transmit fd0 fd1 =
@@ -340,7 +342,10 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         Stack.TCP.close fd0 >>= fun () ->
         Stack.TCP.close fd1 >>= fun () -> Lwt.return_unit
       in
-      Lwt.join [ transmit fd0 fd1; transmit fd1 fd0; close () ] >>= fun () ->
+      Lwt.join [ transmit fd0 fd1; transmit fd1 fd0 ] >>= fun () ->
+      Stack.TCP.write fd0 close_packet >>= fun _ ->
+      Stack.TCP.write fd1 close_packet >>= fun _ ->
+      close () >>= fun () ->
       Logs.debug (fun m -> m "Pipe finished.");
       Lwt.return_unit
 
@@ -439,7 +444,7 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   module Bob_clear = Make (Stack.TCP)
 
-  let start _pclock _time stack =
+  let start _time stack =
     let rooms = Bob.Secured.make () in
     let handshake socket = Lwt.return (Ok (socket, Stack.TCP.dst socket)) in
     Lwt.join

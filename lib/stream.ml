@@ -135,9 +135,14 @@ let rec full_write ~path fd bstr off len =
   | Ok len' when len' - len = 0 -> Fiber.return fd
   | Ok len' -> full_write ~path fd bstr (off + len') (len - len')
   | Error `Closed ->
+      Log.err (fun m ->
+          m "%d (%a) was closed." (Obj.magic fd) Bob_fpath.pp path);
       Fmt.failwith "Unexpected closed fd %d (%a)" (Obj.magic fd) Bob_fpath.pp
         path
   | Error (`Unix errno) ->
+      Log.err (fun m ->
+          m "Got an error when we tried to write into %d (%a): %s"
+            (Obj.magic fd) Bob_fpath.pp path (Unix.error_message errno));
       Fmt.failwith "write(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
         (Unix.error_message errno)
 
@@ -273,17 +278,14 @@ module Sink = struct
     Sink { init; push; full; stop }
 
   let bigstring =
-    let bigstring_blit src src_off dst dst_off len =
-      Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
-    in
-    let init () = Fiber.return (Ke.Rke.create ~capacity:128 Bigarray.char) in
+    let init () = Fiber.return (Qe.create 128) in
     let push ke bstr =
-      Ke.Rke.N.push ke ~blit:bigstring_blit ~length:Bigarray.Array1.dim bstr;
+      Qe.push ke bstr;
       Fiber.return ke
     in
     let full = Fiber.always false in
     let stop ke =
-      match Ke.Rke.N.peek ke with
+      match Qe.peek ke with
       | [] -> Fiber.return De.bigstring_empty
       | [ x ] -> Fiber.return x
       | _ ->
@@ -319,12 +321,7 @@ module Sink = struct
             (Unix.error_message errno)
     in
     let stop fd = Fiber.close fd in
-    let push fd bstr =
-      Log.debug (fun m -> m "Push:");
-      Log.debug (fun m ->
-          m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string bstr));
-      full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr)
-    in
+    let push fd bstr = full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) in
     let full = Fiber.always false in
     Sink { init; stop; full; push }
 
@@ -381,66 +378,6 @@ module Flow = struct
     in
     { flow }
 
-  (* Buffering *)
-
-  let flush_if_full ~push ~acc ke capacity =
-    if Ke.Rke.Weighted.length ke = capacity then (
-      let vs = Ke.Rke.Weighted.N.peek ke in
-      let rec go acc = function
-        | [] -> Fiber.return acc
-        | x :: r -> push acc x >>= fun acc -> go acc r
-      in
-      go acc vs >>= fun acc ->
-      Ke.Rke.Weighted.N.shift_exn ke (Ke.Rke.Weighted.length ke);
-      Fiber.return acc)
-    else Fiber.return acc
-
-  let flush ~push ~acc ke capacity =
-    if Ke.Rke.Weighted.available ke = capacity then Fiber.return acc
-    else
-      let vs = Ke.Rke.Weighted.N.peek ke in
-      let rec go acc = function
-        | [] -> Fiber.return acc
-        | x :: r -> push acc x >>= fun acc -> go acc r
-      in
-      go acc vs >>= fun acc ->
-      Ke.Rke.Weighted.N.shift_exn ke (Ke.Rke.Weighted.length ke);
-      Fiber.return acc
-
-  let rec push_until_empty ~push ~acc ke capacity str ~off ~len =
-    flush_if_full ~push ~acc ke capacity >>= fun acc ->
-    let max = min (Ke.Rke.Weighted.available ke) len in
-    let _ =
-      Ke.Rke.Weighted.N.push_exn ke ~blit:bigstring_blit_from_string
-        ~length:String.length str ~off ~len:max
-    in
-    if len - max = 0 then Fiber.return (ke, capacity, acc)
-    else
-      push_until_empty ~push ~acc ke capacity str ~off:(off + max)
-        ~len:(len - max)
-
-  and bigstring_blit_from_string src src_off dst dst_off len =
-    Stdbob.bigstring_blit_from_string src ~src_off dst ~dst_off ~len
-
-  let bigbuffer capacity =
-    let flow (Sink k) =
-      let init () =
-        k.init () >>= fun acc ->
-        let ke, capacity = Ke.Rke.Weighted.create ~capacity Bigarray.char in
-        Fiber.return (ke, capacity, acc)
-      in
-      let push (ke, capacity, acc) str =
-        push_until_empty ~push:k.push ~acc ke capacity str ~off:0
-          ~len:(String.length str)
-      in
-      let full (_, _, acc) = k.full acc in
-      let stop (ke, capacity, acc) =
-        flush ~push:k.push ~acc ke capacity >>= k.stop
-      in
-      Sink { init; stop; full; push }
-    in
-    { flow }
-
   (* Zlib *)
 
   let rec deflate_zlib_until_end ~push ~acc encoder o =
@@ -474,12 +411,11 @@ module Flow = struct
         k.init () >>= fun acc -> Fiber.return (encoder, o, acc)
       in
       let push (encoder, o, acc) i =
-        Log.debug (fun m -> m "Deflate:");
-        Log.debug (fun m ->
-            m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) (bigstring_to_string i));
-        deflate_zlib_until_await ~push:k.push ~acc
-          (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
-          o
+        if Bigarray.Array1.dim i = 0 then Fiber.return (encoder, o, acc)
+        else
+          deflate_zlib_until_await ~push:k.push ~acc
+            (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
+            o
       in
       let full (_, _, acc) = k.full acc in
       let stop (encoder, o, acc) =
@@ -755,7 +691,10 @@ module Stream = struct
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Bob_fpath.pp
                       path (Unix.error_message errno))
           in
-          let stop r = Fiber.close fd >>= fun () -> k.stop r in
+          let stop r =
+            Log.debug (fun m -> m "Close the file %a." Bob_fpath.pp path);
+            Fiber.close fd >>= fun () -> k.stop r
+          in
           bracket go ~init:k.init ~stop
         in
         Fiber.return (Ok { stream })

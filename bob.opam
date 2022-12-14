@@ -37,10 +37,3 @@ depends: [
   "alcotest"       {with-test}
   "spoke"
 ]
-
-pin-depends: [
-  [ "mirage-crypto.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
-  [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
-  [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
-  [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#aa16c7ca4adb6a1274aec90b7f966e9da668756b" ]
-]

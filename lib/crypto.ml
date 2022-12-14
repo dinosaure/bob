@@ -103,8 +103,9 @@ type 'fd t = {
   send_record : Cstruct.t;
   mutable recv_seq : int64;
   mutable send_seq : int64;
-  recv_queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
-  send_queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t;
+  recv_queue : Qe.t;
+  send_queue : Qe.t;
+  mutable closed : bool;
 }
 
 let symmetric_of_key_nonce_and_cipher key_nonce (Spoke.AEAD aead) =
@@ -116,30 +117,23 @@ let symmetric_of_key_nonce_and_cipher key_nonce (Spoke.AEAD aead) =
   let nonce = Cstruct.of_string ~off:key_len ~len:nonce_len key_nonce in
   Symmetric { key; nonce; impl = (module Cipher_block) }
 
-(* XXX(dinosaure): [0xffffff] is not chosen randomly. It's a length which can
-   speed-up the file transfer but is small enough to work on a small machine
-   with 4Go. *)
+let max_packet = 0x7fff
 
 let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
   let recv = symmetric_of_key_nonce_and_cipher k0 cipher0 in
   let send = symmetric_of_key_nonce_and_cipher k1 cipher1 in
   let recv_queue =
     let (Symmetric { impl = (module Cipher_block); _ }) = recv in
-    let max_packet = 2 + 0xffff + Cipher_block.tag_size in
-    Ke.Rke.create ~capacity:(max_packet * 2) Bigarray.char
+    Qe.create (2 + max_packet + Cipher_block.tag_size)
   in
-  let send_queue =
-    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
-    let max_packet = 2 + 0xffff + Cipher_block.tag_size in
-    Ke.Rke.create ~capacity:(max_packet * 2) Bigarray.char
-  in
+  let send_queue = Qe.create max_packet in
   let recv_record =
     let (Symmetric { impl = (module Cipher_block); _ }) = recv in
-    Cstruct.create (2 + 0xffff + Cipher_block.tag_size)
+    Cstruct.create (2 + max_packet + Cipher_block.tag_size)
   in
   let send_record =
-    let (Symmetric { impl = (module Cipher_block); _ }) = send in
-    Cstruct.create (2 + 0xffff + Cipher_block.tag_size)
+    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
+    Cstruct.create (2 + max_packet + Cipher_block.tag_size)
   in
   {
     fd;
@@ -151,37 +145,33 @@ let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
     send_seq = 0L;
     recv_queue;
     send_queue;
+    closed = false;
   }
 
 let get_record record queue symmetric =
   let (Symmetric { impl = (module Cipher_block); _ }) = symmetric in
-  match Ke.Rke.length queue with
-  | 0 -> `Await_hdr
-  | 1 -> `Await_rec 1
-  | 2 | _ ->
-      let blit src src_off dst dst_off len =
-        let src = Cstruct.of_bigarray src ~off:src_off ~len in
-        Cstruct.blit src 0 dst dst_off len
-      in
-      Ke.Rke.N.keep_exn queue ~blit ~length:Cstruct.length record ~len:2;
-      let len = Cstruct.BE.get_uint16 record 0 in
-      let required = 2 + len + Cipher_block.tag_size in
-      if Ke.Rke.length queue >= required then (
-        Ke.Rke.N.keep_exn queue ~blit ~length:Cstruct.length record
-          ~len:required;
-        Ke.Rke.N.shift_exn queue required;
-        `Record (Cstruct.sub record 2 (len + Cipher_block.tag_size)))
-      else `Await_rec (len - Ke.Rke.length queue)
+  match Qe.size queue with
+  | 0 | 1 -> `Await_hdr
+  | 2 | _ -> (
+      let { Cstruct.buffer = record_buffer; off = record_off; _ } = record in
+      Qe.keep queue ~off:record_off ~len:2 record_buffer;
+      let packet = Cstruct.BE.get_uint16 record 0 in
+      match packet with
+      | 0xffff -> `Close
+      | len ->
+          let required = 2 + len + Cipher_block.tag_size in
+          if Qe.size queue >= required then (
+            Qe.keep queue ~off:record_off ~len:required record_buffer;
+            Qe.shift queue required;
+            `Record (Cstruct.sub record 2 (len + Cipher_block.tag_size)))
+          else `Await_rec)
 
 let record ~dst ~seq queue symmetric =
-  let len = min 0xffff (Ke.Rke.length queue) in
-  let blit src src_off dst dst_off len =
-    let src = Cstruct.of_bigarray src ~off:src_off ~len in
-    Cstruct.blit src 0 dst dst_off len
-  in
-  Ke.Rke.N.keep_exn queue ~length:Cstruct.length ~blit ~off:2 ~len dst;
+  let len = min max_packet (Qe.size queue) in
+  let { Cstruct.buffer = dst_buffer; off = dst_off; _ } = dst in
+  Qe.keep queue ~off:(dst_off + 2) ~len dst_buffer;
   let buf = encrypt symmetric seq (Cstruct.sub dst 2 len) in
-  Ke.Rke.N.shift_exn queue len;
+  Qe.shift queue len;
   Cstruct.BE.set_uint16 dst 0 len;
   Cstruct.blit buf 0 dst 2 (Cstruct.length buf);
   Cstruct.sub dst 0 (2 + Cstruct.length buf)
@@ -218,8 +208,30 @@ module Make (Flow : FLOW) = struct
 
   let ( >>= ) = Flow.bind
 
+  let ( >>? ) x f =
+    x >>= function Ok x -> f x | Error _ as err -> Flow.return err
+
+  let ( >>| ) x f = x >>= fun x -> Flow.return (f x)
+  let reword_error f = function Ok _ as v -> v | Error err -> Error (f err)
+  let close_packet = Cstruct.of_string "\xff\xff\xff\xff"
+
+  let send_close flow =
+    Flow.write flow.fd close_packet >>| reword_error (fun err -> `Wr err)
+
   let rec recv flow =
-    match get_record flow.recv_record flow.recv_queue flow.recv with
+    if flow.closed then Flow.return (Ok `End) else go flow.recv_record flow
+
+  and go recv_record flow =
+    match get_record recv_record flow.recv_queue flow.recv with
+    | `Close ->
+        flow.closed <- true;
+        send_close flow >>= fun res ->
+        (match res with
+        | Error err ->
+            Log.err (fun m ->
+                m "Impossible to notify peer to close: %a" pp_write_error err)
+        | Ok () -> ());
+        Flow.return (Ok `End)
     | `Record buf -> (
         match decrypt flow.recv flow.recv_seq buf with
         | Some buf ->
@@ -227,29 +239,22 @@ module Make (Flow : FLOW) = struct
             let { Cstruct.buffer; off; len } = buf in
             let res = Bigarray.Array1.sub buffer off len in
             Flow.return (Ok (`Data res))
-        | None -> Flow.return (Error `Corrupted))
-    | (`Await_hdr | `Await_rec _) as await -> (
+        | None ->
+            Log.err (fun m -> m "Impossible to decrypt the record.");
+            Flow.return (Error `Corrupted))
+    | (`Await_hdr | `Await_rec) as await -> (
         Flow.read flow.fd >>= function
         | Error err -> Flow.return (Error (`Rd err))
         | Ok `Eof ->
             if await = `Await_hdr then Flow.return (Ok `End)
             else Flow.return (Error `Corrupted)
         | Ok (`Data cs) ->
-            let blit src src_off dst dst_off len =
-              let dst = Cstruct.of_bigarray dst ~off:dst_off ~len in
-              Cstruct.blit src src_off dst 0 len
-            in
-            Ke.Rke.N.push flow.recv_queue ~blit ~length:Cstruct.length cs;
-            recv flow)
-
-  let ( >>? ) x f =
-    x >>= function Ok x -> f x | Error _ as err -> Flow.return err
-
-  let ( >>| ) x f = x >>= fun x -> Flow.return (f x)
-  let reword_error f = function Ok _ as v -> v | Error err -> Error (f err)
+            let { Cstruct.buffer; off; len } = cs in
+            Qe.push flow.recv_queue ~off ~len buffer;
+            go recv_record flow)
 
   let rec flush flow =
-    if not (Ke.Rke.is_empty flow.send_queue) then (
+    if not (Qe.is_empty flow.send_queue) then (
       let record =
         record ~dst:flow.send_record ~seq:flow.send_seq flow.send_queue
           flow.send
@@ -260,28 +265,20 @@ module Make (Flow : FLOW) = struct
     else Flow.return (Ok ())
 
   let send flow bstr ~off ~len =
-    let blit src src_off dst dst_off len =
-      Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
-    in
-    Ke.Rke.N.push flow.send_queue ~blit ~length:Bigarray.Array1.dim ~off ~len
-      bstr;
-    flush flow >>? fun () -> Flow.return (Ok len)
+    if flow.closed then Flow.return (Error `Closed)
+    else (
+      Qe.push flow.send_queue ~off ~len bstr;
+      flush flow >>? fun () -> Flow.return (Ok len))
 
-  let close { fd; _ } = Flow.close fd
-
-  let rec getline queue flow =
-    match Stdbob.line_of_queue queue with
-    | Some line -> Flow.return (Some line)
-    | None -> (
-        recv flow >>= function
-        | Ok `End -> Flow.return None
-        | Ok (`Data bstr) ->
-            let blit src src_off dst dst_off len =
-              Stdbob.bigstring_blit src ~src_off dst ~dst_off ~len
-            in
-            Ke.Rke.N.push queue ~blit ~length:Bigarray.Array1.dim bstr;
-            getline queue flow
-        | Error err ->
-            Log.err (fun m -> m "Error while reading a line: %a" pp_error err);
-            Flow.return None)
+  let close flow =
+    (flush flow >>? fun () -> send_close flow) >>= fun res ->
+    (match res with
+    | Error err ->
+        Log.err (fun m ->
+            m "Impossible to flush and/or notify peer to close: %a"
+              pp_write_error err)
+    | Ok () -> ());
+    flow.closed <- true;
+    (* TODO(dinosaure): should we close the underlying flow? *)
+    Flow.return ()
 end

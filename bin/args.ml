@@ -51,7 +51,7 @@ let reporter ppf =
     in
     let with_metadata header _tags k ppf fmt =
       Fmt.kpf k ppf
-        ("[%6d]%a[%a]: " ^^ fmt ^^ "\n%!")
+        ("[%6d]%a[%a]: @[<hov>" ^^ fmt ^^ "@]\n%!")
         pid pp_header (level, header)
         Fmt.(styled `Magenta (fmt "%20s"))
         (Logs.Src.name src)
@@ -296,6 +296,13 @@ let compression =
 let yes =
   let doc = "Answer yes to all bob questions without prompting." in
   Arg.(value & flag & info [ "y"; "yes" ] ~doc)
+
+let reproduce =
+  let doc =
+    "Reproduce the generation of packets. This option must only be used for \
+     debugging."
+  in
+  Arg.(value & flag & info [ "reproduce" ] ~doc)
 
 let destination =
   let doc =

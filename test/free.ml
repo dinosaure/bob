@@ -12,9 +12,9 @@ let connect inet_addr port =
     let _, _, res = Unix.select [] [] [ socket ] 0.01 in
     if res <> [] then stop := true
   done;
-  let errno = Unix.getsockopt_int socket Unix.SO_ERROR in
+  let errno = Unix.getsockopt_error socket in
   Unix.close socket;
-  if errno = 0 then true else false
+  Option.is_none errno
 
 let () =
   match Sys.argv with

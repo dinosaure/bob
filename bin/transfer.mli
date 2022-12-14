@@ -11,7 +11,6 @@ type error =
 val pp_error : error Fmt.t
 val open_error : ('a, error) result -> ('a, [> error ]) result
 val sockaddr_with_secure_port : Unix.sockaddr -> int -> Unix.sockaddr
-val max_data : int
 val max_packet : int
 
 val transfer :

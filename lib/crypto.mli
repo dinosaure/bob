@@ -47,9 +47,6 @@ module Make (Flow : FLOW) : sig
     (int, write_error) result Flow.t
 
   val close : Flow.flow t -> unit Flow.t
-
-  val getline :
-    (char, Bigarray.int8_unsigned_elt) Ke.Rke.t ->
-    Flow.flow t ->
-    string option Flow.t
 end
+
+val max_packet : int

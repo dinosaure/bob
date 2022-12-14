@@ -5,7 +5,7 @@ module Crypto = Crypto
 module Server : sig
   type t
 
-  val hello : g:Random.State.t -> secret:Spoke.secret -> t
+  val hello : ?reproduce:bool -> g:Random.State.t -> Spoke.secret -> t
 
   val receive :
     t ->
@@ -23,7 +23,8 @@ end
 module Client : sig
   type t
 
-  val make : g:Random.State.t -> password:string -> identity:string -> t
+  val make :
+    ?reproduce:bool -> g:Random.State.t -> identity:string -> string -> t
 
   val receive :
     t ->

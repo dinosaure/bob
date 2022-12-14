@@ -138,8 +138,8 @@ module Server = struct
     include State.Server
   end)
 
-  let hello ~g ~secret =
-    let state = State.Server.hello ~g ~secret in
+  let hello ?reproduce ~g secret =
+    let state = State.Server.hello ?reproduce ~g secret in
     let ctx = Protocol.make () in
     let ic = Protocol.recv ctx in
     let oc =
@@ -173,8 +173,8 @@ module Client = struct
     include State.Client
   end)
 
-  let make ~g ~password ~identity =
-    let state = State.Client.hello ~g ~password ~identity in
+  let make ?reproduce ~g ~identity password =
+    let state = State.Client.hello ?reproduce ~g ~identity password in
     let ctx = Protocol.make () in
     let ic = Protocol.recv ctx in
     let oc = Protocol.Done () in

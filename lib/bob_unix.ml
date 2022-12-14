@@ -176,17 +176,17 @@ module Make (IO : IO) = struct
 
   let open_error = function Ok _ as v -> v | Error #error as v -> v
 
-  let server socket ~g ~secret =
-    let t = Bob.Server.hello ~g ~secret in
+  let server socket ?reproduce ~g secret =
+    let t = Bob.Server.hello ?reproduce ~g secret in
     let choose _ = assert false in
     let agreement _ = assert false in
     run ~choose ~agreement ~receive:Bob.Server.receive ~send:Bob.Server.send
       socket t
     >>| open_error
 
-  let client socket ~choose ~g ~password =
+  let client socket ?reproduce ~choose ~g password =
     let identity = Unix.gethostname () in
-    let t = Bob.Client.make ~g ~password ~identity in
+    let t = Bob.Client.make ?reproduce ~g ~identity password in
     run ~choose ~agreement:Bob.Client.agreement ~receive:Bob.Client.receive
       ~send:Bob.Client.send socket t
     >>| open_error
@@ -407,6 +407,8 @@ let map_read = function
   | Ok `End -> `Read `End
   | Error err -> `Error (`Rd err)
 
+let close_packet = bigstring_of_string "\xff\xff\xff\xff" ~off:0 ~len:4
+
 let pipe fd0 fd1 =
   let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
   let rec transmit fd0 fd1 () =
@@ -446,10 +448,10 @@ let pipe fd0 fd1 =
     Fiber.close fd0 >>= fun () ->
     Fiber.close fd1 >>= fun () -> Fiber.return ()
   in
-  fork_and_join
-    (fun () -> fork_and_join (transmit fd0 fd1) (transmit fd1 fd0))
-    close
-  >>= fun (((), ()), ()) ->
+  fork_and_join (transmit fd0 fd1) (transmit fd1 fd0) >>= fun ((), ()) ->
+  Fiber.write fd0 close_packet ~off:0 ~len:4 >>= fun _ ->
+  Fiber.write fd1 close_packet ~off:0 ~len:4 >>= fun _ ->
+  close () >>= fun () ->
   Log.debug (fun m -> m "The secure room is done.");
   Fiber.return ()
 

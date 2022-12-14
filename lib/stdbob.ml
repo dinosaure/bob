@@ -18,6 +18,7 @@ external bytes_set_uint32 : bytes -> int -> int32 -> unit = "%caml_bytes_set32"
 external bytes_get_uint32 : bytes -> int -> int32 = "%caml_bytes_get32"
 external string_get_uint8 : string -> int -> int = "%string_safe_get"
 external string_get_uint32 : string -> int -> int32 = "%caml_string_get32"
+external bigstring_blit : bigstring -> bigstring -> unit = "caml_ba_blit"
 
 let flip (a, b) = (b, a)
 let identity x = x
@@ -29,22 +30,37 @@ let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 let never _ = assert false
 
 let bigstring_blit src ~src_off dst ~dst_off ~len =
-  let len0 = len land 3 in
-  let len1 = len asr 2 in
+  if
+    len < 0 || src_off < 0
+    || src_off > Bigarray.Array1.dim src - len
+    || dst_off < 0
+    || dst_off > Bigarray.Array1.dim dst - len
+  then
+    Fmt.invalid_arg
+      "Stdbob.bigstring_blit %d ~src_off:%d %d ~dst_off:%d ~len:%d"
+      (Bigarray.Array1.dim src) src_off (Bigarray.Array1.dim dst) dst_off len;
+  bigstring_blit
+    (Bigarray.Array1.sub src src_off len)
+    (Bigarray.Array1.sub dst dst_off len)
 
-  for i = 0 to len1 - 1 do
-    let i = i * 4 in
-    let v = bigstring_get_uint32 src (src_off + i) in
-    bigstring_set_uint32 dst (dst_off + i) v
-  done;
-
-  for i = 0 to len0 - 1 do
-    let i = (len1 * 4) + i in
-    let v = bigstring_get_uint8 src (src_off + i) in
-    bigstring_set_uint8 dst (dst_off + i) v
-  done
+let bigstring_copy ?(off = 0) ?len bstr =
+  let len =
+    match len with Some len -> len | None -> Bigarray.Array1.dim bstr - off
+  in
+  let result = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+  bigstring_blit bstr ~src_off:off result ~dst_off:0 ~len;
+  result
 
 let bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len =
+  if
+    len < 0 || src_off < 0
+    || src_off > Bigarray.Array1.dim src - len
+    || dst_off < 0
+    || dst_off > Bytes.length dst - len
+  then
+    Fmt.invalid_arg
+      "Stdbob.bigstring_blit_to_bytes %d ~src_off:%d %d ~dst_off:%d ~len:%d"
+      (Bigarray.Array1.dim src) src_off (Bytes.length dst) dst_off len;
   let len0 = len land 3 in
   let len1 = len asr 2 in
 
@@ -61,6 +77,15 @@ let bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len =
   done
 
 let bigstring_blit_from_string src ~src_off dst ~dst_off ~len =
+  if
+    len < 0 || src_off < 0
+    || src_off > String.length src - len
+    || dst_off < 0
+    || dst_off > Bigarray.Array1.dim dst - len
+  then
+    Fmt.invalid_arg
+      "Stdbob.bigstring_blit_from_string %d ~src_off:%d %d ~dst_off:%d ~len:%d"
+      (String.length src) src_off (Bigarray.Array1.dim dst) dst_off len;
   let len0 = len land 3 in
   let len1 = len asr 2 in
 
@@ -77,6 +102,15 @@ let bigstring_blit_from_string src ~src_off dst ~dst_off ~len =
   done
 
 let bigstring_blit_from_bytes src ~src_off dst ~dst_off ~len =
+  if
+    len < 0 || src_off < 0
+    || src_off > Bytes.length src - len
+    || dst_off < 0
+    || dst_off > Bigarray.Array1.dim dst - len
+  then
+    Fmt.invalid_arg
+      "Stdbob.bigstring_blit_from_bytes %d ~src_off:%d %d ~dst_off:%d ~len:%d"
+      (Bytes.length src) src_off (Bigarray.Array1.dim dst) dst_off len;
   let len0 = len land 3 in
   let len1 = len asr 2 in
 

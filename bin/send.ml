@@ -1,6 +1,11 @@
 open Stdbob
 open Prgrss
 
+let () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+(* XXX(dinosaure): if the receiver close abruptely the connection, a SIGPIPE
+   is raised by the system to our binary. We ignore that and prefer to get
+   the EPIPE error on the [write()] syscall. *)
+
 let compress_with_reporter quiet ~compression ~config store hashes =
   with_reporter ~config quiet
     (make_compression_progress ~total:(Pack.length store))
@@ -38,7 +43,7 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ~len:Transfer.max_data ?level
+  Pack.make_one ~len:Bob_unix.Crypto.max_packet ?level
     ~reporter:(Fiber.return <.> reporter)
     ~finalise path
   >>= function
@@ -55,7 +60,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       @@ fun (reporter, finalise) ->
       let open Fiber in
       let open Stream in
-      Stream.of_file ~len:Transfer.max_data path
+      Stream.of_file ~len:Bob_unix.Crypto.max_packet path
       >>| Result.get_ok
       >>= Transfer.transfer
             ~reporter:(Fiber.return <.> reporter)
@@ -81,7 +86,8 @@ let generate_pack_file quiet ~config ~g compression path =
         ~level:(if compression then 4 else 0)
         ~config store compressed
 
-let run_server quiet g dns compression addr secure_port password path =
+let run_server quiet g dns compression addr secure_port reproduce password path
+    =
   let open Fiber in
   (match addr with
   | `Inet (inet_addr, port) ->
@@ -109,7 +115,8 @@ let run_server quiet g dns compression addr secure_port password path =
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
   Fiber.connect socket sockaddr >>| reword_error (fun errno -> `Connect errno)
   >>? fun () ->
-  Bob_clear.server socket ~g ~secret >>? fun (identity, ciphers, shared_keys) ->
+  Bob_clear.server socket ~reproduce ~g secret
+  >>? fun (identity, ciphers, shared_keys) ->
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   transfer_with_reporter quiet ~config ~identity ~ciphers:(flip ciphers)
     ~shared_keys:(flip shared_keys) sockaddr pack
@@ -121,10 +128,12 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run () dns compression addr secure_port (quiet, g, password) path =
+let run () dns compression addr secure_port reproduce (quiet, g, password) path
+    =
   match
     Fiber.run
-      (run_server quiet g dns compression addr secure_port password path)
+      (run_server quiet g dns compression addr secure_port reproduce password
+         path)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -171,6 +180,6 @@ let cmd =
     Term.(
       ret
         (const run $ term_setup_temp $ term_setup_dns $ compression $ relay
-       $ secure_port
+       $ secure_port $ reproduce
         $ term_setup_password password
         $ path))

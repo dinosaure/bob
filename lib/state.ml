@@ -323,6 +323,7 @@ module Server = struct
     g : Random.State.t;
     mutable shared_keys : (int * Spoke.shared_keys) option;
     queue : server send Queue.t;
+    reproduce : bool;
   }
 
   let next_packet t =
@@ -331,7 +332,7 @@ module Server = struct
     | Send_to (Relay, packet) -> Some (000, packet_to_raw packet)
     | exception _ -> None
 
-  let hello ~g ~secret =
+  let hello ?(reproduce = false) ~g secret =
     let t =
       {
         secret;
@@ -340,6 +341,7 @@ module Server = struct
         g;
         shared_keys = None;
         queue = Queue.create ();
+        reproduce;
       }
     in
     let public = Spoke.public_of_secret secret in
@@ -371,9 +373,13 @@ module Server = struct
         t.identity <- identity;
         `Continue
     | Peer (Client, uid), X_and_client_identity { _X; identity } -> (
+        let identities =
+          match t.reproduce with
+          | true -> ("foo", "bar")
+          | false -> (identity, t.identity)
+        in
         match
-          Spoke.server_compute ~g:t.g ~secret:t.secret
-            ~identity:(identity, t.identity) _X
+          Spoke.server_compute ~g:t.g ~secret:t.secret ~identity:identities _X
         with
         | Ok (state, (_Y, server_validator)) ->
             Hashtbl.add t.clients uid (state, identity);
@@ -433,6 +439,7 @@ module Client = struct
     mutable server_identity : string option;
     g : Random.State.t;
     queue : client send Queue.t;
+    reproduce : bool;
   }
 
   let next_packet t =
@@ -441,7 +448,7 @@ module Client = struct
     | Send_to (Relay, packet) -> Some (000, packet_to_raw packet)
     | exception _ -> None
 
-  let hello ~g ~password ~identity =
+  let hello ?(reproduce = false) ~g ~identity password =
     let queue = Queue.create () in
     send_to to_relay Hello_as_a_client queue;
     {
@@ -452,6 +459,7 @@ module Client = struct
       g;
       servers = Hashtbl.create 0x10;
       queue;
+      reproduce;
     }
 
   let accept t =
@@ -541,8 +549,13 @@ module Client = struct
             send_to to_relay err t.queue;
             `Continue
         | Some (client, identity) -> (
+            let identities =
+              match t.reproduce with
+              | true -> ("foo", "bar")
+              | false -> (t.identity, identity)
+            in
             match
-              Spoke.client_compute ~client ~identity:(t.identity, identity) _Y
+              Spoke.client_compute ~client ~identity:identities _Y
                 server_validator
             with
             | Ok (sk, client_validator) ->
