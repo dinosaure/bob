@@ -17,32 +17,32 @@ run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
   "ocaml"          { build & >= "4.13.0" & < "5.0.0" }
-  "dune"           { ?monorepo & >= "2.8.0" }
-  "fmt"            { ?monorepo & >= "0.9.0" }
-  "hxd"            { ?monorepo & >= "0.3.2" }
-  "logs"           { ?monorepo & >= "0.7.0" }
-  "bheap"          { ?monorepo & >= "2.0.0" }
-  "base64"         { ?monorepo & >= "3.5.0" }
-  "decompress"     { ?monorepo & >= "1.5.1" }
-  "digestif"       { ?monorepo & >= "1.1.3" }
+  "dune"           { >= "2.8.0" }
+  "fmt"            { >= "0.9.0" }
+  "hxd"            { >= "0.3.2" }
+  "logs"           { >= "0.7.0" }
+  "bheap"          { >= "2.0.0" }
+  "base64"         { >= "3.5.0" }
+  "decompress"     { >= "1.5.1" }
+  "digestif"       { >= "1.1.3" }
   "opam-monorepo"  { build }
   "esperanto"      { build }
   "ocamlfind"      { build }
-  "bigstringaf"    { ?monorepo }
-  "cmdliner"       { ?monorepo }
-  "ipaddr"         { ?monorepo }
-  "mirage-crypto"  { ?monorepo }
-  "psq"            { ?monorepo }
-  "lru"            { ?monorepo & >= "0.3.1" }
-  "tls"            { ?monorepo }
-  "carton"         { ?monorepo & >= "0.5.0" }
-  "progress"       { ?monorepo }
-  "dns-client"     { ?monorepo }
-  "happy-eyeballs" { ?monorepo & >= "0.4.0" & < "0.5.0" }
-  "ca-certs"       { ?monorepo }
-  "ke"             { ?monorepo & >= "0.6" }
+  "bigstringaf"
+  "cmdliner"
+  "ipaddr"
+  "mirage-crypto"
+  "psq"
+  "lru"            { >= "0.3.1" }
+  "tls"
+  "carton"         { >= "0.5.0" }
+  "progress"
+  "dns-client"
+  "happy-eyeballs" { >= "0.4.0" & < "0.5.0" }
+  "ca-certs"
+  "ke"             { >= "0.6" }
   "alcotest"       { with-test }
-  "spoke"          { ?monorepo }
+  "spoke"
 ]
 
 pin-depends: [
