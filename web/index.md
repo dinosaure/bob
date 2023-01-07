@@ -488,9 +488,9 @@ $ iptables -A FORWARD -o service -j BOB
 $ iptables -t nat -N BOB
 $ iptables -t nat -A PREROUTING -m addrtype --dst-type LOCAL -j BOB
 $ iptables -t nat -A BOB ! -s 10.0.0.2/32 \
-    -p tcp -m tcp --dport 9000 =j DNAT --to-destination 10.0.0.2:9000
+    -p tcp -m tcp --dport 9000 -j DNAT --to-destination 10.0.0.2:9000
 $ iptables -t nat -A BOB ! -s 10.0.0.2/32 \
-    -p tcp -m tcp --dport 9001 =j DNAT --to-destination 10.0.0.2:9001
+    -p tcp -m tcp --dport 9001 -j DNAT --to-destination 10.0.0.2:9001
 ```
 
 This deployment method is typical of deploying a unikernel on a machine that has
