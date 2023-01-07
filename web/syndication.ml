@@ -119,10 +119,14 @@ let feed g =
       Syndic.Date.epoch entries
   in
   let id = generate_id g in
-  Syndic.Atom.feed
-    ~title:
-      (Text "B·o·B, an universal & secure peer-to-peer file-transfer in OCaml")
-    ~generator ~authors ~id ~updated ~links entries
+  let title =
+    let of_markdown str : Syndic.Atom.title =
+      Syndic.Atom.Html (None, Omd.to_html (Omd.of_string str))
+    in
+    of_markdown
+      {markdown|"B·o·B, an universal & secure peer-to-peer file-transfer in OCaml"|markdown}
+  in
+  Syndic.Atom.feed ~title ~generator ~authors ~id ~updated ~links entries
 
 let to_int_array str =
   let res = Array.make (String.length str / 2) 0 in
