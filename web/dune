@@ -1,4 +1,6 @@
 (executable
  (name syndication)
  (modules syndication)
+ (public_name bob.feed)
+ (package bob-web)
  (libraries omd fmt uuidm base64 syndic))
