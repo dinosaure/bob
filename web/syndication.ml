@@ -90,6 +90,28 @@ https://builds.osau.re/job/bob/build/latest/f/bin/bob.com|markdown}
     ~categories:Category.[ bugfix; relay ]
     ~id ()
 
+let entry_2023_01_18 g =
+  let id = generate_id g in
+  let updated = Syndic.Date.of_rfc3339 "2023-01-18 14:00:00+01:00" in
+  let content =
+    of_markdown
+      {markdown|New version of Esperanto (0.0.2)
+
+I finally took the time to update Esperanto to finally use Cosmopolitan v2.2.
+This version of Esperanto produces the `threads.cmxa` required for libraries
+like `lwt`. As far as Bob is concerned, this should not change anything in its
+behaviour but this version change integrates the various bugs fixed by Justine
+(Cosmopolitan's author) as well as the support of OCaml 4.14.1.
+
+The link to download Bob on the website does not ensure reproducibility with
+previous versions. However, there should be no problem with the compatibility
+between the old versions of Bob and the new one.|markdown}
+  in
+  Syndic.Atom.entry
+    ~authors:Person.(romain_calascibetta, [])
+    ~title:(Text "Bob compiled with a new version of Esperanto (0.0.2)")
+    ~updated ~published:updated ~content ~id ()
+
 let generator = Syndic.Atom.generator ~version:"1.6.1" "Syndic"
 
 let feed g =
@@ -100,7 +122,9 @@ let feed g =
     ]
   in
   let entries =
-    List.map (fun entry -> entry g) [ entry_2022_12_14_0; entry_2022_12_14_1 ]
+    List.map
+      (fun entry -> entry g)
+      [ entry_2022_12_14_0; entry_2022_12_14_1; entry_2023_01_18 ]
   in
   let authors =
     List.fold_left
