@@ -16,33 +16,34 @@ install: [
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 
 depends: [
-  "ocaml"          { build & >= "4.13.0" & < "5.0.0" }
-  "dune"           { >= "2.8.0" }
-  "fmt"            { >= "0.9.0" }
-  "hxd"            { >= "0.3.2" }
-  "logs"           { >= "0.7.0" }
-  "bheap"          { >= "2.0.0" }
-  "base64"         { >= "3.5.0" }
-  "decompress"     { >= "1.5.1" }
-  "digestif"       { >= "1.1.3" }
-  "opam-monorepo"  { build }
-  "esperanto"      { build }
-  "ocamlfind"      { build }
+  "ocaml"             { build & >= "4.13.0" & < "5.0.0" }
+  "dune"              { >= "2.8.0" }
+  "fmt"               { >= "0.9.0" }
+  "hxd"               { >= "0.3.2" }
+  "logs"              { >= "0.7.0" }
+  "bheap"             { >= "2.0.0" }
+  "base64"            { >= "3.5.0" }
+  "decompress"        { >= "1.5.1" }
+  "digestif"          { >= "1.1.3" }
+  "opam-monorepo"     { build }
+  "esperanto"         { build }
+  "ocamlfind"         { build }
   "bigstringaf"
   "cmdliner"
   "ipaddr"
   "mirage-crypto"
+  "mirage-crypto-rng" { >= "0.11.0" }
   "psq"
-  "lru"            { >= "0.3.1" }
+  "lru"               { >= "0.3.1" }
   "tls"
-  "carton"         { >= "0.5.0" }
+  "carton"            { >= "0.5.0" }
   "progress"
   "dns-client"
-  "happy-eyeballs" { >= "0.4.0" & < "0.5.0" }
+  "happy-eyeballs"    { >= "0.4.0" & < "0.5.0" }
   "ca-certs"
-  "ke"             { >= "0.6" }
-  "alcotest"       { with-test }
-  "spoke"
+  "ke"                { >= "0.6" }
+  "alcotest"          { with-test }
+  "spoke"             { >= "0.0.2" }
 ]
 
 pin-depends: [

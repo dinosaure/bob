@@ -23,14 +23,7 @@ type 'k cipher_block = (module CIPHER_BLOCK with type key = 'k)
 
 let module_of : type k. k Spoke.aead -> k cipher_block = function
   | Spoke.GCM -> (module Mirage_crypto.Cipher_block.AES.GCM)
-  | Spoke.CCM ->
-      let module M = struct
-        include Mirage_crypto.Cipher_block.AES.CCM
-
-        let of_secret = of_secret ~maclen:16
-        let tag_size = 16
-      end in
-      (module M)
+  | Spoke.CCM16 -> (module Mirage_crypto.Cipher_block.AES.CCM16)
   | Spoke.ChaCha20_Poly1305 ->
       let module M = struct
         include Mirage_crypto.Chacha20
