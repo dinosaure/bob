@@ -15,7 +15,7 @@ run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
 depends: [
   "ocaml"          {>= "4.13.0"}
   "dune"           {>= "2.8.0"}
-  "syndic"
+  "syndic"         {>= "1.6.0"}
   "uuidm"
   "omd"
 ]
