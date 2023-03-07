@@ -17,7 +17,8 @@ jobs:
       run: sudo sh -c "echo ':APE:M::MZqFpD::/bin/sh:' >/proc/sys/fs/binfmt_misc/register"
     - name: Pin & Install workflows
       run: |
-        opam install esperanto-cosmopolitan esperanto ocamlfind opam-monorepo
+        opam pin add git+https://github.com/dinosaure/esperanto.git
+        opam install ocamlfind opam-monorepo
         opam repo add upstream git+https://github.com/ocaml/opam-repository.git
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
