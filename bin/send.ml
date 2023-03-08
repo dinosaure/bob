@@ -94,39 +94,18 @@ let better_to_compress_for mime_type =
 
 let run_server quiet g dns mime_type compression addr secure_port reproduce
     password path =
-  let open Fiber in
   let compression =
     match (mime_type, compression) with
     | None, None -> true
     | Some mime_type, None -> better_to_compress_for mime_type
     | _, Some v -> v
   in
-  (match addr with
-  | `Inet (inet_addr, port) ->
-      Fiber.return (Ok (Unix.ADDR_INET (inet_addr, port)))
-  | `Domain (domain_name, port) -> (
-      Bob_dns.gethostbyname6 dns domain_name >>= function
-      | Ok ip6 ->
-          Fiber.return
-            (Ok
-               (Unix.ADDR_INET (Ipaddr_unix.to_inet_addr (Ipaddr.V6 ip6), port)))
-      | Error _ -> (
-          Bob_dns.gethostbyname dns domain_name >>= function
-          | Ok ip4 ->
-              Fiber.return
-                (Ok
-                   (Unix.ADDR_INET
-                      (Ipaddr_unix.to_inet_addr (Ipaddr.V4 ip4), port)))
-          | Error _ as err -> Fiber.return err)))
-  >>? fun sockaddr ->
-  let domain = Unix.domain_of_sockaddr sockaddr in
-  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM 0 in
-  let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
+  let happy_eyeballs = Bob_happy_eyeballs.create ~dns () in
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
+  let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
   let open Fiber in
+  Bob_happy_eyeballs.connect happy_eyeballs addr >>? fun (sockaddr, socket) ->
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
-  Fiber.connect socket sockaddr >>| reword_error (fun errno -> `Connect errno)
-  >>? fun () ->
   Bob_clear.server socket ~reproduce ~g secret
   >>? fun (identity, ciphers, shared_keys) ->
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
@@ -135,7 +114,6 @@ let run_server quiet g dns mime_type compression addr secure_port reproduce
   >>| Transfer.open_error
 
 let pp_error ppf = function
-  | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err

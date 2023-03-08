@@ -51,7 +51,8 @@
   bob.unix
   bob.pack
   bob.tls
-  bob.dns))
+  bob.dns
+  bob.happy-eyeballs))
 
 ; (rule
 ;  (target cat.com)

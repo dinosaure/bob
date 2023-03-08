@@ -88,6 +88,12 @@
   happy-eyeballs))
 
 (library
+ (name bob_happy_eyeballs)
+ (public_name bob.happy-eyeballs)
+ (modules bob_happy_eyeballs)
+ (libraries bob.fiber bob.dns))
+
+(library
  (name bob_tls)
  (public_name bob.tls)
  (modules bob_tls)
