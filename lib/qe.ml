@@ -65,18 +65,18 @@ let compress t =
      In our case and according to [Stdbob], it's a [memcpy], the overlap
      is not handled so. *)
   (if len1 > 0 then (
-   let buffer' =
-     Bigarray.Array1.create Bigarray.char Bigarray.c_layout t.capacity
-   in
-   bigstring_blit t.buffer ~src_off:rd_cursor buffer' ~dst_off:0 ~len:len0;
-   bigstring_blit t.buffer ~src_off:0 buffer' ~dst_off:len0 ~len:len1;
-   t.buffer <- buffer')
-  else
-    let buffer' =
-      Bigarray.Array1.create Bigarray.char Bigarray.c_layout t.capacity
-    in
-    bigstring_blit t.buffer ~src_off:rd_cursor buffer' ~dst_off:0 ~len:len0;
-    t.buffer <- buffer');
+     let buffer' =
+       Bigarray.Array1.create Bigarray.char Bigarray.c_layout t.capacity
+     in
+     bigstring_blit t.buffer ~src_off:rd_cursor buffer' ~dst_off:0 ~len:len0;
+     bigstring_blit t.buffer ~src_off:0 buffer' ~dst_off:len0 ~len:len1;
+     t.buffer <- buffer')
+   else
+     let buffer' =
+       Bigarray.Array1.create Bigarray.char Bigarray.c_layout t.capacity
+     in
+     bigstring_blit t.buffer ~src_off:rd_cursor buffer' ~dst_off:0 ~len:len0;
+     t.buffer <- buffer');
   t.rd_cursor <- 0;
   t.wr_cursor <- size
 
