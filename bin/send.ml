@@ -156,7 +156,11 @@ open Cmdliner
 open Args
 
 let mime_type =
-  let doc = "The MIME type of the document." in
+  let doc =
+    "The MIME type of the document. You can use the $(b,file) command to \
+     recognize the MIME type of a document. If the document is recognized as a \
+     video, an audio or an image, we will disable the compression."
+  in
   Arg.(
     value
     & opt (some string) None
