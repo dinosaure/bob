@@ -86,9 +86,21 @@ let generate_pack_file quiet ~config ~g compression path =
         ~level:(if compression then 4 else 0)
         ~config store compressed
 
-let run_server quiet g dns compression addr secure_port reproduce password path
-    =
+(* XXX(dinosaure): we don't want to compress for video, audio and image. *)
+let better_to_compress_for mime_type =
+  match String.split_on_char '/' mime_type with
+  | "video" :: _ | "audio" :: _ | "image" :: _ -> false
+  | _ -> true
+
+let run_server quiet g dns mime_type compression addr secure_port reproduce
+    password path =
   let open Fiber in
+  let compression =
+    match (mime_type, compression) with
+    | None, None -> true
+    | Some mime_type, None -> better_to_compress_for mime_type
+    | _, Some v -> v
+  in
   (match addr with
   | `Inet (inet_addr, port) ->
       Fiber.return (Ok (Unix.ADDR_INET (inet_addr, port)))
@@ -128,12 +140,12 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run () dns compression addr secure_port reproduce (quiet, g, password) path
-    =
+let run () dns mime_type compression addr secure_port reproduce
+    (quiet, g, password) path =
   match
     Fiber.run
-      (run_server quiet g dns compression addr secure_port reproduce password
-         path)
+      (run_server quiet g dns mime_type compression addr secure_port reproduce
+         password path)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -142,6 +154,13 @@ let run () dns compression addr secure_port reproduce (quiet, g, password) path
 
 open Cmdliner
 open Args
+
+let mime_type =
+  let doc = "The MIME type of the document." in
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "mime-type" ] ~doc ~docv:"<mime-type>")
 
 let password =
   let doc = "The password to share." in
@@ -179,7 +198,7 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ term_setup_temp $ term_setup_dns $ compression $ relay
-       $ secure_port $ reproduce
+        (const run $ term_setup_temp $ term_setup_dns $ mime_type $ compression
+       $ relay $ secure_port $ reproduce
         $ term_setup_password password
         $ path))

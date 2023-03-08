@@ -283,10 +283,10 @@ let term_setup_dns = Term.(const setup_dns $ nameservers)
 let compression =
   Arg.(
     value
-    & vflag true
+    & vflag None
         [
-          (true, info [ "compress" ] ~doc:"Explicitly compress objects.");
-          ( false,
+          (Some true, info [ "compress" ] ~doc:"Explicitly compress objects.");
+          ( Some false,
             info [ "no-compression" ]
               ~doc:
                 "Explicitly store objects as they are (useful for video/image)."
