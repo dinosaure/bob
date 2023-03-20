@@ -55,7 +55,7 @@ let xor src dst =
 
 let xor a b =
   let len = min (Cstruct.length a) (Cstruct.length b) in
-  let res = Cstruct.of_string (Cstruct.copy b 0 len) in
+  let res = Cstruct.of_string (Cstruct.to_string b ~off:0 ~len) in
   xor a res;
   res
 
