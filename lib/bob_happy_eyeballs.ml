@@ -65,7 +65,14 @@ let rec act t action =
               Fiber.return
                 (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
           | None -> Fiber.close fd >>= fun () -> Fiber.return (Error ()))
-      | Error (`Unix _err) -> assert false
+      | Error (`Unix err) ->
+          Log.warn (fun m ->
+              m "Got an error when we tried to connect to %a:%d: %s" Ipaddr.pp
+                ip port (Unix.error_message err));
+          Fiber.return
+            (Ok
+               (Happy_eyeballs.Connection_failed
+                  (host, id, (ip, port), Unix.error_message err)))
       | Error (`Msg msg) ->
           Fiber.return
             (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg))))
