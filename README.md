@@ -143,7 +143,7 @@ type ('from, 'to) packet =
 This does not mean that we cannot receive a packet from a sender to a sender,
 but we can (and should) elimimate such cases upstream of the state machine.
 Another property is that we cannot, in OCaml and in this state machine,
-explicitely send a packet to a sender if we are recognizsed as a sender.
+explicitely send a packet to a sender if we are recognised as a sender.
 
 #### Unikernels and [MirageOS][mirage]
 
@@ -215,9 +215,9 @@ $ iptables -A FORWARD -o service -j BOB
 $ iptables -t nat -N BOB
 $ iptables -t nat -A PREROUTING -m addrtype --dst-type LOCAL -j BOB
 $ iptables -t nat -A BOB ! -s 10.0.0.2/32 \
-    -p tcp -m tcp --dport 9000 =j DNAT --to-destination 10.0.0.2:9000
+    -p tcp -m tcp --dport 9000 -j DNAT --to-destination 10.0.0.2:9000
 $ iptables -t nat -A BOB ! -s 10.0.0.2/32 \
-    -p tcp -m tcp --dport 9001 =j DNAT --to-destination 10.0.0.2:9000
+    -p tcp -m tcp --dport 9001 -j DNAT --to-destination 10.0.0.2:9000
 ```
 
 ##### Launch the unikernel
@@ -252,8 +252,7 @@ software every day.
 Currently, the `bob` executable can be compiled with the `esperanto` toolchain.
 By this way, we are able to deliver a `bob.com` which works _anywhere_. The
 status of it is experimental. However, few tweak on some libraries (specially
-`mirage-crypto` and `digestif`) are needed to be able to compile `bob`
-with this _toolchain_.
+`mirage-crypto`) are needed to be able to compile `bob` with this _toolchain_.
 
 The final executable, the `bob.com` seems to work on PowerShell (Windows) and
 obviously Linux.
