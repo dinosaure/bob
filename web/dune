@@ -3,4 +3,4 @@
  (modules syndication)
  (public_name bob.feed)
  (package bob-web)
- (libraries omd fmt uuidm base64 syndic))
+ (libraries cmarkit fmt uuidm base64 syndic))
