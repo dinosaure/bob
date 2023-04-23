@@ -203,8 +203,9 @@ The software is available here
 <img style="width: 20px;" height="20" src="https://worker.jart.workers.dev/redbean/freebsd64.png" alt="freebsd" />
 <img style="width: 22px;" height="20" src="https://worker.jart.workers.dev/redbean/openbsd.png" alt="openbsd" />
 <img style="width: 20px;" height="20" src="https://worker.jart.workers.dev/redbean/netbsd2.png" alt="netbsd" />:
-[bob.com (x86\_64)][bob-com]
+[bob.com][bob-com]
 
+The program is even portable for `x86_64` or `arm64` processors.
 You can follow the project via [this Atom feed][feed].
 
 <ol class="terminal-toc">
@@ -653,7 +654,7 @@ follow the steps to build Bob from a "context" described
 
 This method allows us to build a relationship of trust between you and us.
 
-**Q**: If I find a bug, what is the best way to help?
+**Q**: If I find a bug, what is the best way to help? \
 **A**: Bob has some options for giving information that can really help
 developers. The first is the `-vvv` option which displays Bob's _debug_
 information. The second is `--seed` (which expects a value in Base64 form) which
@@ -666,10 +667,14 @@ Bob's operation can be an important attack beam, it is only for debugging.
 Finally, the `--reproduce` option must be used on both sides (of the sender and
 receiver). The seed used must also be the same on both sides.
 
-**Q**: What is the best way to follow the project?
+**Q**: What is the best way to follow the project? \
 **A**: We offer an [Atom feed][feed] on our website that keeps you informed of
 all the progress and changes on our relay. For a more detailed tracking, we
 advise you to follow our [GitHub repository][github-repository].
+
+**Q**: My computer has an ARM-64 processor (like a Mac M1), can I run Bob? \
+**A**: Yes, Bob integrates a mini `x86_64` emulator which is able to run the
+program on a ARM-64 processor. Bob is **actually** portable!
 
 ## Manifest
 

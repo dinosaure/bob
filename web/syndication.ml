@@ -15,7 +15,9 @@ let generate_id g =
   let v = Uuidm.v4_gen g () in
   Uri.of_string (Fmt.str "urn:uuid:%s" (Uuidm.to_string v))
 
-let of_markdown str = Syndic.Atom.Html (None, Omd.to_html (Omd.of_string str))
+let of_markdown str =
+  let doc = Cmarkit.Doc.of_string str in
+  Syndic.Atom.Html (None, Cmarkit_html.of_doc ~safe:true doc)
 
 let entry_2022_12_14_0 g =
   let id = generate_id g in
@@ -112,6 +114,26 @@ between the old versions of Bob and the new one.|markdown}
     ~title:(Text "Bob compiled with a new version of Esperanto (0.0.2)")
     ~updated ~published:updated ~content ~id ()
 
+let entry_2023_28_04 g =
+  let id = generate_id g in
+  let updated = Syndic.Date.of_rfc3339 "2023-04-28 14:00:00+01:00" in
+  let content =
+    of_markdown
+      {markdown|Esperanto 0.0.3 and portability
+
+The latest version of Esperanto includes a major new change regarding Bob's
+portability. It is now possible to run Bob on arm64/aarch64 computers.
+Cosmopolitan now statically integrates a tool, blink, which allows to virtualise
+the executable on such platforms "à la qemu". This means that Bob is now
+**really** portable to all platforms.
+
+The website will be updated accordingly.|markdown}
+  in
+  Syndic.Atom.entry
+    ~authors:Person.(romain_calascibetta, [])
+    ~title:(Text "Esperanto 0.0.3 and portability") ~updated ~published:updated
+    ~content ~id ()
+
 let generator = Syndic.Atom.generator ~version:"1.6.1" "Syndic"
 
 let feed g =
@@ -124,7 +146,12 @@ let feed g =
   let entries =
     List.map
       (fun entry -> entry g)
-      [ entry_2022_12_14_0; entry_2022_12_14_1; entry_2023_01_18 ]
+      [
+        entry_2022_12_14_0;
+        entry_2022_12_14_1;
+        entry_2023_01_18;
+        entry_2023_28_04;
+      ]
   in
   let authors =
     List.fold_left
@@ -145,7 +172,8 @@ let feed g =
   let id = generate_id g in
   let title =
     let of_markdown str : Syndic.Atom.title =
-      Syndic.Atom.Html (None, Omd.to_html (Omd.of_string str))
+      let doc = Cmarkit.Doc.of_string str in
+      Syndic.Atom.Html (None, Cmarkit_html.of_doc ~safe:true doc)
     in
     of_markdown
       {markdown|"B·o·B, an universal & secure peer-to-peer file-transfer in OCaml"|markdown}
