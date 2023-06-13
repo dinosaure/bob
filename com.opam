@@ -52,6 +52,7 @@ pin-depends: [
   [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
   [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
   [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
+  [ "mtime.dev" "git+https://github.com/dinosaure/mtime.git#d5d70f38c40da90e3e173eb60346df55b64a4a0a"]
 ]
 
 x-mirage-opam-lock-location: "com.opam.locked"
