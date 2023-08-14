@@ -6,6 +6,12 @@ let choose = function
   | false ->
       let open Fiber in
       fun identity ->
+        let human_readable_identity =
+          Password.identity_of_seed
+            (Password.compile Dict.En.words)
+            ~seed:identity
+          |> Result.get_ok
+        in
         let rec asking () =
           Fiber.getline Unix.stdin >>| Stdlib.Option.map String.lowercase_ascii
           >>= function
@@ -15,7 +21,7 @@ let choose = function
               Fmt.pr "Invalid response, accept from %s [Y/n]: %!" identity;
               asking ()
         in
-        Fmt.pr "Accept from %s [Y/n]: %!" identity;
+        Fmt.pr "Accept from %s [Y/n]: %!" human_readable_identity;
         asking ()
 
 let ask_password () =

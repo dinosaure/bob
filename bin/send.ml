@@ -105,7 +105,17 @@ let run_server quiet g (_, he) mime_type compression addr secure_port reproduce
   let open Fiber in
   Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
-  Bob_clear.server socket ~reproduce ~g secret
+  let identity =
+    if quiet then Fun.const (Fiber.return ())
+    else fun seed ->
+      let identity =
+        Password.identity_of_seed (Password.compile Dict.En.words) ~seed
+        |> Result.get_ok
+      in
+      Fmt.pr "%s\rIdentity: %s\n%!" Terminal.Ansi.erase_line identity;
+      Fiber.return ()
+  in
+  Bob_clear.server socket ~reproduce ~g ~identity secret
   >>? fun (identity, ciphers, shared_keys) ->
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   transfer_with_reporter quiet ~config ~identity ~ciphers:(flip ciphers)
