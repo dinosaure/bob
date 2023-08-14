@@ -86,3 +86,14 @@ let generate ?g (starters, wordparts) length =
     | None -> ()
   done;
   Buffer.contents buf
+
+let identity_of_seed ~seed t =
+  match Base64.decode seed with
+  | Ok seed ->
+      let arr =
+        Array.init (String.length seed) (fun idx -> Char.code seed.[idx])
+      in
+      let g = Random.State.make arr in
+      let ps = Array.init 2 (fun _ -> generate ~g t (Random.State.int g 5)) in
+      Ok (Fmt.str "%s-%s" ps.(0) ps.(1))
+  | Error _ as err -> err
