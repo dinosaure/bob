@@ -52,6 +52,7 @@ depends: [
   "ke"                     { >= "0.6" }
   "alcotest"               { with-test }
   "spoke"                  { >= "0.0.2" }
+  "socks"
 ]
 
 pin-depends: [
@@ -61,6 +62,7 @@ pin-depends: [
   [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#83b160823cc601ffb19f8be2e32d643ffcbea60d" ]
   [ "mtime.dev" "git+https://github.com/dinosaure/mtime.git#d5d70f38c40da90e3e173eb60346df55b64a4a0a" ]
   [ "gmp.dev" "git+https://github.com/mirage/ocaml-gmp.git#90c7941b3b2649c19f2596538417e5ce1df61b9d" ]
+  [ "socks.dev" "git+https://github.com/dinosaure/ocaml-socks.git#31399dab6812cb3fbf28b9eea5c5e4a3939abe4b" ]
 ]
 
 x-mirage-opam-lock-location: "com.opam.locked"

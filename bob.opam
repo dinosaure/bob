@@ -38,4 +38,9 @@ depends: [
   "ke"                {>= "0.6"}
   "alcotest"          {with-test}
   "spoke"             {>= "0.0.2"}
+  "socks"
+]
+
+pin-depends: [
+  [ "socks.dev" "git+https://github.com/dinosaure/ocaml-socks.git#31399dab6812cb3fbf28b9eea5c5e4a3939abe4b" ]
 ]

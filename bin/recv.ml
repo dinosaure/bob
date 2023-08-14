@@ -229,14 +229,17 @@ let extract_with_reporter quiet ~config ?g
                 name Bob_fpath.pp destination);
           unpack_with_reporter quiet ~config ~total pack destination hash)
 
-let run_client quiet g (_, he) addr secure_port reproduce password yes
+let run_client quiet g (_, he) through addr secure_port reproduce password yes
     destination =
   let open Fiber in
   (match password with
   | Some password -> Fiber.return password
   | None -> ask_password ())
   >>= fun password ->
-  Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
+  (match through with
+  | Some server -> Bob_socks.connect ~happy_eyeballs:he ~server addr
+  | None -> Bob_happy_eyeballs.connect he addr)
+  >>? fun (sockaddr, socket) ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in
   Bob_clear.client socket ~reproduce ~choose ~g password
@@ -255,10 +258,12 @@ let pp_error ppf = function
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run quiet g () dns_and_he addr secure_port reproduce password yes dst =
+let run quiet g () dns_and_he through addr secure_port reproduce password yes
+    dst =
   match
     Fiber.run
-      (run_client quiet g dns_and_he addr secure_port reproduce password yes dst)
+      (run_client quiet g dns_and_he through addr secure_port reproduce password
+         yes dst)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -276,8 +281,8 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ relay $ secure_port $ reproduce $ password $ yes
-     $ destination))
+     $ term_setup_dns $ through $ relay $ secure_port $ reproduce $ password
+     $ yes $ destination))
 
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in
