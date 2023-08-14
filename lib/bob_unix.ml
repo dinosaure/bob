@@ -91,7 +91,7 @@ module Make (IO : IO) = struct
 
   type outcome = [ `Write of string | `Error of error | `Done | `Continue ]
 
-  let run ~choose ~agreement ~receive ~send socket t =
+  let run ~choose ~agreement ?identity ~receive ~send socket t =
     let handshake_is_done : [ `Done ] Fiber.Ivar.t = Fiber.Ivar.create () in
     let errored : [ `Error of error ] Fiber.Ivar.t = Fiber.Ivar.create () in
     let rec read () =
@@ -108,6 +108,11 @@ module Make (IO : IO) = struct
           Log.debug (fun m -> m "recv <- %a" pp_data data);
           match receive t data with
           | `Continue | `Read -> Fiber.pause () >>= read
+          | `Identity str ->
+              (match identity with
+              | Some fn -> fn str
+              | None -> Fiber.return ())
+              >>= read
           | `Agreement identity ->
               choose identity >>= fun v ->
               agreement t v;
@@ -176,22 +181,30 @@ module Make (IO : IO) = struct
 
   let open_error = function Ok _ as v -> v | Error #error as v -> v
 
-  let server socket ?reproduce ~g secret =
+  let server socket ?reproduce ~g ?identity secret =
     let t = Bob.Server.hello ?reproduce ~g secret in
     let choose _ = assert false in
     let agreement _ = assert false in
-    run ~choose ~agreement ~receive:Bob.Server.receive ~send:Bob.Server.send
-      socket t
+    run ~choose ~agreement ~receive:Bob.Server.receive ?identity
+      ~send:Bob.Server.send socket t
     >>| open_error
 
-  let client socket ?reproduce ~choose ~g password =
-    let identity = Unix.gethostname () in
-    let t = Bob.Client.make ?reproduce ~g ~identity password in
-    run ~choose ~agreement:Bob.Client.agreement ~receive:Bob.Client.receive
-      ~send:Bob.Client.send socket t
+  let client socket ?reproduce ~choose ~g ?identity password =
+    let hostname = Unix.gethostname () in
+    (* TODO(dinosaure): delete [identity]. *)
+    let t = Bob.Client.make ?reproduce ~g ~identity:hostname password in
+    run ~choose ~agreement:Bob.Client.agreement ?identity
+      ~receive:Bob.Client.receive ~send:Bob.Client.send socket t
     >>| open_error
 
-  let relay ?(timeout = 3600.) socket rooms ~stop =
+  let generate_identity ~g =
+    let res = Bytes.make 16 '\000' in
+    for i = 0 to 15 do
+      Bytes.set res i (Char.unsafe_chr (Random.State.int g 256))
+    done;
+    Base64.encode_exn (Bytes.unsafe_to_string res)
+
+  let relay ~g ?(timeout = 3600.) socket rooms ~stop =
     let t = Bob.Relay.make () in
     let fds = Hashtbl.create 0x100 in
     let rec write () =
@@ -277,8 +290,14 @@ module Make (IO : IO) = struct
             fds;
           Fiber.pause () >>= read
     in
-    let handler fd sockaddr =
-      let identity = Fmt.str "%a" pp_sockaddr sockaddr in
+    let handler fd _sockaddr =
+      let identity =
+        let rec go () =
+          let str = generate_identity ~g in
+          if Hashtbl.mem fds str then go () else str
+        in
+        go ()
+      in
       Log.debug (fun m -> m "Add %s as an active connection." identity);
       IO.of_file_descr fd >>= function
       | Error err ->
@@ -355,9 +374,14 @@ let rec loop ~timeout t ready queue state fd k =
   >>= function
   | `Closed | `Bounded _ -> Fiber.return ()
   | `Continue k -> loop t ~timeout ready queue state fd k
-  | `Error _ | `Invalid_peer ->
+  | (`Error _ | `Invalid_peer) as err ->
+      let err =
+        match err with
+        | `Error (`Rd err) -> Fmt.str "read(): %s" (Unix.error_message err)
+        | `Invalid_peer -> "Invalid peer"
+      in
       Log.err (fun m ->
-          m "Got an error from %a." pp_sockaddr (Unix.getpeername fd));
+          m "Got an error from %a: %s" pp_sockaddr (Unix.getpeername fd) err);
       if Fiber.Ivar.is_empty state then (
         Fiber.Ivar.fill state `Closed;
         full_write fd _02 ~off:0 ~len:2 >>= fun _ -> Fiber.close fd)

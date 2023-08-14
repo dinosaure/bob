@@ -10,10 +10,11 @@ module Server : sig
   val receive :
     t ->
     [ `End | `Data of string * int * int ] ->
-    [> `Continue
+    [ `Continue
     | `Read
     | `Close
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Identity of string
     | `Agreement of string
     | `Error of Handshake.error ]
 
@@ -29,10 +30,11 @@ module Client : sig
   val receive :
     t ->
     [ `End | `Data of string * int * int ] ->
-    [> `Continue
+    [ `Continue
     | `Read
     | `Close
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
+    | `Identity of string
     | `Agreement of string
     | `Error of Handshake.error ]
 
