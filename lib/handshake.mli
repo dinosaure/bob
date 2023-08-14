@@ -11,6 +11,7 @@ type error =
   | `Invalid_header
   | `Invalid_new_server
   | `Invalid_uid
+  | `Unexpected_packet
   | Spoke.error ]
 
 val pp_error : error Fmt.t
