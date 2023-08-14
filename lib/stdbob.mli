@@ -38,3 +38,4 @@ module LList : sig
 end
 
 val bytes_to_size : ?decimals:int -> int Fmt.t
+val cuts : sep:string -> string -> string list
