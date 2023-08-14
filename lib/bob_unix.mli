@@ -47,6 +47,7 @@ module Make (IO : IO) : sig
     IO.fd ->
     ?reproduce:bool ->
     g:Random.State.t ->
+    ?identity:(string -> unit Fiber.t) ->
     Spoke.secret ->
     ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
       [> error ] )
@@ -61,6 +62,7 @@ module Make (IO : IO) : sig
     ?reproduce:bool ->
     choose:(string -> [ `Accept | `Refuse ] Fiber.t) ->
     g:Random.State.t ->
+    ?identity:(string -> unit Fiber.t) ->
     string ->
     ( string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys,
       [> error ] )
@@ -72,12 +74,13 @@ module Make (IO : IO) : sig
       accept or refuse the peer found. *)
 
   val relay :
+    g:Random.State.t ->
     ?timeout:float ->
     Unix.file_descr ->
     Bob.Secured.t ->
     stop:unit Fiber.Ivar.t ->
     unit Fiber.t
-  (** [relay ?timeout socket room ~stop] launch a relay which can accept
+  (** [relay ~g ?timeout socket room ~stop] launch a relay which can accept
       connections from [socket]. The user can specify a [timeout] value (how
       long the relay can keep an active connection with a peer). If [stop] is
       filled, the relay terminates. The given [room] is filled by peers which
