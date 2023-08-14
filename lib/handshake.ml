@@ -77,6 +77,7 @@ type error =
   | `Invalid_header
   | `Invalid_new_server
   | `Invalid_uid
+  | `Unexpected_packet
   | Spoke.error ]
 
 let pp_error ppf = function
@@ -86,6 +87,7 @@ let pp_error ppf = function
   | `Invalid_header -> Fmt.pf ppf "Invalid header"
   | `Invalid_new_server -> Fmt.string ppf "Invalid new server"
   | `Invalid_uid -> Fmt.string ppf "Invalid UID"
+  | `Unexpected_packet -> Fmt.string ppf "Unexpected packet"
   | #Spoke.error as err -> Spoke.pp_error ppf err
 
 type 'a t =
