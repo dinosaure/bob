@@ -40,10 +40,11 @@ depends: [
   "alcotest"          {with-test}
   "spoke"             {>= "0.0.3"}
   "bstr"
+  "socks"
 ]
 
 pin-depends: [
-  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#eda61bb0c2671f3eaaac9f0f0ffa8423b3e63c98" ]
+  [ "socks.dev" "git+https://github.com/dinosaure/ocaml-socks.git#31399dab6812cb3fbf28b9eea5c5e4a3939abe4b" ]
 ]
 
 available: arch != "x86_32"
