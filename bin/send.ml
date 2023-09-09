@@ -51,9 +51,10 @@ let emit_one_with_reporter quiet ?level ~config path =
   | Ok stream -> Fiber.return (Stream stream)
 
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
-    sockaddr = function
+    ~happy_eyeballs ?through addr = function
   | Stream stream ->
-      Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
+      Transfer.transfer ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through
+        addr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
       with_reporter ~config quiet (make_tranfer_bar ~total)
@@ -64,7 +65,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       >>| Result.get_ok
       >>= Transfer.transfer
             ~reporter:(Fiber.return <.> reporter)
-            ~identity ~ciphers ~shared_keys sockaddr
+            ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through addr
       >>| fun res ->
       finalise ();
       res
@@ -106,7 +107,7 @@ let run_server quiet g (_, he) through mime_type compression addr secure_port
   (match through with
   | Some server -> Bob_socks.connect ~happy_eyeballs:he ~server addr
   | None -> Bob_happy_eyeballs.connect he addr)
-  >>? fun (sockaddr, socket) ->
+  >>? fun (_sockaddr, socket) ->
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
   let identity =
     if quiet then Fun.const (Fiber.return ())
@@ -120,9 +121,9 @@ let run_server quiet g (_, he) through mime_type compression addr secure_port
   in
   Bob_clear.server socket ~reproduce ~g ~identity secret
   >>? fun (identity, ciphers, shared_keys) ->
-  let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
+  let addr = Transfer.addr_with_secure_port addr secure_port in
   transfer_with_reporter quiet ~config ~identity ~ciphers:(flip ciphers)
-    ~shared_keys:(flip shared_keys) sockaddr pack
+    ~shared_keys:(flip shared_keys) ~happy_eyeballs:he ?through addr pack
   >>| Transfer.open_error
 
 let pp_error ppf = function

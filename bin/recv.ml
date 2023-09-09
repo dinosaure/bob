@@ -36,12 +36,13 @@ let ask_password () =
   Fmt.pr "Your password: %!";
   asking ()
 
-let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
-    : (Stdbob.bigstring Stream.source, _) result Fiber.t =
+let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
+    ~happy_eyeballs ?through addr :
+    (Stdbob.bigstring Stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   Transfer.receive
     ~reporter:(Fiber.return <.> reporter)
-    ~finalise ~identity ~ciphers ~shared_keys sockaddr
+    ~finalise ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through addr
 
 let make_window bits = De.make_window ~bits
 
@@ -239,14 +240,15 @@ let run_client quiet g (_, he) through addr secure_port reproduce password yes
   (match through with
   | Some server -> Bob_socks.connect ~happy_eyeballs:he ~server addr
   | None -> Bob_happy_eyeballs.connect he addr)
-  >>? fun (sockaddr, socket) ->
+  >>? fun (_sockaddr, socket) ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in
   Bob_clear.client socket ~reproduce ~choose ~g password
   >>? fun (identity, ciphers, shared_keys) ->
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
-  let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
-  source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
+  let addr = Transfer.addr_with_secure_port addr secure_port in
+  source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
+    ~happy_eyeballs:he ?through addr
   >>| Transfer.open_error
   >>? fun source -> extract_with_reporter quiet ~config ~g source destination
 

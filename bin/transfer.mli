@@ -1,7 +1,7 @@
 type error =
   [ Bob_unix.error
   | `Blocking_connect of Connect.error
-  | `Connect of Unix.error
+  | `Connect of [ `Closed | `Msg of string | `Unix of Unix.error ]
   | `Crypto of
     [ `Closed
     | `Corrupted
@@ -10,7 +10,7 @@ type error =
 
 val pp_error : error Fmt.t
 val open_error : ('a, error) result -> ('a, [> error ]) result
-val sockaddr_with_secure_port : Unix.sockaddr -> int -> Unix.sockaddr
+val addr_with_secure_port : Bob_socks.addr -> int -> Bob_socks.addr
 val max_packet : int
 
 val transfer :
@@ -19,7 +19,9 @@ val transfer :
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
-  Unix.sockaddr ->
+  happy_eyeballs:Bob_happy_eyeballs.t ->
+  ?through:Bob_socks.server ->
+  Bob_socks.addr ->
   Stdbob.bigstring Stream.stream ->
   (unit, error) result Fiber.t
 
@@ -29,5 +31,7 @@ val receive :
   identity:string ->
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
-  Unix.sockaddr ->
+  happy_eyeballs:Bob_happy_eyeballs.t ->
+  ?through:Bob_socks.server ->
+  Bob_socks.addr ->
   (Stdbob.bigstring Stream.source, error) result Fiber.t
