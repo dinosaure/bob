@@ -1,16 +1,16 @@
 open Stdbob
 open Socks
 
-let fully_write fd bs =
+let fully_write fd str =
   let open Fiber in
   let rec go (off, len) =
     if len > 0 then
-      Fiber.write fd bs ~off ~len >>= function
+      Fiber.write fd str ~off ~len >>= function
       | Ok len' -> go (off + len', len - len')
       | Error err -> Fiber.return (Error err)
     else Fiber.return (Ok ())
   in
-  go (0, Bigarray.Array1.dim bs)
+  go (0, String.length str)
 
 let addr_to_string_and_int = function
   | `Inet (inet_addr, port) -> (Unix.string_of_inet_addr inet_addr, port)
@@ -112,10 +112,7 @@ let connect ~happy_eyeballs ~server dst =
       let[@warning "-8"] (Ok req) =
         Socks.make_socks4_request ~username ~hostname port
       in
-      fully_write socket
-        (bigstring_of_string req ~off:0 ~len:(String.length req))
-      >>| open_write_error
-      >>? fun () ->
+      fully_write socket req >>| open_write_error >>? fun () ->
       let rec go payload =
         match Socks.parse_socks4_response payload with
         | Ok "" -> Fiber.return (Ok (sockaddr, socket))
@@ -132,7 +129,7 @@ let connect ~happy_eyeballs ~server dst =
             | `End ->
                 Fiber.return
                   (Error (`Msg "Incomplete response from the SOCKSv4a server"))
-            | `Data bs -> go (payload ^ bigstring_to_string bs))
+            | `Data str -> go (payload ^ str))
       in
       go ""
   | `Socks5, credential, addr ->
@@ -158,17 +155,15 @@ let connect ~happy_eyeballs ~server dst =
         | Username _ -> assert false
       in
       let[@warning "-8"] (Ok req) = Socks.make_socks5_request socks5_request in
-      fully_write socket
-        (bigstring_of_string auth_req ~off:0 ~len:(String.length auth_req))
-      >>| open_write_error
-      >>? fun () ->
+      fully_write socket auth_req >>| open_write_error >>? fun () ->
       let rec go payload =
         match Socks.parse_socks5_username_password_response payload with
-        | Ok (No_acceptable_methods, _) ->
+        | Ok (false, _) ->
             Fiber.return
               (Error
                  (`Msg
-                   "No acceptable authentication methods for the SOCKSv5 server"))
+                    "No acceptable authentication methods for the SOCKSv5 \
+                     server"))
         | Ok (_, leftover) -> Fiber.return (Ok leftover)
         | Error `Invalid_request ->
             Fiber.return
@@ -179,13 +174,10 @@ let connect ~happy_eyeballs ~server dst =
             | `End ->
                 Fiber.return
                   (Error (`Msg "Incomplete response from the SOCKSv5 server"))
-            | `Data bs -> go (payload ^ bigstring_to_string bs))
+            | `Data str -> go (payload ^ str))
       in
       go "" >>? fun payload ->
-      fully_write socket
-        (bigstring_of_string req ~off:0 ~len:(String.length req))
-      >>| open_write_error
-      >>? fun () ->
+      fully_write socket req >>| open_write_error >>? fun () ->
       let rec go payload =
         match Socks.parse_socks5_response payload with
         | Ok (Socks.Succeeded, value, "") ->
@@ -201,6 +193,6 @@ let connect ~happy_eyeballs ~server dst =
             | `End ->
                 Fiber.return
                   (Error (`Msg "Incomplete response from the SOCKSv5 server"))
-            | `Data bs -> go (payload ^ bigstring_to_string bs))
+            | `Data str -> go (payload ^ str))
       in
       go payload
