@@ -12,6 +12,7 @@ let bob =
         package "spoke" ~sublibs:[ "core" ]
           ~pin:"git+https://github.com/dinosaure/spoke.git";
         package "psq";
+        package "base64";
       ]
     (time @-> stackv4v6 @-> job)
 
