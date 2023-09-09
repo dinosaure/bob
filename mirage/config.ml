@@ -21,6 +21,7 @@ let bob =
         package "bob" ~pin:"git+https://github.com/dinosaure/bob.git";
         package "spoke" ~sublibs:[ "core" ];
         package "psq";
+        package "base64";
       ]
     ~keys:[ Key.v port; Key.v secure_port ]
     (time @-> stackv4v6 @-> job)
