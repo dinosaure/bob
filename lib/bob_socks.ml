@@ -96,6 +96,21 @@ let socks5_struct_to_sockaddr { Socks.port; address } =
   in
   Unix.ADDR_INET (Ipaddr_unix.to_inet_addr addr, port)
 
+let pp_socks5_reply ppf = function
+  | Socks.Succeeded -> Fmt.string ppf "Succeeeded"
+  | Socks.General_socks_server_failure ->
+      Fmt.string ppf "General socks server failure"
+  | Socks.Connection_not_allowed_by_ruleset ->
+      Fmt.string ppf "Connection not allowed by ruleset"
+  | Socks.Network_unreachable -> Fmt.string ppf "Network unreachable"
+  | Socks.Host_unreachable -> Fmt.string ppf "Host unreachable"
+  | Socks.Connection_refused -> Fmt.string ppf "Connection refused"
+  | Socks.TTL_expired -> Fmt.string ppf "TTL expired"
+  | Socks.Command_not_supported -> Fmt.string ppf "Command not supported"
+  | Socks.Address_type_not_supported ->
+      Fmt.string ppf "Address type not supported"
+  | Socks.Unassigned -> Fmt.string ppf "Unassigned"
+
 let connect ~happy_eyeballs ~server dst =
   let open Fiber in
   let hostname, port = addr_to_string_and_int dst in
@@ -139,7 +154,7 @@ let connect ~happy_eyeballs ~server dst =
       Bob_happy_eyeballs.connect happy_eyeballs addr
       >>? fun (_sockaddr, socket) ->
       let socks5_request =
-        match addr with
+        match dst with
         | `Domain (domain_name, port) ->
             let domain_name = Domain_name.to_string domain_name in
             Socks.Connect
@@ -169,7 +184,11 @@ let connect ~happy_eyeballs ~server dst =
               (Error
                  (`Msg
                    "No acceptable authentication methods for the SOCKSv5 server"))
-        | Ok (_, leftover) -> Fiber.return (Ok leftover)
+        | Ok (No_authentication_required, leftover) when credential = None ->
+            Fiber.return (Ok leftover)
+        | Ok (_, _) ->
+            Fiber.return
+              (Error (`Msg "Unexpected response from the SOCKSv5 server"))
         | Error `Invalid_request ->
             Fiber.return
               (Error (`Msg "Invalid response from the SOCKSv5 server"))
@@ -191,8 +210,11 @@ let connect ~happy_eyeballs ~server dst =
         | Ok (Socks.Succeeded, value, "") ->
             let sockaddr = socks5_struct_to_sockaddr value in
             Fiber.return (Ok (sockaddr, socket))
-        | Ok (_, _, _) ->
-            Fiber.return (Error (`Msg "Error from the SOCKSv5 server"))
+        | Ok (reply, _, leftover) ->
+            Fiber.return
+              (Error
+                 (msgf "Error from the SOCKSv5 server: %a (%S)" pp_socks5_reply
+                    reply leftover))
         | Error Socks.Invalid_response ->
             Fiber.return (Error (`Msg "Rejected by the SOCKSv5 server"))
         | Error Socks.Incomplete_response -> (
