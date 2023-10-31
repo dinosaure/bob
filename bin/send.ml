@@ -92,7 +92,7 @@ let better_to_compress_for mime_type =
   | "video" :: _ | "audio" :: _ | "image" :: _ -> false
   | _ -> true
 
-let run_server quiet g dns mime_type compression addr secure_port reproduce
+let run_server quiet g (_, he) mime_type compression addr secure_port reproduce
     password path =
   let compression =
     match (mime_type, compression) with
@@ -100,11 +100,10 @@ let run_server quiet g dns mime_type compression addr secure_port reproduce
     | Some mime_type, None -> better_to_compress_for mime_type
     | _, Some v -> v
   in
-  let happy_eyeballs = Bob_happy_eyeballs.create ~dns () in
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
   let open Fiber in
-  Bob_happy_eyeballs.connect happy_eyeballs addr >>? fun (sockaddr, socket) ->
+  Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
   Bob_clear.server socket ~reproduce ~g secret
   >>? fun (identity, ciphers, shared_keys) ->
@@ -118,12 +117,12 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run () dns mime_type compression addr secure_port reproduce
+let run () dns_and_he mime_type compression addr secure_port reproduce
     (quiet, g, password) path =
   match
     Fiber.run
-      (run_server quiet g dns mime_type compression addr secure_port reproduce
-         password path)
+      (run_server quiet g dns_and_he mime_type compression addr secure_port
+         reproduce password path)
   with
   | Ok () -> `Ok 0
   | Error err ->

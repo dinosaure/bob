@@ -85,13 +85,13 @@
   bob.fiber
   bob.tls
   mirage-crypto-rng.unix
-  happy-eyeballs))
+  bob.happy-eyeballs))
 
 (library
  (name bob_happy_eyeballs)
  (public_name bob.happy-eyeballs)
  (modules bob_happy_eyeballs)
- (libraries bob.fiber bob.dns))
+ (libraries ipaddr.unix mtime.clock.os dns happy-eyeballs bob.fiber))
 
 (library
  (name bob_tls)

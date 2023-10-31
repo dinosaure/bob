@@ -223,14 +223,14 @@ let extract_with_reporter quiet ~config ?g
                 name Bob_fpath.pp destination);
           unpack_with_reporter quiet ~config ~total pack destination hash)
 
-let run_client quiet g dns addr secure_port reproduce password yes destination =
+let run_client quiet g (_, he) addr secure_port reproduce password yes
+    destination =
   let open Fiber in
   (match password with
   | Some password -> Fiber.return password
   | None -> ask_password ())
   >>= fun password ->
-  let happy_eyeballs = Bob_happy_eyeballs.create ~dns () in
-  Bob_happy_eyeballs.connect happy_eyeballs addr >>? fun (sockaddr, socket) ->
+  Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in
   Bob_clear.client socket ~reproduce ~choose ~g password
@@ -249,10 +249,10 @@ let pp_error ppf = function
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run quiet g () dns addr secure_port reproduce password yes dst =
+let run quiet g () dns_and_he addr secure_port reproduce password yes dst =
   match
     Fiber.run
-      (run_client quiet g dns addr secure_port reproduce password yes dst)
+      (run_client quiet g dns_and_he addr secure_port reproduce password yes dst)
   with
   | Ok () -> `Ok 0
   | Error err ->

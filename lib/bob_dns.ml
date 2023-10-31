@@ -12,12 +12,12 @@ module Transport :
       [ `Plaintext of Ipaddr.t * int
       | `Tls of Tls.Config.client * Ipaddr.t * int ]
      and type +'a io = 'a Fiber.t
-     and type stack = unit = struct
+     and type stack = Bob_happy_eyeballs.t = struct
   type io_addr =
     [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
 
   type +'a io = 'a Fiber.t
-  type stack = unit
+  type stack = Bob_happy_eyeballs.t
   type nameservers = Static of io_addr list
 
   type t = {
@@ -27,143 +27,28 @@ module Transport :
     mutable connected_condition : (Fiber.Condition.t * Fiber.Mutex.t) option;
     mutable requests :
       (Cstruct.t * (Cstruct.t, [ `Msg of string ]) result Fiber.Ivar.t) IM.t;
-    mutable he : Happy_eyeballs.t;
-    mutable cancel_connecting : unit Fiber.Ivar.t Happy_eyeballs.Waiter_map.t;
-    mutable waiters :
-      ((Ipaddr.t * int) * Unix.file_descr, [ `Msg of string ]) result
-      Fiber.Ivar.t
-      Happy_eyeballs.Waiter_map.t;
-    timer_mutex : Fiber.Mutex.t;
-    timer_condition : Fiber.Condition.t;
+    he : Bob_happy_eyeballs.t;
   }
 
   type context = t
 
   let nameserver_ips = function Static nameservers -> nameservers
 
-  let handle_one_action t = function
-    | Happy_eyeballs.Connect (host, id, (ip, port)) -> (
-        let cancel = Fiber.Ivar.create () in
-        t.cancel_connecting <-
-          Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
-        let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
-        let fam =
-          match ip with
-          | Ipaddr.V4 _ -> Unix.PF_INET
-          | Ipaddr.V6 _ -> Unix.PF_INET6
-        in
-        let socket = Unix.socket fam Unix.SOCK_STREAM p_proto in
-        let addr = Unix.ADDR_INET (Ipaddr_unix.to_inet_addr ip, port) in
-        Fiber.pick
-          (fun () ->
-            Fiber.connect socket addr >>= function
-            | Error errno ->
-                Fiber.return
-                  (Error
-                     (msgf "Error %s connecting to nameserver %a:%d"
-                        (Unix.error_message errno) Ipaddr.pp ip port))
-            | Ok _ as v -> Fiber.return v)
-          (fun () -> Fiber.wait cancel >>| fun () -> Error (msgf "Cancelled"))
-        >>= fun result ->
-        t.cancel_connecting <-
-          Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
-        match result with
-        | Error (`Msg err) ->
-            Fiber.close socket >>| fun () ->
-            Some (Happy_eyeballs.Connection_failed (host, id, (ip, port), err))
-        | Ok () ->
-            let waiters, v =
-              Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
-            in
-            t.waiters <- waiters;
-            (match v with
-            | Some waiter ->
-                Fiber.Ivar.fill waiter (Ok ((ip, port), socket));
-                Fiber.return ()
-            | None -> Fiber.close socket)
-            >>| fun () -> Some (Happy_eyeballs.Connected (host, id, (ip, port)))
-        )
-    | Connect_failed (host, id, reason) ->
-        let waiters, v =
-          Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
-        in
-        t.waiters <- waiters;
-        (match v with
-        | Some waiter ->
-            let err =
-              msgf "Connection to %a failed: %s" Domain_name.pp host reason
-            in
-            Fiber.Ivar.fill waiter (Error err)
-        | None -> ());
-        Fiber.return None
-    | Connect_cancelled (host, id) -> (
-        match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
-        | None ->
-            Log.warn (fun m ->
-                m
-                  "Happy-eyeballs tries to cancel the connection to %a but the \
-                   process does not exist."
-                  Domain_name.pp host);
-            Fiber.return None
-        | Some cancel ->
-            Fiber.Ivar.fill cancel ();
-            Fiber.return None)
-    | (Resolve_a _ | Resolve_aaaa _) as a ->
-        Log.warn (fun m -> m "Ignoring action %a" Happy_eyeballs.pp_action a);
-        Fiber.return None
-
-  let rec handle_action t action =
-    handle_one_action t action >>= function
-    | None -> Fiber.return ()
-    | Some event ->
-        let he, actions =
-          Happy_eyeballs.event t.he (Mtime_clock.elapsed_ns ()) event
-        in
-        t.he <- he;
-        Fiber.parallel_iter ~f:(handle_action t) actions
-
-  let handle_timer_actions t actions =
-    Fiber.async (fun () ->
-        Fiber.parallel_iter ~f:(fun a -> handle_action t a) actions)
-
-  let he_timer_interval = Duration.of_ms 500
-
-  let rec he_timer t =
-    let rec loop () =
-      let he, cont, actions =
-        Happy_eyeballs.timer t.he (Mtime_clock.elapsed_ns ())
-      in
-      t.he <- he;
-      handle_timer_actions t actions;
-      match cont with
-      | `Suspend -> he_timer t
-      | `Act -> Fiber.sleep (Duration.to_f he_timer_interval) >>= loop
-    in
-    Fiber.Condition.wait t.timer_condition t.timer_mutex >>= loop
-
-  let create ?nameservers ~timeout:timeout_ns () =
+  let create ?nameservers ~timeout:timeout_ns he =
     let nameservers =
       match nameservers with
       | Some (`Udp, _) -> invalid_arg "UDP is not supported"
       | Some (`Tcp, ns) -> Static ns
       | None -> assert false
     in
-    let t =
-      {
-        nameservers;
-        timeout_ns;
-        fd = None;
-        connected_condition = None;
-        requests = IM.empty;
-        he = Happy_eyeballs.create (Mtime_clock.elapsed_ns ());
-        cancel_connecting = Happy_eyeballs.Waiter_map.empty;
-        waiters = Happy_eyeballs.Waiter_map.empty;
-        timer_mutex = Fiber.Mutex.create ();
-        timer_condition = Fiber.Condition.create ();
-      }
-    in
-    Fiber.async (fun () -> he_timer t);
-    t
+    {
+      nameservers;
+      timeout_ns;
+      fd = None;
+      connected_condition = None;
+      requests = IM.empty;
+      he;
+    }
 
   let nameservers { nameservers; _ } = (`Tcp, nameserver_ips nameservers)
   let rng = Mirage_crypto_rng.generate ?g:None
@@ -281,17 +166,8 @@ module Transport :
 
   let rec connect_to_ns_list (t : t) connected_condition nameservers :
       (unit, [ `Msg of string ]) result Fiber.t =
-    let ivar = Fiber.Ivar.create () in
-    let waiters, id = Happy_eyeballs.Waiter_map.register ivar t.waiters in
-    t.waiters <- waiters;
     let ns = to_pairs nameservers in
-    let he, actions =
-      Happy_eyeballs.connect_ip t.he (Mtime_clock.elapsed_ns ()) ~id ns
-    in
-    t.he <- he;
-    Fiber.Condition.signal t.timer_condition;
-    Fiber.async (fun () -> Fiber.parallel_iter ~f:(handle_action t) actions);
-    Fiber.wait ivar >>= function
+    Bob_happy_eyeballs.connect_ip t.he ns >>= function
     | Error (`Msg msg) ->
         Fiber.Condition.broadcast connected_condition;
         t.connected_condition <- None;
@@ -315,6 +191,12 @@ module Transport :
           Fiber.Condition.broadcast connected_condition;
           t.connected_condition <- None;
           req_all socket t
+        in
+        let addr =
+          match addr with
+          | Unix.ADDR_INET (inet_addr, port) ->
+              (Ipaddr_unix.of_inet_addr inet_addr, port)
+          | Unix.ADDR_UNIX name -> Fmt.failwith "Got an UNIX address: %S" name
         in
         let config = find_ns (nameserver_ips t.nameservers) addr in
         match config with

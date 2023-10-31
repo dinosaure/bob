@@ -33,7 +33,7 @@ depends: [
   "carton"            {>= "0.5.0"}
   "progress"          {>= "0.2.1"}
   "dns-client"        {>= "6.4.0"}
-  "happy-eyeballs"    {>= "0.4.0" & < "0.5.0"}
+  "happy-eyeballs"    {>= "0.6.0"}
   "ca-certs"
   "ke"                {>= "0.6"}
   "alcotest"          {with-test}

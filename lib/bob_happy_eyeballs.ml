@@ -4,19 +4,28 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let msgf fmt = Format.kasprintf (fun msg -> `Msg msg) fmt
 
+type getaddrinfo = {
+  getaddrinfo :
+    'response 'a.
+    'response Dns.Rr_map.key ->
+    'a Domain_name.t ->
+    ('response, [ `Msg of string ]) result Fiber.t;
+}
+
 type t = {
   mutable waiters :
     ((Ipaddr.t * int) * Unix.file_descr, [ `Msg of string ]) result Fiber.Ivar.t
     Happy_eyeballs.Waiter_map.t;
-  mutable cancel_connecting : unit Fiber.Ivar.t Happy_eyeballs.Waiter_map.t;
+  mutable cancel_connecting :
+    (int * unit Fiber.Ivar.t) list Happy_eyeballs.Waiter_map.t;
   mutable he : Happy_eyeballs.t;
-  dns : Bob_dns.t;
+  mutable dns : getaddrinfo;
   timer_interval : float;
   timer_condition : Fiber.Condition.t;
   timer_mutex : Fiber.Mutex.t;
 }
 
-let try_connect ip port () =
+let try_connect ip port =
   let fd =
     let fam =
       match ip with Ipaddr.V4 _ -> Unix.PF_INET | Ipaddr.V6 _ -> Unix.PF_INET6
@@ -33,54 +42,66 @@ let rec act t action =
   let open Fiber in
   (match action with
   | Happy_eyeballs.Resolve_a host -> (
-      Bob_dns.getaddrinfo t.dns Dns.Rr_map.A host >>| function
+      t.dns.getaddrinfo Dns.Rr_map.A host >>| function
       | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
       | Error (`Msg msg) -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg)))
   | Happy_eyeballs.Resolve_aaaa host -> (
-      Bob_dns.getaddrinfo t.dns Dns.Rr_map.Aaaa host >>| function
+      t.dns.getaddrinfo Dns.Rr_map.Aaaa host >>| function
       | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
       | Error (`Msg msg) -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       )
-  | Happy_eyeballs.Connect (host, id, (ip, port)) -> (
+  | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       let cancelled, cancel =
         let ivar = Fiber.Ivar.create () in
         (Fiber.wait ivar, ivar)
       in
+      let entry = (attempt, cancel) in
       t.cancel_connecting <-
-        Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
-      Fiber.pick (try_connect ip port) (fun () ->
-          cancelled >>| fun () -> Error (`Msg "Cancelled"))
-      >>= fun result ->
-      t.cancel_connecting <-
-        Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
-      match result with
-      | Ok fd -> (
-          let waiters, result =
-            Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
-          in
-          t.waiters <- waiters;
-          match result with
-          | Some waiter ->
-              Fiber.Ivar.fill waiter (Ok ((ip, port), fd));
-              Fiber.return
-                (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
-          | None -> Fiber.close fd >>= fun () -> Fiber.return (Error ()))
-      | Error (`Unix err) ->
-          Log.warn (fun m ->
-              m "Got an error when we tried to connect to %a:%d: %s" Ipaddr.pp
-                ip port (Unix.error_message err));
-          Fiber.return
-            (Ok
-               (Happy_eyeballs.Connection_failed
-                  (host, id, (ip, port), Unix.error_message err)))
-      | Error (`Msg msg) ->
-          Fiber.return
-            (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg))))
-  | Happy_eyeballs.Connect_cancelled (_host, id) ->
-      (match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
-      | None -> ()
-      | Some waiter -> Fiber.Ivar.fill waiter ());
-      Fiber.return (Error ())
+        Happy_eyeballs.Waiter_map.update id
+          (function None -> Some [ entry ] | Some c -> Some (entry :: c))
+          t.cancel_connecting;
+      let conn () =
+        try_connect ip port >>= function
+        | Ok fd -> (
+            let cancel_connecting, others =
+              Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+            in
+            t.cancel_connecting <- cancel_connecting;
+            List.iter
+              (fun (att, w) -> if att <> attempt then Fiber.Ivar.fill w ())
+              (Stdlib.Option.value ~default:[] others);
+            let waiters, r =
+              Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
+            in
+            t.waiters <- waiters;
+            match r with
+            | Some waiter ->
+                Fiber.Ivar.fill waiter (Ok ((ip, port), fd));
+                Fiber.return
+                  (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
+            | None -> Fiber.close fd >>= fun () -> Fiber.return (Error ()))
+        | Error err ->
+            let msg =
+              match err with
+              | `Msg msg -> msg
+              | `Unix err -> Unix.error_message err
+            in
+            t.cancel_connecting <-
+              Happy_eyeballs.Waiter_map.update id
+                (function
+                  | None -> None
+                  | Some c -> (
+                      match
+                        List.filter (fun (att, _) -> not (att = attempt)) c
+                      with
+                      | [] -> None
+                      | c -> Some c))
+                t.cancel_connecting;
+            Fiber.return
+              (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
+      in
+      let cancelled () = cancelled >>| fun () -> Error () in
+      Fiber.pick conn cancelled
   | Happy_eyeballs.Connect_failed (_host, id, msg) -> (
       let waiters, result =
         Happy_eyeballs.Waiter_map.find_and_remove id t.waiters
@@ -117,8 +138,12 @@ let rec timer t =
   in
   Fiber.Condition.wait t.timer_condition t.timer_mutex >>= loop
 
+let dummy =
+  let getaddrinfo _ _ = Fiber.return (Error (`Msg "Not implemented")) in
+  { getaddrinfo }
+
 let create ?(happy_eyeballs = Happy_eyeballs.create (Mtime_clock.elapsed_ns ()))
-    ?(dns = Bob_dns.create ()) ?(timer_interval = Duration.of_ms 10) () =
+    ?(timer_interval = Duration.of_ms 10) ?getaddrinfo:(dns = dummy) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
   and timer_condition = Fiber.Condition.create ()
@@ -139,6 +164,8 @@ let create ?(happy_eyeballs = Happy_eyeballs.create (Mtime_clock.elapsed_ns ()))
   in
   Fiber.async (fun () -> timer t);
   t
+
+let inject getaddrinfo t = t.dns <- getaddrinfo
 
 let handle_actions t actions =
   List.iter (fun a -> Fiber.async (fun () -> act t a)) actions
