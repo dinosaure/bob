@@ -211,6 +211,8 @@ let temp =
     & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env)
 
 let term_setup_temp = Term.(const setup_temp $ temp)
+let setup_happy_eyeballs () = Bob_happy_eyeballs.create ()
+let term_setup_happy_eyeballs = Term.(const setup_happy_eyeballs $ const ())
 
 let nameserver_of_string str =
   let ( let* ) = Result.bind in
@@ -275,10 +277,21 @@ let nameservers =
     & opt_all nameserver [ unicast_censurfridns_dk; google_com ]
     & info [ "nameserver" ] ~docs:common_options ~doc ~docv:"<nameserver>" ~env)
 
-let setup_dns nameservers =
-  Bob_dns.create ~edns:`Auto ~nameservers:(`Tcp, nameservers) ()
+let getaddrinfo dns =
+  let getaddrinfo record domain_name =
+    Bob_dns.getaddrinfo dns record domain_name
+  in
+  { Bob_happy_eyeballs.getaddrinfo }
 
-let term_setup_dns = Term.(const setup_dns $ nameservers)
+let setup_dns nameservers happy_eyeballs =
+  let dns =
+    Bob_dns.create ~edns:`Auto ~nameservers:(`Tcp, nameservers) happy_eyeballs
+  in
+  Bob_happy_eyeballs.inject (getaddrinfo dns) happy_eyeballs;
+  (dns, happy_eyeballs)
+
+let term_setup_dns =
+  Term.(const setup_dns $ nameservers $ term_setup_happy_eyeballs)
 
 let compression =
   Arg.(
