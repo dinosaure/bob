@@ -48,10 +48,10 @@ depends: [
 ]
 
 pin-depends: [
-  [ "mirage-crypto.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
-  [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
-  [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
-  [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#989c4aff6915b239f2afa0c88d948257a960f43a" ]
+  [ "mirage-crypto.dev" "git+https://github.com/dinosaure/mirage-crypto.git#b3682240f92453c8300298ff3e197af44f155d80" ]
+  [ "mirage-crypto-pk.dev" "git+https://github.com/dinosaure/mirage-crypto.git#b3682240f92453c8300298ff3e197af44f155d80" ]
+  [ "mirage-crypto-ec.dev" "git+https://github.com/dinosaure/mirage-crypto.git#b3682240f92453c8300298ff3e197af44f155d80" ]
+  [ "mirage-crypto-rng.dev" "git+https://github.com/dinosaure/mirage-crypto.git#b3682240f92453c8300298ff3e197af44f155d80" ]
   [ "mtime.dev" "git+https://github.com/dinosaure/mtime.git#d5d70f38c40da90e3e173eb60346df55b64a4a0a"]
 ]
 
