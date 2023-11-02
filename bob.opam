@@ -42,5 +42,5 @@ depends: [
 ]
 
 pin-depends: [
-  [ "socks.dev" "git+https://github.com/dinosaure/ocaml-socks.git#31399dab6812cb3fbf28b9eea5c5e4a3939abe4b" ]
+  [ "socks.dev" "git+https://github.com/cfcs/ocaml-socks.git#c46ed399df18307e5240457b9d5d4ff8a6739f06" ]
 ]
