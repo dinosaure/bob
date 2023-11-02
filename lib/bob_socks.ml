@@ -111,106 +111,146 @@ let pp_socks5_reply ppf = function
       Fmt.string ppf "Address type not supported"
   | Socks.Unassigned -> Fmt.string ppf "Unassigned"
 
-let connect ~happy_eyeballs ~server dst =
+let connect_socks4 ~happy_eyeballs ~credential ~addr dst =
   let open Fiber in
   let hostname, port = addr_to_string_and_int dst in
+  Bob_happy_eyeballs.connect happy_eyeballs addr >>? fun (sockaddr, socket) ->
+  let username =
+    match credential with
+    | Username username -> username
+    | None -> ""
+    | Credential _ -> assert false
+  in
+  let[@warning "-8"] (Ok req) =
+    Socks.make_socks4_request ~username ~hostname port
+  in
+  fully_write socket req >>| open_write_error >>? fun () ->
+  let rec go payload =
+    match Socks.parse_socks4_response payload with
+    | Ok "" -> Fiber.return (Ok (sockaddr, socket))
+    | Ok _ ->
+        (* XXX(dinosaure): we know how we should talk to the relay and,
+           actually, the server waits for an identifier from us, it should
+           not send something at this stage. *)
+        Fiber.return (Error (`Msg "Unexpected leftover data"))
+    | Error Socks.Rejected ->
+        Fiber.return (Error (`Msg "Rejected by the SOCKSv4a server"))
+    | Error Socks.Incomplete_response -> (
+        Fiber.read socket >>| reword_error (fun err -> `Unix err) >>? function
+        | `End ->
+            Fiber.return
+              (Error (`Msg "Incomplete response from the SOCKSv4a server"))
+        | `Data str -> go (payload ^ str))
+  in
+  go ""
+
+let finally_connect_socks5 socket payload dst =
+  let open Fiber in
+  let socks5_request =
+    match dst with
+    | `Domain (domain_name, port) ->
+        let domain_name = Domain_name.to_string domain_name in
+        Socks.Connect { Socks.port; address = Socks.Domain_address domain_name }
+    | `Inet (inet_addr, port) -> (
+        match Ipaddr_unix.of_inet_addr inet_addr with
+        | Ipaddr.V4 addr ->
+            Socks.Connect { Socks.port; address = Socks.IPv4_address addr }
+        | Ipaddr.V6 addr ->
+            Socks.Connect { Socks.port; address = Socks.IPv6_address addr })
+  in
+  let[@warning "-8"] (Ok req) = Socks.make_socks5_request socks5_request in
+  fully_write socket req >>| open_write_error >>? fun () ->
+  let rec go payload =
+    match Socks.parse_socks5_response payload with
+    | Ok (Socks.Succeeded, value, "") ->
+        let sockaddr = socks5_struct_to_sockaddr value in
+        Fiber.return (Ok (sockaddr, socket))
+    | Ok (reply, _, leftover) ->
+        Fiber.return
+          (Error
+             (msgf "Error from the SOCKSv5 server: %a (%S)" pp_socks5_reply
+                reply leftover))
+    | Error Socks.Invalid_response ->
+        Fiber.return (Error (`Msg "Rejected by the SOCKSv5 server"))
+    | Error Socks.Incomplete_response -> (
+        Fiber.read socket >>| reword_error (fun err -> `Unix err) >>? function
+        | `End ->
+            Fiber.return
+              (Error (`Msg "Incomplete response from the SOCKSv5 server"))
+        | `Data str -> go (payload ^ str))
+  in
+  go payload
+
+let parse_socks5_response payload =
+  match (payload.[0], String.length payload >= 2) with
+  | '\x05', true ->
+      let leftover = String.sub payload 2 (String.length payload - 2) in
+      Ok (Socks.socks5_authentication_method_of_char payload.[1], leftover)
+  | '\x05', false -> Error `Incomplete_response
+  | _ -> Error `Invalid_response
+  | exception _ -> Error `Incomplete_response
+
+let connect_socks5 ~happy_eyeballs ~credential ~addr dst =
+  let open Fiber in
+  Bob_happy_eyeballs.connect happy_eyeballs addr >>? fun (_sockaddr, socket) ->
+  let auth_req =
+    match credential with
+    | None -> Socks.make_socks5_auth_request ~username_password:false
+    | Credential _ -> Socks.make_socks5_auth_request ~username_password:true
+    | Username _ -> assert false
+  in
+  fully_write socket auth_req >>| open_write_error >>? fun () ->
+  let rec go payload =
+    match parse_socks5_response payload with
+    | Ok (No_authentication_required, leftover) ->
+        Fiber.return (Ok (`No_authentication_required leftover))
+    | Ok (Username_password _, leftover) ->
+        let username_password_req =
+          match credential with
+          | None | Username _ -> assert false
+          | Credential (username, password) ->
+              Socks.make_socks5_username_password_request ~username ~password
+              |> Result.get_ok
+        in
+        Fiber.return (Ok (`Authentication (username_password_req, leftover)))
+    | Ok _ ->
+        Fiber.return
+          (error_msgf
+             "No acceptable authentication methods for the SOCKSv5 server")
+    | Error `Invalid_response ->
+        Fiber.return (Error (`Msg "Invalid response from the SOCKSv5 server"))
+    | Error `Incomplete_response -> (
+        Fiber.read socket >>| reword_error (fun err -> `Unix err) >>? function
+        | `End ->
+            Fiber.return
+              (Error (`Msg "Incomplete response from the SOCKSv5 server"))
+        | `Data str -> go (payload ^ str))
+  in
+  go "" >>? function
+  | `Authentication (username_password_req, payload) ->
+      fully_write socket username_password_req >>| open_write_error
+      >>? fun () ->
+      let rec go payload =
+        if String.length payload < 2 then
+          Fiber.read socket >>| reword_error (fun err -> `Unix err) >>? function
+          | `End ->
+              Fiber.return
+                (Error (`Msg "Incomplete response from SOCKSv5 server"))
+          | `Data str -> go (payload ^ str)
+        else
+          match String.sub payload 0 2 with
+          | "\x01\x00" ->
+              Fiber.return
+                (Ok (String.sub payload 2 (String.length payload - 2)))
+          | _ -> Fiber.return (Error (`Msg "Invalid username/password"))
+      in
+      go payload >>? fun payload -> finally_connect_socks5 socket payload dst
+  | `No_authentication_required payload ->
+      finally_connect_socks5 socket payload dst
+
+let connect ~happy_eyeballs ~server dst =
   match server with
   | `Socks4a, credential, addr ->
-      Bob_happy_eyeballs.connect happy_eyeballs addr
-      >>? fun (sockaddr, socket) ->
-      let username =
-        match credential with
-        | Username username -> username
-        | None -> ""
-        | Credential _ -> assert false
-      in
-      let[@warning "-8"] (Ok req) =
-        Socks.make_socks4_request ~username ~hostname port
-      in
-      fully_write socket req >>| open_write_error >>? fun () ->
-      let rec go payload =
-        match Socks.parse_socks4_response payload with
-        | Ok "" -> Fiber.return (Ok (sockaddr, socket))
-        | Ok _ ->
-            (* XXX(dinosaure): we know how we should talk to the relay and,
-               actually, the server waits for an identifier from us, it should
-               not send something at this stage. *)
-            Fiber.return (Error (`Msg "Unexpected leftover data"))
-        | Error Socks.Rejected ->
-            Fiber.return (Error (`Msg "Rejected by the SOCKSv4a server"))
-        | Error Socks.Incomplete_response -> (
-            Fiber.read socket >>| reword_error (fun err -> `Unix err)
-            >>? function
-            | `End ->
-                Fiber.return
-                  (Error (`Msg "Incomplete response from the SOCKSv4a server"))
-            | `Data str -> go (payload ^ str))
-      in
-      go ""
+      connect_socks4 ~happy_eyeballs ~credential ~addr dst
   | `Socks5, credential, addr ->
-      Bob_happy_eyeballs.connect happy_eyeballs addr
-      >>? fun (_sockaddr, socket) ->
-      let socks5_request =
-        match dst with
-        | `Domain (domain_name, port) ->
-            let domain_name = Domain_name.to_string domain_name in
-            Socks.Connect
-              { Socks.port; address = Socks.Domain_address domain_name }
-        | `Inet (inet_addr, port) -> (
-            match Ipaddr_unix.of_inet_addr inet_addr with
-            | Ipaddr.V4 addr ->
-                Socks.Connect { Socks.port; address = Socks.IPv4_address addr }
-            | Ipaddr.V6 addr ->
-                Socks.Connect { Socks.port; address = Socks.IPv6_address addr })
-      in
-      let auth_req =
-        match credential with
-        | None -> Socks.make_socks5_auth_request ~username_password:false
-        | Credential _ -> Socks.make_socks5_auth_request ~username_password:true
-        | Username _ -> assert false
-      in
-      let[@warning "-8"] (Ok req) = Socks.make_socks5_request socks5_request in
-      fully_write socket auth_req >>| open_write_error >>? fun () ->
-      let rec go payload =
-        match Socks.parse_socks5_username_password_response payload with
-        | Ok (false, _) ->
-            Fiber.return
-              (Error
-                 (`Msg
-                    "No acceptable authentication methods for the SOCKSv5 \
-                     server"))
-        | Ok (_, leftover) -> Fiber.return (Ok leftover)
-        | Error `Invalid_request ->
-            Fiber.return
-              (Error (`Msg "Invalid response from the SOCKSv5 server"))
-        | Error `Incomplete_request -> (
-            Fiber.read socket >>| reword_error (fun err -> `Unix err)
-            >>? function
-            | `End ->
-                Fiber.return
-                  (Error (`Msg "Incomplete response from the SOCKSv5 server"))
-            | `Data str -> go (payload ^ str))
-      in
-      go "" >>? fun payload ->
-      fully_write socket req >>| open_write_error >>? fun () ->
-      let rec go payload =
-        match Socks.parse_socks5_response payload with
-        | Ok (Socks.Succeeded, value, "") ->
-            let sockaddr = socks5_struct_to_sockaddr value in
-            Fiber.return (Ok (sockaddr, socket))
-        | Ok (reply, _, leftover) ->
-            Fiber.return
-              (Error
-                 (msgf "Error from the SOCKSv5 server: %a (%S)" pp_socks5_reply
-                    reply leftover))
-        | Error Socks.Invalid_response ->
-            Fiber.return (Error (`Msg "Rejected by the SOCKSv5 server"))
-        | Error Socks.Incomplete_response -> (
-            Fiber.read socket >>| reword_error (fun err -> `Unix err)
-            >>? function
-            | `End ->
-                Fiber.return
-                  (Error (`Msg "Incomplete response from the SOCKSv5 server"))
-            | `Data str -> go (payload ^ str))
-      in
-      go payload
+      connect_socks5 ~happy_eyeballs ~credential ~addr dst

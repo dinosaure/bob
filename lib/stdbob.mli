@@ -6,6 +6,10 @@ val ( <.> ) : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b
 val msgf : ('a, Format.formatter, unit, [> `Msg of string ]) format4 -> 'a
 val reword_error : ('e0 -> 'e1) -> ('a, 'e0) result -> ('a, 'e1) result
 val never : 'a -> 'b
+
+val error_msgf :
+  ('a, Format.formatter, unit, ('b, [> `Msg of string ]) result) format4 -> 'a
+
 val io_buffer_size : int
 val reraise : exn -> 'a
 val line_of_queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t -> string option
