@@ -204,7 +204,7 @@ let connect_socks5 ~happy_eyeballs ~credential ~addr dst =
     match parse_socks5_response payload with
     | Ok (No_authentication_required, leftover) ->
         Fiber.return (Ok (`No_authentication_required leftover))
-    | Ok (Username_password _, leftover) ->
+    | Ok (Username_password _, leftover) when credential <> None ->
         let username_password_req =
           match credential with
           | None | Username _ -> assert false
@@ -231,18 +231,20 @@ let connect_socks5 ~happy_eyeballs ~credential ~addr dst =
       fully_write socket username_password_req >>| open_write_error
       >>? fun () ->
       let rec go payload =
-        if String.length payload < 2 then
-          Fiber.read socket >>| reword_error (fun err -> `Unix err) >>? function
-          | `End ->
-              Fiber.return
-                (Error (`Msg "Incomplete response from SOCKSv5 server"))
-          | `Data str -> go (payload ^ str)
-        else
-          match String.sub payload 0 2 with
-          | "\x01\x00" ->
-              Fiber.return
-                (Ok (String.sub payload 2 (String.length payload - 2)))
-          | _ -> Fiber.return (Error (`Msg "Invalid username/password"))
+        match Socks.parse_socks5_username_password_response payload with
+        | Ok (true, leftover) -> Fiber.return (Ok leftover)
+        | Ok (false, _leftover) ->
+            Fiber.return (Error (`Msg "Invalid username/password"))
+        | Error `Invalid_request ->
+            Fiber.return
+              (Error (`Msg "Invalid response from the SOCKSv5 server"))
+        | Error `Incomplete_request -> (
+            Fiber.read socket >>| reword_error (fun err -> `Unix err)
+            >>? function
+            | `End ->
+                Fiber.return
+                  (Error (`Msg "Incomplete response from SOCKSv5 server"))
+            | `Data str -> go (payload ^ str))
       in
       go payload >>? fun payload -> finally_connect_socks5 socket payload dst
   | `No_authentication_required payload ->
