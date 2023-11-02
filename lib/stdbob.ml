@@ -28,6 +28,7 @@ let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 let io_buffer_size = 65536 (* 0x10000 & = De.io_buffer_size *)
 let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 let never _ = assert false
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 
 let bigstring_blit src ~src_off dst ~dst_off ~len =
   if

@@ -116,7 +116,7 @@ let run_server quiet g (_, he) through mime_type compression addr secure_port
         Password.identity_of_seed (Password.compile Dict.En.words) ~seed
         |> Result.get_ok
       in
-      Fmt.pr "%s\rIdentity: %s\n%!" Terminal.Ansi.erase_line identity;
+      Progress.interject_with (fun () -> Fmt.pr "Identity: %s\n%!" identity);
       Fiber.return ()
   in
   Bob_clear.server socket ~reproduce ~g ~identity secret
