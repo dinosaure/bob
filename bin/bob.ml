@@ -27,10 +27,32 @@ let cmd =
   let doc = "An universal & secure peer-to-peer file-transfer program." in
   let man =
     [
-      `S Manpage.s_description;
+      `S Manpage.s_synopsis;
       `P
         "$(tname) is a simple program to transfer a file from one to another. \
-         It requires a $(b,relay).";
+         It requires a $(b,relay). It's very easy to use. It consists of two \
+         sub-commands, $(b,recv) and $(b,send). Otherwise, $(tname) expects 1 \
+         argument, which can be either a password (to receive something) or a \
+         file / folder (to send it).";
+      `S Manpage.s_description;
+      `P
+        "If you wish to receive a file, you must be in possession of a \
+         password given by the person who wishes to transmit his or her file. \
+         You can then launch $(tname) in this way to receive the file.";
+      `Pre "\\$ $(tname) bryank-soindentazy";
+      `P
+        "You can use various options, such as automatically accepting the file \
+         ($(b,-y)), defining a specific destination ($(b,-o)) or specifying a \
+         relay other than the default one.";
+      `Pre "\\$ $(tname) -r bob.relay.com -y -o file.txt bryank-soindentazy";
+      `P
+        "If you want to send a document, simply specify its location as \
+         follows:";
+      `Pre "\\$ $(tname) file.txt";
+      `P
+        "You can choose whether or not to compress the document. For images \
+         and videos, we advise you $(b,not) to compress.";
+      `Pre "\\$ $(tname) --no-compression Le.Sens.de.la.Fete.2017.FRENCH.mkv";
     ]
   in
   Cmd.v (Cmd.info "bob" ~version:"%%VERSION%%" ~doc ~man) term

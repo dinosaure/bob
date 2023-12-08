@@ -491,8 +491,10 @@ let run fiber =
       (fun (Fiber (k, ivar)) ->
         try k ivar (fun () -> ())
         with exn ->
+          let bt = Printexc.get_raw_backtrace () in
           Log.err (fun m ->
-              m "Got an unexpected exception: %s" (Printexc.to_string exn)))
+              m "Got an unexpected exception: %s" (Printexc.to_string exn));
+          Log.err (fun m -> m "%s" (Printexc.raw_backtrace_to_string bt)))
       fbs;
 
     List.iter (fun ivar -> Ivar.fill ivar ()) slp;
