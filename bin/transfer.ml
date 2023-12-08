@@ -95,7 +95,11 @@ let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
 
 let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
     sockaddr stream =
-  let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
+  let { Unix.p_proto; _ } =
+    try Unix.getprotobyname "tcp"
+    with _ ->
+      (* fail on Windows *) { p_name = "tcp"; p_aliases = [||]; p_proto = 0 }
+  in
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
   let open Fiber in
@@ -136,7 +140,11 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
 
 let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
     ~shared_keys sockaddr =
-  let { Unix.p_proto; _ } = Unix.getprotobyname "tcp" in
+  let { Unix.p_proto; _ } =
+    try Unix.getprotobyname "tcp"
+    with _ ->
+      (* fail on Windows *) { p_name = "tcp"; p_aliases = [||]; p_proto = 0 }
+  in
   let domain = Unix.domain_of_sockaddr sockaddr in
   let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
   let open Fiber in
