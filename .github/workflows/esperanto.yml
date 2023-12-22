@@ -5,20 +5,20 @@ jobs:
     strategy:
       matrix:
         operating-system: [ubuntu-latest]
-        ocaml-version: ["4.14.0"]
+        ocaml-version: ["4.14.1"]
     runs-on: ${{ matrix.operating-system }}
     steps:
     - uses: actions/checkout@v2
     - uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: ${{ matrix.ocaml-version }}
+        opam-disable-sandboxing: true
 # See jart/cosmopolitan#3
     - name: Fix binfmt and Cosmopolitan
       run: sudo sh -c "echo ':APE:M::MZqFpD::/bin/sh:' >/proc/sys/fs/binfmt_misc/register"
     - name: Pin & Install workflows
       run: |
-        opam install esperanto.0.0.4
-        opam install ocamlfind opam-monorepo
+        opam install ocamlfind opam-monorepo x86_64-esperanto aarch64-esperanto
         opam repo add upstream git+https://github.com/ocaml/opam-repository.git
         opam repo add dune-universe git+https://github.com/dune-universe/opam-overlays.git
         opam repo add mirage-universe git+https://github.com/dune-universe/mirage-opam-overlays.git
@@ -26,9 +26,9 @@ jobs:
       run: |
         env OPAMVAR_monorepo='opam-monorepo' opam monorepo lock --require-cross-compile --build-only --ocaml-version ${{ matrix.ocaml-version }} com
         env OPAMVAR_monorepo='opam-monorepo' opam monorepo pull
-        opam exec -- dune build -x esperanto -p bob bin/bob.exe
-        objcopy -S -O binary _build/default.esperanto/bin/bob.exe bob.com
-        strip bob.com
+        opam exec -- dune build -x x86_64_esperanto -p bob bin/bob.exe
+        opam exec -- dune build -x aarch64_esperanto -p bob bin/bob.exe
+        ./link.sh
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:
