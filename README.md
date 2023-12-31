@@ -9,9 +9,9 @@ of bob is to offer the possibility to share documents without any constraints:
 - accesibility: we mainly want to provide one binary which works anywhere
 - usage
 
-The software is available here: [bob.com (x86_64)][bob-com]. You can use it
-directly without any installation! You can check how we built `bob.com` via our
-website: [builds.osau.re](https://builds.osau.re)
+The software is available here: [bob.com][bob-com]. You can use it directly
+without any installation! You can check how we built `bob.com` via our website:
+[builds.osau.re](https://builds.osau.re)
 
 For this purpose, bob uses [state-of-the-art][article] security,
 [Cosmopolitan][cosmopolitan] to ensure its accessibility on all systems and a
@@ -224,7 +224,7 @@ $ iptables -t nat -A BOB ! -s 10.0.0.2/32 \
 
 You can launch the unikernel with `albatross` with:
 ```sh
-$ albatross-client-local create --net=service \
+$ albatross-client create --net=service \
     --arg="--ipv4=10.0.0.2/24"
     --arg="--ipv4-gateway=10.0.0.1" bob bob.hvt
 ```

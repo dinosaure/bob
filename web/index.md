@@ -441,8 +441,8 @@ dist/bob.hvt
 An image `bob.hvt` is crafted and it can be launched with [Solo5][solo5] and
 [albatross][albatross]. Albatross is available _via_ `apt` if you want:
 ```bash
-$ wget -qO- https://apt.robur.coop/gpg.pub | apt-key add -
-$ echo "deb https://apt.robur.coop ubuntu-20.04 main" >> /etc/apt/sources.list
+$ curl -fsSL https://apt.robur.coop/gpg.pub | gpg --dearmor > /usr/share/keyrings/apt.robur.coop.gpg
+$ echo "deb [signed-by=/usr/share/keyrings/apt.robur.coop.gpg] https://apt.robur.coop ubuntu-20.04 main" > /etc/apt/sources.list.d/robur.list
 $ sudo apt update
 $ sudo apt install solo5-hvt albatross
 ```
@@ -504,7 +504,7 @@ information for such infrastructures.
 
 You can finally launch the unikernel with `albatross` with:
 ```bash
-$ albatross-client-local create --net=service \
+$ albatross-client create --net=service \
     --arg="--ipv4=10.0.0.2/24"
     --arg="--ipv4-gateway=10.0.0.1" bob bob.hvt
 ```
@@ -673,8 +673,10 @@ all the progress and changes on our relay. For a more detailed tracking, we
 advise you to follow our [GitHub repository][github-repository].
 
 **Q**: My computer has an ARM-64 processor (like a Mac M1), can I run Bob? \
-**A**: Yes, Bob integrates a mini `x86_64` emulator which is able to run the
-program on a ARM-64 processor. Bob is **actually** portable!
+**A**: Yes, Bob is a binary that integrates 2 assemblers, x86_64 and aarch64.
+So, depending on the machine on which Bob is running, one of the two
+"sub-binaries" is chosen to run Bob natively. In this case, Macs with an Apple
+Silicon processor can run Bob.
 
 ## Manifest
 
@@ -897,10 +899,10 @@ team's view behind the project.
 [google-cloud]: https://cloud.google.com/
 [seccomp]: https://code.google.com/archive/p/seccompsandbox/wikis/overview.wiki
 [opam]: https://opam.ocaml.org/
-[albatross]: https://github.com/roburio/albatross
+[albatross]: https://github.com/robur-coop/albatross
 [solo5]: https://github.com/solo5/solo5
 [github-repository]: https://github.com/dinosaure/bob
-[donate]: https://robur.io/Donate
+[donate]: https://robur.coop/Donate
 [osau.re]: https://blog.osau.re/
 [uncensoreddns]: https://blog.uncensoreddns.org/
 [robur]: https://robur.coop/
