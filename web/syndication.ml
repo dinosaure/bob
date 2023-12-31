@@ -134,6 +134,29 @@ The website will be updated accordingly.|markdown}
     ~title:(Text "Esperanto 0.0.3 and portability") ~updated ~published:updated
     ~content ~id ()
 
+let entry_2023_31_12 g =
+  let id = generate_id g in
+  let updated = Syndic.Date.of_rfc3339 "2023-12-31 12:00:00+01:00" in
+  let content =
+    of_markdown
+      {markdown|Esperanto.0.0.5 and portability
+
+Hello Bob users. On this festive day, a major update has just been made to Bob.
+We have just updated Cosmopolitan to version 3.1 (released in November 2023).
+Among other things, this makes Bob available natively on aarch64 architectures
+(previous versions used blink to translate the x86_64 assembler to aarch64).
+We're delighted that Bob now runs on Macs with an Apple Silicon processor.
+
+For 2024, we now have clear objectives:
+- support for Tor and anonymisation (already functional but requiring a change to the protocol)
+- support for 'resuming' a failed transfer
+- transfer via UDP on a local network|markdown}
+  in
+  Syndic.Atom.entry
+    ~authors:Person.(romain_calascibetta, [])
+    ~title:(Text "Esperanto.0.0.5 and portability") ~updated ~published:updated
+    ~content ~id ()
+
 let generator = Syndic.Atom.generator ~version:"1.6.1" "Syndic"
 
 let feed g =
@@ -151,6 +174,7 @@ let feed g =
         entry_2022_12_14_1;
         entry_2023_01_18;
         entry_2023_28_04;
+        entry_2023_31_12;
       ]
   in
   let authors =
