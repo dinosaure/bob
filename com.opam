@@ -10,11 +10,15 @@ license:      "MIT"
 synopsis:     "A peer-to-peer file-transfer tool"
 
 build: [
-  [ "dune" "build" "-x" "x86_64-esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
-  [ "dune" "build" "-x" "aarch64-esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
-  [ "sh" "link.sh" ]
+  [ "dune" "build" "-x" "x86_64_esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
+  [ "dune" "build" "-x" "aarch64_esperanto" "-p" name "bin/bob.exe" "-j" jobs ]
+  [ "sh" "-c" "apelink -o bob.com -l %{bin}%/ape-x86_64.elf -l %{bin}%/ape-aarch64.elf -M %{bin}%/ape-m1.c _build/default.x86_64_esperanto/bin/bob.exe.dbg _build/default.aarch64_esperanto/bin/bob.exe.dbg" ]
 ]
 run-test: [ "dune" "runtest" "-p" name "-j" jobs ]
+
+install: [
+  [ "cp" "bob.com" "%{bin}%/bob.com" ]
+]
 
 depends: [
   "ocaml"                  { build & >= "4.13.0" & < "5.0.0" }
