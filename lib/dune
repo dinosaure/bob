@@ -22,9 +22,9 @@
  (public_name bob)
  (modules crypto state handshake bob)
  (libraries
-  cstruct
   bob.std
   bob.qe
+  bob.protocol
   mirage-crypto
   hxd.core
   hxd.string
