@@ -1,3 +1,4 @@
 (library
  (name bob_protocol)
- (public_name bob.protocol))
+ (public_name bob.protocol)
+ (libraries astring fmt))
