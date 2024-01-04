@@ -17,9 +17,12 @@ and 'err info = { error : 'err; buffer : Bytes.t; committed : int }
 type error =
   [ `End_of_input | `Not_enough_space | `Invalid_packet | `Partial_packet ]
 
-val return : 'v -> decoder -> ('v, [> error ]) state
+val pp_error : error Fmt.t
+val return : 'v -> decoder -> ('v, 'err) state
+val fail : 'err -> decoder -> ('v, 'err) state
 
 val prompt :
   (decoder -> ('v, ([> error ] as 'err)) state) -> decoder -> ('v, 'err) state
 
 val peek_packet : decoder -> string
+val junk_packet : decoder -> unit

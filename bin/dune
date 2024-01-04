@@ -19,22 +19,31 @@
  (modules compress)
  (libraries bob.stream))
 
+(library
+ (name args)
+ (public_name bob.args)
+ (modules args)
+ (libraries
+  cmdliner
+  fmt
+  logs.cli
+  ipaddr
+  ipaddr.unix
+  base64
+  bob.password
+  bob.temp
+  bob.happy-eyeballs
+  ca-certs
+  tls
+  bob.dns
+  fmt.cli
+  fmt.tty))
+
 (executable
  (name bob)
  (public_name bob)
  (package bob)
- (modules
-  prgrss
-  transfer
-  daemon
-  bob
-  clear
-  bob_clear
-  recv
-  send
-  relay
-  connect
-  args)
+ (modules prgrss transfer daemon bob clear bob_clear recv send relay connect)
  (libraries
   ca-certs
   progress
@@ -47,12 +56,28 @@
   logs.cli
   fmt.tty
   logs.fmt
+  bob.args
   bob.password
   bob.unix
   bob.pack
   bob.tls
   bob.dns
   bob.happy-eyeballs))
+
+(executable
+ (name talk)
+ (public_name bob.talk)
+ (package bob)
+ (modules talk)
+ (libraries
+  cmdliner
+  bob.args
+  bob.std
+  bob.fiber
+  bob.protocol
+  bob.unix
+  bob.happy-eyeballs
+  bob))
 
 ; (rule
 ;  (target cat.com)

@@ -1,6 +1,9 @@
 type encoder = { payload : bytes; mutable pos : int }
 type error = [ `Not_enough_space ]
 
+let pp_error ppf = function
+  | `Not_enough_space -> Fmt.string ppf "Not enough space"
+
 type 'err state =
   | Write of {
       buffer : string;
@@ -51,3 +54,11 @@ let write str encoder =
     if len < l then leave_with encoder `Not_enough_space
   in
   go 0 (String.length str) encoder
+
+let write k ~pkt:str encoder =
+  let len = String.length str in
+  let hdr = Fmt.str "%04x" len in
+  (* TODO(dinosaure): optimise... *)
+  write hdr encoder;
+  write str encoder;
+  flush k encoder

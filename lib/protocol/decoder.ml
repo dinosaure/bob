@@ -18,6 +18,12 @@ and 'err info = { error : 'err; buffer : bytes; committed : int }
 type error =
   [ `End_of_input | `Not_enough_space | `Invalid_packet | `Partial_packet ]
 
+let pp_error ppf = function
+  | `End_of_input -> Fmt.string ppf "End of input"
+  | `Not_enough_space -> Fmt.string ppf "Not enough space"
+  | `Invalid_packet -> Fmt.string ppf "Invalid packet"
+  | `Partial_packet -> Fmt.string ppf "Partial packet"
+
 exception Leave of error info
 
 let return (type v) (value : v) _ : (v, 'err) state = Done value
@@ -60,7 +66,7 @@ let at_least_one_packet decoder =
           }
   else Ok None
 
-let error error (decoder : decoder) : _ state =
+let fail error (decoder : decoder) : _ state =
   Error { error; buffer = decoder.buffer; committed = decoder.pos }
 
 let leave error (decoder : decoder) =
@@ -76,13 +82,13 @@ let prompt :
     decoder.max <- rest;
     decoder.pos <- 0);
   let rec go off =
-    if off = Bytes.length decoder.buffer then error `Not_enough_space decoder
+    if off = Bytes.length decoder.buffer then fail `Not_enough_space decoder
     else
       match at_least_one_packet { decoder with max = off } with
       | Ok None ->
           let continue = function
             | `Len len -> go (off + len)
-            | `End -> error `End_of_input decoder
+            | `End -> fail `End_of_input decoder
           in
           Read
             {
@@ -101,5 +107,11 @@ let prompt :
 let peek_packet decoder =
   match at_least_one_packet decoder with
   | Ok (Some len) -> Bytes.sub_string decoder.buffer (decoder.pos + 4) len
+  | Ok None -> leave `Partial_packet decoder
+  | Error err -> raise (Leave err)
+
+let junk_packet decoder =
+  match at_least_one_packet decoder with
+  | Ok (Some len) -> decoder.pos <- decoder.pos + 4 + len
   | Ok None -> leave `Partial_packet decoder
   | Error err -> raise (Leave err)
