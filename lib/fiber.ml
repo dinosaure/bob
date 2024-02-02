@@ -288,7 +288,7 @@ let close fd =
 external bigstring_read :
   Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
   = "bob_bigstring_read"
-  [@@noalloc]
+[@@noalloc]
 
 external retrieve_error : unit -> Unix.error = "bob_retrieve_error"
 
@@ -338,7 +338,7 @@ let sigrd fd =
 external bigstring_write :
   Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
   = "bob_bigstring_write"
-  [@@noalloc]
+[@@noalloc]
 
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with
