@@ -1,4 +1,4 @@
-let src = Logs.Src.create "bob.protocol"
+let src = Logs.Src.create "bob.handshake"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
