@@ -62,7 +62,7 @@
  (name git)
  (public_name bob.git)
  (modules git)
- (libraries bob.fiber bob.stream cstruct digestif))
+ (libraries bob.fiber bob.stream cstruct carton digestif))
 
 (library
  (name pack)

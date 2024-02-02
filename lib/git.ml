@@ -7,11 +7,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 module SHA1 = struct
   include Digestif.SHA1
 
-  let hash x = Hashtbl.hash x
   let length = digest_size
-  let feed = feed_bigstring
-  let null = digest_string ""
-  let compare a b = String.compare (to_raw_string a) (to_raw_string b)
 
   let sink_bigstring ?(ctx = empty) () =
     Stream.Sink.make ~init:(Fiber.always ctx)
@@ -56,6 +52,9 @@ let tree_of_string ?path str =
 
 let v_space = Cstruct.string " "
 let v_null = Cstruct.string "\x00"
+
+type elt = [ `Reg of Bob_fpath.t * SHA1.t | `Dir of Bob_fpath.t * SHA1.t ]
+type tree = elt list
 
 let tree_of_cstruct ?path contents =
   let path_with ~name =
@@ -114,31 +113,6 @@ module Filesystem = struct
       try Sys.readdir (Bob_fpath.to_string d) with _exn -> [||]
     in
     Array.to_list <.> readdir
-
-  let rec traverse ~get ~add visited stack ~f acc =
-    match stack with
-    | [] -> Fiber.return acc
-    | x :: r ->
-        if List.exists (Bob_fpath.equal x) visited then
-          traverse ~get ~add visited r ~f acc
-        else
-          let open Fiber in
-          let contents = get x in
-          traverse ~get ~add (x :: visited) (add contents stack) ~f acc >>= f x
-
-  let fold ?(dotfiles = false) ~f acc paths =
-    let dir_child d acc bname =
-      if (not dotfiles) && bname.[0] = '.' then acc
-      else Bob_fpath.(d / bname) :: acc
-    in
-    let add stack vs = vs @ stack in
-    let get path =
-      let entries = readdir path in
-      List.fold_left (dir_child path) [] entries
-    in
-    traverse ~get ~add [] paths ~f acc
-
-  let fold ?dotfiles ~f acc d = fold ?dotfiles ~f acc [ d ]
 end
 
 let serialize_directory entries =
