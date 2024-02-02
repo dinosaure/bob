@@ -4,7 +4,7 @@ let src = Logs.Src.create "bob.pack"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module SHA256 = struct
+module SHA1 = struct
   include Digestif.SHA1
 
   let hash x = Hashtbl.hash x
@@ -12,16 +12,6 @@ module SHA256 = struct
   let feed = feed_bigstring
   let null = digest_string ""
   let compare a b = String.compare (to_raw_string a) (to_raw_string b)
-
-  let sink_bigstring ?(ctx = empty) () =
-    Stream.Sink.make ~init:(Fiber.always ctx)
-      ~push:(fun ctx bstr -> Fiber.return (feed_bigstring ctx bstr))
-      ~stop:(Fiber.return <.> get) ()
-
-  let sink_string ?(ctx = empty) () =
-    Stream.Sink.make ~init:(Fiber.always ctx)
-      ~push:(fun ctx str -> Fiber.return (feed_string ctx str))
-      ~stop:(Fiber.return <.> get) ()
 end
 
 module Scheduler = Carton.Make (Fiber)
@@ -35,14 +25,14 @@ let scheduler =
   }
 
 type store = {
-  store : (SHA256.t, Bob_fpath.t) Hashtbl.t;
-  rstore : (Bob_fpath.t, SHA256.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
-  root : (SHA256.t * SHA256.t) option;
+  store : (SHA1.t, Bob_fpath.t) Hashtbl.t;
+  rstore : (Bob_fpath.t, SHA1.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
+  root : (SHA1.t * SHA1.t) option;
   path : Bob_fpath.t;
 }
 
 let length { rstore; _ } =
-  let module Set = Set.Make (SHA256) in
+  let module Set = Set.Make (SHA1) in
   let hashes =
     Hashtbl.fold (fun _ (hash, _) set -> Set.add hash set) rstore Set.empty
   in
@@ -84,7 +74,7 @@ end
 external bigstring_read :
   Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
   = "bob_bigstring_read"
-  [@@noalloc]
+[@@noalloc]
 
 let rec full_read fd ba off len =
   if len > 0 then
@@ -125,29 +115,6 @@ let load_file path =
       Fmt.failwith "openfile(%a): %s" Bob_fpath.pp path
         (Unix.error_message errno)
 
-let serialize_directory entries =
-  (* XXX(dinosaure): à la Git. *)
-  let entries =
-    List.sort (fun (a, _) (b, _) -> Bob_fpath.compare a b) entries
-  in
-  let open Stream in
-  let open Stream in
-  Stream.of_list entries >>= fun (p, hash) ->
-  match Bob_fpath.is_dir_path p with
-  | true ->
-      Stream.of_list
-        [
-          "40000 ";
-          Bob_fpath.(to_string (rem_empty_seg p));
-          "\x00";
-          SHA256.to_raw_string hash;
-        ]
-      |> Fiber.return
-  | false ->
-      Stream.of_list
-        [ "100644 "; Bob_fpath.to_string p; "\x00"; SHA256.to_raw_string hash ]
-      |> Fiber.return
-
 let load_directory rstore path =
   Log.debug (fun m -> m "Load directory: %a." Bob_fpath.pp path);
   let entries = Filesystem.readdir path in
@@ -165,20 +132,20 @@ let load_directory rstore path =
   in
   let open Fiber in
   let open Stream in
-  Stream.to_string (serialize_directory entries) >>| fun str ->
+  Stream.to_string (Git.serialize_directory entries) >>| fun str ->
   Carton.Dec.v ~kind:`B
     (bigstring_of_string str ~off:0 ~len:(String.length str))
 
 let load_root ~real_length path hash =
   let basename = Bob_fpath.basename path in
   let entry =
-    Fmt.str "%s\000%s%d" basename (SHA256.to_raw_string hash) real_length
+    Fmt.str "%s\000%s%d" basename (SHA1.to_raw_string hash) real_length
   in
   Fiber.return
     (Carton.Dec.v ~kind:`A
        (bigstring_of_string entry ~off:0 ~len:(String.length entry)))
 
-let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
+let load : store -> SHA1.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
  fun store hash ->
   match (Hashtbl.find_opt store.store hash, store.root) with
   | None, Some (hash_of_root, hash_of_tree) when hash_of_root = hash ->
@@ -195,7 +162,7 @@ let load : store -> SHA256.t -> (Carton.Dec.v, Scheduler.t) Carton.io =
       | Unix.S_DIR -> Scheduler.inj (load_directory store.rstore real_path)
       | _ -> failwith "Invalid kind of object")
   | None, (Some _ | None) ->
-      Log.err (fun m -> m "The object %a does not exists." SHA256.pp hash);
+      Log.err (fun m -> m "The object %a does not exists." SHA1.pp hash);
       raise Not_found
 
 let deltify ~reporter ?(compression = true) store hashes =
@@ -216,7 +183,7 @@ let deltify ~reporter ?(compression = true) store hashes =
           let open Fiber in
           reporter !counter >>| fun () -> counter := 0
       end in
-      let module Delta = Carton.Enc.Delta (Scheduler) (Fiber) (SHA256) (Verbose)
+      let module Delta = Carton.Enc.Delta (Scheduler) (Fiber) (SHA1) (Verbose)
       in
       let open Fiber in
       let f hash =
@@ -230,7 +197,7 @@ let deltify ~reporter ?(compression = true) store hashes =
       Stream.Stream.to_array entries >>= fun entries ->
       Delta.delta
         ~threads:(List.init 4 (fun _ -> load store))
-        ~weight:10 ~uid_ln:SHA256.length entries
+        ~weight:10 ~uid_ln:SHA1.length entries
       >>| Stream.Stream.of_array
   | false ->
       (* XXX(dinosaure): just generate targets without patch compression. *)
@@ -250,11 +217,11 @@ let deltify ~reporter ?(compression = true) store hashes =
       Fiber.return (Stream.map f hashes)
 
 type t = {
-  mutable ctx : SHA256.ctx;
+  mutable ctx : SHA1.ctx;
   mutable cursor : int64;
   b : Carton.Enc.b;
-  uid : SHA256.t Carton.Enc.uid;
-  offsets : (SHA256.t, int64) Hashtbl.t;
+  uid : SHA1.t Carton.Enc.uid;
+  offsets : (SHA1.t, int64) Hashtbl.t;
 }
 
 let rec encode_target t ~push ~acc encoder =
@@ -262,7 +229,7 @@ let rec encode_target t ~push ~acc encoder =
   match Carton.Enc.N.encode ~o:t.b.o encoder with
   | `Flush (encoder, len) ->
       push acc (Bigarray.Array1.sub t.b.o 0 len) >>= fun acc ->
-      t.ctx <- SHA256.feed_bigstring t.ctx t.b.o ~off:0 ~len;
+      t.ctx <- SHA1.feed_bigstring t.ctx t.b.o ~off:0 ~len;
       t.cursor <- Int64.add t.cursor (Int64.of_int len);
       let encoder =
         Carton.Enc.N.dst encoder t.b.o 0 (Bigarray.Array1.dim t.b.o)
@@ -276,8 +243,8 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
       Log.debug (fun m -> m "Start to encode a PACK file.");
       let uid =
         {
-          Carton.Enc.uid_ln = SHA256.digest_size;
-          Carton.Enc.uid_rw = SHA256.to_raw_string;
+          Carton.Enc.uid_ln = SHA1.digest_size;
+          Carton.Enc.uid_rw = SHA1.to_raw_string;
         }
       in
       let b =
@@ -295,9 +262,9 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
       let open Fiber in
       k.init () >>= fun acc ->
       let hdr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 12 in
-      let ctx = SHA256.empty in
+      let ctx = SHA1.empty in
       Carton.Enc.header_of_pack ~length hdr 0 12;
-      let ctx = SHA256.feed_bigstring ctx hdr ~off:0 ~len:12 in
+      let ctx = SHA1.feed_bigstring ctx hdr ~off:0 ~len:12 in
       k.push acc hdr >>= fun acc ->
       Fiber.return
         ({ ctx; cursor = 12L; b; uid; offsets = Hashtbl.create length }, acc)
@@ -311,16 +278,16 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
         match Hashtbl.find_opt t.offsets hash with
         | Some v ->
             Log.debug (fun m ->
-                m "Ask where is %a: %08Lx (anchor: %08Lx)." SHA256.pp hash v
+                m "Ask where is %a: %08Lx (anchor: %08Lx)." SHA1.pp hash v
                   anchor);
             Fiber.return (Some (Int64.to_int v))
         | None ->
-            Log.err (fun m -> m "%a not found." SHA256.pp hash);
+            Log.err (fun m -> m "%a not found." SHA1.pp hash);
             Fiber.return None
       in
 
       Log.debug (fun m ->
-          m "Start to encode %a at %08Lx" SHA256.pp
+          m "Start to encode %a at %08Lx" SHA1.pp
             (Carton.Enc.target_uid target)
             t.cursor);
       Carton.Enc.encode_target ?level scheduler ~b:t.b
@@ -329,7 +296,7 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
       |> Scheduler.prj
       >>= fun (len, encoder) ->
       k.push acc (Bigarray.Array1.sub t.b.o 0 len) >>= fun acc ->
-      t.ctx <- SHA256.feed_bigstring t.ctx t.b.o ~off:0 ~len;
+      t.ctx <- SHA1.feed_bigstring t.ctx t.b.o ~off:0 ~len;
       t.cursor <- Int64.add t.cursor (Int64.of_int len);
       let encoder =
         Carton.Enc.N.dst encoder t.b.o 0 (Bigarray.Array1.dim t.b.o)
@@ -340,9 +307,9 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
     let full (_, acc) = k.full acc in
     let stop (t, acc) =
       let open Fiber in
-      let hash = SHA256.get t.ctx in
-      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA256.pp hash);
-      let hash = SHA256.to_raw_string hash in
+      let hash = SHA1.get t.ctx in
+      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA1.pp hash);
+      let hash = SHA1.to_raw_string hash in
       let hash = bigstring_of_string hash ~off:0 ~len:(String.length hash) in
       k.push acc hash >>= k.stop
     in
@@ -350,49 +317,9 @@ let pack ?(len = Stdbob.io_buffer_size) ~reporter ?level ~length store =
   in
   { Stream.flow }
 
-let hash_of_filename path =
-  let open Fiber in
-  let open Stream in
-  let len = Unix.(stat (Bob_fpath.to_string path)).Unix.st_size in
-  let hdr = Fmt.str "blob %d\000" len in
-  let ctx = SHA256.feed_string SHA256.empty hdr in
-  Stream.of_file path >>= function
-  | Error (`Msg err) -> Fmt.failwith "%s." err
-  | Ok stream -> Stream.(into (SHA256.sink_bigstring ~ctx ()) stream)
-
-let hash_of_directory ~root:_ rstore path =
-  let entries = Filesystem.readdir path in
-  let entries =
-    List.filter_map
-      (fun entry ->
-        let key = Bob_fpath.(path / entry) in
-        match Hashtbl.find_opt rstore key with
-        | Some (hash, `Dir) -> Some (Bob_fpath.(to_dir_path (v entry)), hash)
-        | Some (hash, `Reg) -> Some (Bob_fpath.v entry, hash)
-        | Some (_, `Root) -> None
-        | None -> None)
-      entries
-  in
-  let open Fiber in
-  let open Stream in
-  Stream.to_string (serialize_directory entries) >>= fun str ->
-  Log.debug (fun m -> m "Serialization of %a:" Bob_fpath.pp path);
-  Log.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
-  let hdr = Fmt.str "tree %d\000" (String.length str) in
-  Stream.(into (SHA256.sink_string ()) (double hdr str))
-
-let hash_of_root ~real_length ~root hash =
-  let str =
-    Fmt.str "%s\000%s%d" (Bob_fpath.basename root)
-      (SHA256.to_raw_string hash)
-      real_length
-  in
-  let hdr = Fmt.str "commit %d\000" (String.length str) in
-  SHA256.digest_string (hdr ^ str)
-
 let store root =
   let open Fiber in
-  let rstore : (Bob_fpath.t, SHA256.t * [ `Reg | `Dir | `Root ]) Hashtbl.t =
+  let rstore : (Bob_fpath.t, SHA1.t * [ `Reg | `Dir | `Root ]) Hashtbl.t =
     Hashtbl.create 0x100
   in
   let compute path =
@@ -400,14 +327,14 @@ let store root =
     let stat = Unix.stat (Bob_fpath.to_string path) in
     match stat.Unix.st_kind with
     | Unix.S_REG ->
-        hash_of_filename path >>= fun hash ->
-        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
+        Git.hash_of_filename path >>= fun hash ->
+        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA1.pp hash);
         Hashtbl.add rstore path (hash, `Reg);
         Fiber.return (Some hash)
     | Unix.S_DIR ->
         Log.debug (fun m -> m "Calculate the hash of %a" Bob_fpath.pp path);
-        hash_of_directory ~root rstore path >>= fun hash ->
-        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA256.pp hash);
+        Git.hash_of_directory ~root rstore path >>= fun hash ->
+        Log.debug (fun m -> m "%a -> %a" Bob_fpath.pp path SHA1.pp hash);
         Hashtbl.add rstore path (hash, `Dir);
         Fiber.return (Some hash)
     | _ -> Fiber.return None
@@ -430,10 +357,10 @@ let store root =
     if Sys.is_directory (Bob_fpath.to_string root) then (
       let hash_of_tree, _ = Hashtbl.find rstore root in
       let real_length = Hashtbl.length rstore in
-      let hash_of_root = hash_of_root ~real_length ~root hash_of_tree in
-      Log.debug (fun m -> m "Hash of root: %a" SHA256.pp hash_of_root);
+      let hash_of_root = Git.hash_of_root ~real_length ~root hash_of_tree in
+      Log.debug (fun m -> m "Hash of root: %a" SHA1.pp hash_of_root);
       Log.debug (fun m ->
-          m "Hash of tree: %a (%a)" SHA256.pp hash_of_tree Bob_fpath.pp root);
+          m "Hash of tree: %a (%a)" SHA1.pp hash_of_tree Bob_fpath.pp root);
       Hashtbl.add rstore (Bob_fpath.v "./") (hash_of_root, `Root);
       Some (hash_of_root, hash_of_tree))
     else None
@@ -443,7 +370,7 @@ let store root =
     | Some (hash_of_root, _) -> hash_of_root :: hashes
     | None -> hashes
   in
-  let module Set = Set.Make (SHA256) in
+  let module Set = Set.Make (SHA1) in
   let hashes =
     List.fold_left (fun set hash -> Set.add hash set) Set.empty hashes
   in
@@ -528,7 +455,7 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
       let hdr = hdr in
       let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
-      let ctx = ref (SHA256.feed_bigstring SHA256.empty hdr) in
+      let ctx = ref (SHA1.feed_bigstring SHA1.empty hdr) in
       let q = De.Queue.create 0x1000 in
       let w = De.Lz77.make_window ~bits:15 in
       let open Stream in
@@ -549,7 +476,7 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
                 m "@[<hov>%a@]"
                   (Hxd_string.pp Hxd.default)
                   (bigstring_to_string bstr));
-            ctx := SHA256.feed_bigstring !ctx bstr;
+            ctx := SHA1.feed_bigstring !ctx bstr;
             Fiber.return ())
           (Stream.double hdr_name name)
       in
@@ -561,7 +488,7 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
                 m "@[<hov>%a@]"
                   (Hxd_string.pp Hxd.default)
                   (bigstring_to_string bstr));
-            ctx := SHA256.feed_bigstring !ctx bstr;
+            ctx := SHA1.feed_bigstring !ctx bstr;
             Fiber.return ())
           Stream.(singleton hdr_file ++ file)
       in
@@ -569,12 +496,11 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
         singleton hdr ++ name ++ file
         ++ of_fiber (fun () ->
                finalise ();
-               let hash = SHA256.get !ctx in
-               Log.debug (fun m ->
-                   m "Hash of the PACK file: %a." SHA256.pp hash);
+               let hash = SHA1.get !ctx in
+               Log.debug (fun m -> m "Hash of the PACK file: %a." SHA1.pp hash);
                let hash =
-                 (bigstring_of_string ~off:0 ~len:SHA256.length
-                 <.> SHA256.to_raw_string)
+                 (bigstring_of_string ~off:0 ~len:SHA1.length
+                 <.> SHA1.to_raw_string)
                    hash
                in
                Fiber.return hash))
@@ -582,8 +508,8 @@ let make_one ?(len = Stdbob.io_buffer_size) ?(level = 4) ~reporter ~finalise
       Log.debug (fun m -> m "The PACK stream is ready to be sent.");
       Fiber.return (Ok stream)
 
-module First_pass = Carton.Dec.Fp (SHA256)
-module Verify = Carton.Dec.Verify (SHA256) (Scheduler) (Fiber)
+module First_pass = Carton.Dec.Fp (SHA1)
+module Verify = Carton.Dec.Verify (SHA1) (Scheduler) (Fiber)
 
 type status = Verify.status
 type decoder = First_pass.decoder
@@ -630,7 +556,7 @@ let rec until_await_or_peek :
       if src_len > 0 then Fiber.return (Some decoder, Some (src, src_len), acc)
       else Fiber.return (Some decoder, None, acc)
   | `End hash ->
-      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA256.pp hash);
+      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA1.pp hash);
       push acc (`End hash, None, De.bigstring_empty, 0) >>= fun acc ->
       Fiber.return (None, None, acc)
   | `Malformed err -> failwith err
@@ -831,21 +757,6 @@ let replace tbl k v =
   | v' -> if v < v' then Hashtbl.replace tbl k v'
   | exception _ -> Hashtbl.add tbl k v
 
-let digest ~kind ?(off = 0) ?len buf =
-  let len =
-    match len with Some len -> len | None -> Bigarray.Array1.dim buf - off
-  in
-  let ctx = SHA256.empty in
-  let ctx =
-    match kind with
-    | `A -> SHA256.feed_string ctx (Fmt.str "commit %d\000" len)
-    | `B -> SHA256.feed_string ctx (Fmt.str "tree %d\000" len)
-    | `C -> SHA256.feed_string ctx (Fmt.str "blob %d\000" len)
-    | `D -> SHA256.feed_string ctx (Fmt.str "mesg %d\000" len)
-  in
-  let ctx = SHA256.feed_bigstring ctx ~off ~len buf in
-  SHA256.get ctx
-
 let make_window bits = De.make_window ~bits
 
 let map (fd, st) ~pos len =
@@ -879,7 +790,7 @@ let collect entries =
         Fiber.return (succ idx, status :: acc)
     | `Ref (ptr, source, target, _weight) ->
         Log.debug (fun m ->
-            m "An object references to another one: %a" SHA256.pp ptr);
+            m "An object references to another one: %a" SHA1.pp ptr);
         replace sized offset (max target source);
         Hashtbl.add where offset idx;
         (try
@@ -901,7 +812,7 @@ let collect entries =
     | None, None -> []
   in
   let weight ~cursor = Hashtbl.find sized cursor in
-  let oracle = { Carton.Dec.where; children; digest; weight } in
+  let oracle = { Carton.Dec.where; children; digest = Git.digest; weight } in
   Fiber.return (matrix, oracle)
 
 let verify ?reporter:(verbose = ignore) ~oracle path matrix =
@@ -911,35 +822,11 @@ let verify ?reporter:(verbose = ignore) ~oracle path matrix =
   let pack =
     Carton.Dec.make (fd, st) ~allocate:make_window
       ~z:(De.bigstring_create De.io_buffer_size)
-      ~uid_ln:SHA256.length ~uid_rw:SHA256.of_raw_string Stdbob.never
+      ~uid_ln:SHA1.length ~uid_rw:SHA1.of_raw_string Stdbob.never
   in
   Verify.verify ~threads:4 pack ~map ~oracle ~verbose ~matrix >>= fun () ->
   Unix.close fd;
   Fiber.return ()
-
-let v_space = Cstruct.string " "
-let v_null = Cstruct.string "\x00"
-
-let readdir ~path contents =
-  let init () = Fiber.return (Cstruct.of_bigarray contents) in
-  let pull contents =
-    let ( >>= ) = Option.bind in
-    Cstruct.cut ~sep:v_space contents >>= fun (perm, contents) ->
-    Cstruct.cut ~sep:v_null contents >>= fun (name, contents) ->
-    (try Some (Cstruct.sub contents 0 SHA256.length) with _ -> None)
-    >>= fun hash ->
-    let contents = Cstruct.shift contents SHA256.length in
-    let hash = SHA256.of_raw_string (Cstruct.to_string hash) in
-    match Cstruct.to_string perm with
-    | "40000" ->
-        Some (`Dir (Bob_fpath.(path / Cstruct.to_string name), hash), contents)
-    | "100644" ->
-        Some (`Reg (Bob_fpath.(path / Cstruct.to_string name), hash), contents)
-    | _ -> failwith "Invalid kind of entry into a tree"
-  in
-  let pull = Fiber.return <.> pull in
-  let stop = Fiber.ignore in
-  Stream.Source { init; pull; stop }
 
 let rec create_filesystem ~reporter pack =
   let init = Fiber.always pack in
@@ -968,7 +855,9 @@ and create_directory ~reporter pack path hash =
   let contents =
     Bigarray.Array1.sub (Carton.Dec.raw contents) 0 (Carton.Dec.len contents)
   in
-  Stream.Stream.run ~from:(readdir ~path contents) ~via:Stream.Flow.identity
+  Stream.Stream.run
+    ~from:(Git.tree_of_cstruct ~path contents)
+    ~via:Stream.Flow.identity
     ~into:(create_filesystem ~reporter pack)
   >>= function
   | (), None -> Fiber.return pack
@@ -1020,13 +909,13 @@ let unpack path status =
           (Hashtbl.create 0x100) status
       in
       let find uid =
-        Logs.debug (fun m -> m "Try to find: %a." SHA256.pp uid);
+        Logs.debug (fun m -> m "Try to find: %a." SHA1.pp uid);
         Hashtbl.find id uid
       in
       let pack =
         Carton.Dec.make (fd, st) ~allocate:make_window
           ~z:(De.bigstring_create De.io_buffer_size)
-          ~uid_ln:SHA256.length ~uid_rw:SHA256.of_raw_string find
+          ~uid_ln:SHA1.length ~uid_rw:SHA1.of_raw_string find
       in
       let root =
         Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null
@@ -1042,9 +931,9 @@ let unpack path status =
       in
       let[@warning "-8"] (name :: rest) = String.split_on_char '\000' root in
       let rest = String.concat "\000" rest in
-      let hash = SHA256.of_raw_string (String.sub rest 0 SHA256.length) in
+      let hash = SHA1.of_raw_string (String.sub rest 0 SHA1.length) in
       let total =
         int_of_string
-          (String.sub rest SHA256.length (String.length rest - SHA256.length))
+          (String.sub rest SHA1.length (String.length rest - SHA1.length))
       in
       Fiber.return (Ok (name, total, hash, pack))
