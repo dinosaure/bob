@@ -18,7 +18,27 @@
  (modules handshake)
  (libraries logs.fmt fmt.tty bob alcotest))
 
+(executable
+ (name resume)
+ (modules resume)
+ (libraries logs.fmt fmt.tty bob alcotest))
+
+(executable
+ (name machine)
+ (modules machine)
+ (libraries hxd.string hxd.core bob.protocol alcotest))
+
 (rule
  (alias runtest)
  (action
   (run ./handshake.exe --color=always)))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./resume.exe --color=always)))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./machine.exe --color=always)))

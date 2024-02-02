@@ -21,8 +21,6 @@
  (name bob)
  (public_name bob)
  (modules crypto state handshake bob)
- (libraries bob.std bob.qe mirage-crypto hxd.core hxd.string logs spoke.core))
- (modules crypto state protocol bob)
  (libraries
   bob.std
   bob.qe
@@ -47,6 +45,12 @@
   (language c)
   (names bob))
  (libraries bob.std bob.fpath ke bheap logs unix))
+
+(library
+ (name json)
+ (public_name bob.json)
+ (modules json)
+ (libraries jsonm fmt))
 
 (library
  (name stream)

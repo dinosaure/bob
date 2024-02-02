@@ -1,3 +1,7 @@
+let src = Logs.Src.create "bob.protocol.decoder"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 type decoder = { buffer : Bytes.t; mutable pos : int; mutable max : int }
 
 let io_buffer_size = 65536
@@ -28,25 +32,34 @@ exception Leave of error info
 
 let return (type v) (value : v) _ : (v, 'err) state = Done value
 
+let rec map ~f = function
+  | Error _ as err -> err
+  | Done v -> Done (f v)
+  | Read { buffer; off; len; continue } ->
+      let continue v = map ~f (continue v) in
+      Read { buffer; off; len; continue }
+
+let ( let+ ) x f = map ~f x
+
 let safe :
     (decoder -> ('v, ([> error ] as 'err)) state) -> decoder -> ('v, 'err) state
     =
  fun k decoder ->
   try k decoder
   with Leave { error = #error as error; buffer; committed } ->
-    Error { error = (error :> 'err); buffer; committed }
+    Error { error :> 'err; buffer; committed }
 
 (* TODO(dinosaure): check [len] and avoid overflow. *)
 let of_hex str ~off ~len =
   let of_chr = function
     | '0' .. '9' as chr -> Char.code chr - Char.code '0'
-    | 'a' .. 'z' as chr -> Char.code chr - Char.code 'a' + 10
-    | 'A' .. 'Z' as chr -> Char.code chr - Char.code 'A' + 10
+    | 'a' .. 'f' as chr -> Char.code chr - Char.code 'a' + 10
+    | 'A' .. 'F' as chr -> Char.code chr - Char.code 'A' + 10
     | _ -> invalid_arg "Invalid hexadecimal character"
   in
   let value = ref 0 in
-  for i = len - 1 downto 0 do
-    value := (!value lsr 4) + of_chr str.[off + i]
+  for i = 0 to len - 1 do
+    value := (!value lsl 4) + of_chr str.[off + i]
   done;
   !value
 
@@ -106,7 +119,9 @@ let prompt :
 
 let peek_packet decoder =
   match at_least_one_packet decoder with
-  | Ok (Some len) -> Bytes.sub_string decoder.buffer (decoder.pos + 4) len
+  | Ok (Some len) ->
+      Log.debug (fun m -> m "Got a packet of %d byte(s)." len);
+      Bytes.sub_string decoder.buffer (decoder.pos + 4) len
   | Ok None -> leave `Partial_packet decoder
   | Error err -> raise (Leave err)
 

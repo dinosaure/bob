@@ -143,4 +143,4 @@ let test03 =
   | Ok _ -> Alcotest.fail "Unexpected packets"
   | Error err -> Alcotest.failf "%a" Bob.Handshake.pp_error err
 
-let () = Alcotest.run "protocol" [ ("recv", [ test01; test02; test03 ]) ]
+let () = Alcotest.run "handshake" [ ("recv", [ test01; test02; test03 ]) ]

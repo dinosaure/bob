@@ -20,6 +20,8 @@ type error =
 val pp_error : error Fmt.t
 val return : 'v -> decoder -> ('v, 'err) state
 val fail : 'err -> decoder -> ('v, 'err) state
+val map : f:('a -> 'b) -> ('a, 'err) state -> ('b, 'err) state
+val ( let+ ) : ('a, 'err) state -> ('a -> 'b) -> ('b, 'err) state
 
 val prompt :
   (decoder -> ('v, ([> error ] as 'err)) state) -> decoder -> ('v, 'err) state
