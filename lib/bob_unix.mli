@@ -43,7 +43,7 @@ module Make (IO : IO) : sig
     [ `Connection_closed_by_relay
     | `Wr of IO.write_error
     | `Rd of IO.error
-    | Bob.Protocol.error ]
+    | Bob.Handshake.error ]
 
   val pp_error : error Fmt.t
 

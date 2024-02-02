@@ -1,4 +1,4 @@
-module Protocol = Protocol
+module Handshake = Handshake
 module State = State
 module Crypto = Crypto
 
@@ -15,9 +15,9 @@ module Server : sig
     | `Close
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     | `Agreement of string
-    | `Error of Protocol.error ]
+    | `Error of Handshake.error ]
 
-  val send : t -> [> `Continue | `Write of string | `Error of Protocol.error ]
+  val send : t -> [> `Continue | `Write of string | `Error of Handshake.error ]
 end
 
 module Client : sig
@@ -34,9 +34,9 @@ module Client : sig
     | `Close
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     | `Agreement of string
-    | `Error of Protocol.error ]
+    | `Error of Handshake.error ]
 
-  val send : t -> [> `Continue | `Write of string | `Error of Protocol.error ]
+  val send : t -> [> `Continue | `Write of string | `Error of Handshake.error ]
   val agreement : t -> [ `Accept | `Refuse ] -> unit
 end
 

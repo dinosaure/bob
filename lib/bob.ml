@@ -2,7 +2,7 @@ let src = Logs.Src.create "bob.core"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 module State = State
-module Protocol = Protocol
+module Handshake = Handshake
 module Crypto = Crypto
 
 type 'peer income =
@@ -32,9 +32,9 @@ let data_is_empty = function `End | `Data (_, _, 0) -> true | `Data _ -> false
 module Make (Peer : PEER) = struct
   type t = {
     state : Peer.t;
-    ctx : Protocol.ctx;
-    mutable ic : (int * State.raw) Protocol.t;
-    mutable oc : unit Protocol.t;
+    ctx : Handshake.ctx;
+    mutable ic : (int * State.raw) Handshake.t;
+    mutable oc : unit Handshake.t;
     mutable closed : bool;
   }
 
@@ -43,7 +43,7 @@ module Make (Peer : PEER) = struct
 
   let receive t data =
     let rec go data = function
-      | Protocol.Done (uid, packet) -> (
+      | Handshake.Done (uid, packet) -> (
           Log.debug (fun m ->
               m "Process a new packet from %04x: %a" uid State.pp_raw packet);
           let src_rel = State.src_and_packet ~peer:to_whom_I_speak uid packet in
@@ -59,30 +59,30 @@ module Make (Peer : PEER) = struct
                   t.closed <- true;
                   `Close
               | `Agreement _ as agreement ->
-                  Protocol.save t.ctx data;
-                  t.ic <- Protocol.recv t.ctx;
+                  Handshake.save t.ctx data;
+                  t.ic <- Handshake.recv t.ctx;
                   agreement
               | `Continue ->
-                  (* NOTE(dinosaure): [Protocol.recv t.ctx] has a side-effet on
+                  (* NOTE(dinosaure): [Handshake.recv t.ctx] has a side-effet on
                      [ctx]. We want to check that, before to process anything, we
                      have something into [ctx] and [data]. In that case and only
                      then, we process [ctx] and try to parse a packet into it.
 
-                     In other words, **don't** factor [t.ic <- Protocol.recv t.ctx]!
+                     In other words, **don't** factor [t.ic <- Handshake.recv t.ctx]!
                   *)
-                  if Protocol.income_is_empty t.ctx && data_is_empty data then (
-                    t.ic <- Protocol.recv t.ctx;
+                  if Handshake.income_is_empty t.ctx && data_is_empty data then (
+                    t.ic <- Handshake.recv t.ctx;
                     `Continue)
                   else (
-                    t.ic <- Protocol.recv t.ctx;
+                    t.ic <- Handshake.recv t.ctx;
                     go data t.ic))
           | None ->
               Log.warn (fun m ->
                   m "Discard a packet from %04x: %a" uid State.pp_raw packet);
               `Continue)
-      | Protocol.Fail err ->
+      | Handshake.Fail err ->
           Log.err (fun m ->
-              m "Got an error while parsing: %a" Protocol.pp_error err);
+              m "Got an error while parsing: %a" Handshake.pp_error err);
           `Error err
       | Rd { buf = dst; off = dst_off; len = dst_len; k } as ic -> (
           match data with
@@ -100,13 +100,13 @@ module Make (Peer : PEER) = struct
 
   let send t =
     let rec go = function
-      | Protocol.Done () -> (
+      | Handshake.Done () -> (
           match Peer.next_packet t.state with
-          | Some (uid, packet) -> go (Protocol.send_packet t.ctx (uid, packet))
+          | Some (uid, packet) -> go (Handshake.send_packet t.ctx (uid, packet))
           | None ->
               t.oc <- Done ();
               `Continue)
-      | Protocol.Fail err -> `Error err
+      | Handshake.Fail err -> `Error err
       | Wr { str; off; len; k } ->
           t.oc <- k len;
           `Write (String.sub str off len)
@@ -140,12 +140,12 @@ module Server = struct
 
   let hello ?reproduce ~g secret =
     let state = State.Server.hello ?reproduce ~g secret in
-    let ctx = Protocol.make () in
-    let ic = Protocol.recv ctx in
+    let ctx = Handshake.make () in
+    let ic = Handshake.recv ctx in
     let oc =
       match State.Server.next_packet state with
-      | Some (uid, packet) -> Protocol.send_packet ctx (uid, packet)
-      | None -> Protocol.Done ()
+      | Some (uid, packet) -> Handshake.send_packet ctx (uid, packet)
+      | None -> Handshake.Done ()
     in
     { state; ctx; ic; oc; closed = false }
 end
@@ -175,9 +175,9 @@ module Client = struct
 
   let make ?reproduce ~g ~identity password =
     let state = State.Client.hello ?reproduce ~g ~identity password in
-    let ctx = Protocol.make () in
-    let ic = Protocol.recv ctx in
-    let oc = Protocol.Done () in
+    let ctx = Handshake.make () in
+    let ic = Handshake.recv ctx in
+    let oc = Handshake.Done () in
     { state; ctx; ic; oc; closed = false }
 
   let agreement t = function
@@ -192,9 +192,9 @@ end
 module Relay = struct
   type t = {
     state : State.Relay.t;
-    ctxs : (string, Protocol.ctx) Hashtbl.t;
-    ics : (string, (int * State.raw) Protocol.t) Hashtbl.t;
-    mutable k : [ `Close of string | `Continue ] Protocol.t;
+    ctxs : (string, Handshake.ctx) Hashtbl.t;
+    ics : (string, (int * State.raw) Handshake.t) Hashtbl.t;
+    mutable k : [ `Close of string | `Continue ] Handshake.t;
     mutable peer_identity : string;
   }
 
@@ -214,9 +214,9 @@ module Relay = struct
     }
 
   let new_peer t ~identity =
-    let ctx = Protocol.make () in
+    let ctx = Handshake.make () in
     Hashtbl.add t.ctxs identity ctx;
-    Hashtbl.add t.ics identity (Protocol.recv ctx)
+    Hashtbl.add t.ics identity (Handshake.recv ctx)
 
   let rem_peer t ~identity = State.Relay.delete ~identity t.state
   let exists t ~identity = State.Relay.exists ~identity t.state
@@ -238,7 +238,7 @@ module Relay = struct
         `Close
     | Some ic, Some ctx ->
         let rec go data = function
-          | Protocol.Done (uid, packet) -> (
+          | Handshake.Done (uid, packet) -> (
               Log.debug (fun m ->
                   m "Receive a packet from %04x: %a" uid State.pp_raw packet);
               let result =
@@ -259,21 +259,21 @@ module Relay = struct
               in
               match result with
               | `Agreement _ as agreement ->
-                  Protocol.save ctx data;
+                  Handshake.save ctx data;
                   (* TODO(dinosaure): dragoon here! *)
-                  Hashtbl.replace t.ics identity (Protocol.recv ctx);
+                  Hashtbl.replace t.ics identity (Handshake.recv ctx);
                   agreement
               | `Continue ->
-                  if Protocol.income_is_empty ctx && data_is_empty data then (
-                    Hashtbl.replace t.ics identity (Protocol.recv ctx);
+                  if Handshake.income_is_empty ctx && data_is_empty data then (
+                    Hashtbl.replace t.ics identity (Handshake.recv ctx);
                     result)
                   else
-                    let ic = Protocol.recv ctx in
+                    let ic = Handshake.recv ctx in
                     Hashtbl.replace t.ics identity ic;
                     go data ic)
-          | Protocol.Fail err ->
+          | Handshake.Fail err ->
               Log.err (fun m ->
-                  m "Got an error from %s: %a" identity Protocol.pp_error err);
+                  m "Got an error from %s: %a" identity Handshake.pp_error err);
               Hashtbl.remove t.ics identity;
               Hashtbl.remove t.ctxs identity;
               `Close
@@ -293,19 +293,19 @@ module Relay = struct
 
   let rec send_to t =
     match t.k with
-    | Protocol.Rd _ -> assert false
-    | Protocol.Fail err ->
+    | Handshake.Rd _ -> assert false
+    | Handshake.Fail err ->
         Log.err (fun m ->
-            m "Got an error from %s: %a" t.peer_identity Protocol.pp_error err);
+            m "Got an error from %s: %a" t.peer_identity Handshake.pp_error err);
         Hashtbl.remove t.ctxs t.peer_identity;
         `Close t.peer_identity
-    | Protocol.Wr { str; off; len; k } ->
+    | Handshake.Wr { str; off; len; k } ->
         t.k <- k len;
         `Write (t.peer_identity, String.sub str off len)
-    | Protocol.Done (`Close identity) ->
-        t.k <- Protocol.Done `Continue;
+    | Handshake.Done (`Close identity) ->
+        t.k <- Handshake.Done `Continue;
         `Close identity
-    | Protocol.Done `Continue -> (
+    | Handshake.Done `Continue -> (
         match State.Relay.next_packet t.state with
         | Some (identity, uid, (`Done as packet))
         | Some (identity, uid, (`Accepted as packet))
@@ -315,7 +315,7 @@ module Relay = struct
             | Some ctx ->
                 t.peer_identity <- identity;
                 t.k <-
-                  Protocol.(
+                  Handshake.(
                     send_packet ctx (uid, packet) >>= fun () ->
                     Hashtbl.remove t.ics identity;
                     Hashtbl.remove t.ctxs identity;
@@ -328,7 +328,7 @@ module Relay = struct
             | Some ctx ->
                 t.peer_identity <- identity;
                 t.k <-
-                  Protocol.(
+                  Handshake.(
                     send_packet ctx (uid, packet) >>= fun () -> return `Continue);
                 send_to t)
         | None -> `Continue)

@@ -22,10 +22,10 @@ let () = Logs.set_reporter (reporter Fmt.stdout)
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let process_packet data =
-  let ctx = Bob.Protocol.make () in
+  let ctx = Bob.Handshake.make () in
   let rec go data acc = function
-    | Bob.Protocol.Done v -> go data (v :: acc) (Bob.Protocol.recv ctx)
-    | Bob.Protocol.Fail err -> Error err
+    | Bob.Handshake.Done v -> go data (v :: acc) (Bob.Handshake.recv ctx)
+    | Bob.Handshake.Fail err -> Error err
     | Rd { buf = dst; off = dst_off; len = dst_len; k } -> (
         match data with
         | `End | `Data (_, _, 0) -> Ok (List.rev acc)
@@ -35,7 +35,7 @@ let process_packet data =
             go (`Data (str, off + max, len - max)) acc (k (`Len max)))
     | Wr _ -> assert false
   in
-  go data [] (Bob.Protocol.recv ctx)
+  go data [] (Bob.Handshake.recv ctx)
 
 let test01 =
   Alcotest.test_case "2 packets larger than internal buffer" `Quick @@ fun () ->
@@ -71,7 +71,7 @@ let test01 =
       ] ->
       ()
   | Ok _ -> Alcotest.fail "Unexpected packets"
-  | Error err -> Alcotest.failf "%a" Bob.Protocol.pp_error err
+  | Error err -> Alcotest.failf "%a" Bob.Handshake.pp_error err
 
 let test02 =
   Alcotest.test_case "2 packets larger than internal buffer" `Quick @@ fun () ->
@@ -105,7 +105,7 @@ let test02 =
       ] ->
       ()
   | Ok _ -> Alcotest.fail "Unexpected packets"
-  | Error err -> Alcotest.failf "%a" Bob.Protocol.pp_error err
+  | Error err -> Alcotest.failf "%a" Bob.Handshake.pp_error err
 
 let test03 =
   Alcotest.test_case "2 packets larger than internal buffer" `Quick @@ fun () ->
@@ -141,6 +141,6 @@ let test03 =
       ] ->
       ()
   | Ok _ -> Alcotest.fail "Unexpected packets"
-  | Error err -> Alcotest.failf "%a" Bob.Protocol.pp_error err
+  | Error err -> Alcotest.failf "%a" Bob.Handshake.pp_error err
 
 let () = Alcotest.run "protocol" [ ("recv", [ test01; test02; test03 ]) ]

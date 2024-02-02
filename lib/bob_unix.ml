@@ -77,14 +77,14 @@ module Make (IO : IO) = struct
     [ `Connection_closed_by_relay
     | `Wr of IO.write_error
     | `Rd of IO.error
-    | Bob.Protocol.error ]
+    | Bob.Handshake.error ]
 
   let pp_error ppf = function
     | `Connection_closed_by_relay -> Fmt.string ppf "Connection closed by relay"
     | `Wr `Closed -> Fmt.pf ppf "Connection closed"
     | `Wr err -> Fmt.pf ppf "send(): %a" IO.pp_write_error err
     | `Rd err -> Fmt.pf ppf "recv(): %a" IO.pp_error err
-    | #Bob.Protocol.error as err -> Bob.Protocol.pp_error ppf err
+    | #Bob.Handshake.error as err -> Bob.Handshake.pp_error ppf err
 
   type income =
     [ `Read of [ `End | `Data of string * int * int ] | `Error of error ]
@@ -120,7 +120,7 @@ module Make (IO : IO) = struct
               Log.err (fun m -> m "The relay closed the connection.");
               Fiber.Ivar.fill errored (`Error `Connection_closed_by_relay);
               Fiber.return (Error `Connection_closed_by_relay)
-          | `Error (#Bob.Protocol.error as err) ->
+          | `Error (#Bob.Handshake.error as err) ->
               Log.err (fun m -> m "Got a recv error: %a" pp_error err);
               Fiber.Ivar.fill errored (`Error (err :> error));
               Fiber.return (Error err))
