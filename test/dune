@@ -23,6 +23,16 @@
  (modules test_pack)
  (libraries alcotest bob.stream bob.pack))
 
+(executable
+ (name resume)
+ (modules resume)
+ (libraries logs.fmt fmt.tty bob alcotest))
+
+(executable
+ (name machine)
+ (modules machine)
+ (libraries hxd.string hxd.core bob.protocol alcotest))
+
 (rule
  (alias runtest)
  (deps
@@ -30,3 +40,13 @@
   (glob_files files/*))
  (action
   (run %{test} --color=always)))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./resume.exe --color=always)))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./machine.exe --color=always)))

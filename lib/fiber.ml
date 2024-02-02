@@ -195,6 +195,8 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
 let pwr = Hashtbl.create 0x100
 
 let write fd str ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t =
+  if off < 0 || len < 0 || off > String.length str - len then
+    invalid_arg "Invalid write";
   match Hashtbl.find_opt pwr fd with
   | Some (`Write (_, ivar)) -> Ivar.read ivar
   | _ ->

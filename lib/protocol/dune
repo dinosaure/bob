@@ -1,4 +1,4 @@
 (library
  (name bob_protocol)
  (public_name bob.protocol)
- (libraries astring fmt))
+ (libraries digestif bob.json bob.stream logs astring fpath fmt))

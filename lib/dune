@@ -47,6 +47,12 @@
  (libraries bob.std bob.fpath ke bheap logs unix))
 
 (library
+ (name json)
+ (public_name bob.json)
+ (modules json)
+ (libraries jsonm fmt))
+
+(library
  (name stream)
  (public_name bob.stream)
  (modules stream)

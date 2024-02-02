@@ -105,7 +105,7 @@ let make ~ciphers:(cipher0, cipher1) ~shared_keys:(k0, k1) fd =
     Cstruct.create (2 + max_packet + Cipher_block.tag_size)
   in
   let send_record =
-    let (Symmetric { impl = (module Cipher_block); _ }) = recv in
+    let (Symmetric { impl = (module Cipher_block); _ }) = send in
     Bytes.make (2 + max_packet + Cipher_block.tag_size) '\000'
   in
   {
@@ -218,6 +218,7 @@ module Make (Flow : FLOW) = struct
         Flow.read flow.fd >>= function
         | Error err -> Flow.return (Error (`Rd err))
         | Ok `Eof ->
+            Log.err (fun m -> m "End of transmission with our peer.");
             if await = `Await_hdr then Flow.return (Ok `End)
             else Flow.return (Error `Corrupted)
         | Ok (`Data str) ->
