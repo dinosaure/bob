@@ -14,11 +14,11 @@
  (libraries unix))
 
 (executable
- (name protocol)
- (modules protocol)
+ (name handshake)
+ (modules handshake)
  (libraries logs.fmt fmt.tty bob alcotest))
 
 (rule
  (alias runtest)
  (action
-  (run ./protocol.exe --color=always)))
+  (run ./handshake.exe --color=always)))
