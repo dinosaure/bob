@@ -59,10 +59,24 @@
  (libraries fmt bob.fpath))
 
 (library
+ (name git)
+ (public_name bob.git)
+ (modules git)
+ (libraries bob.fiber bob.stream cstruct digestif))
+
+(library
  (name pack)
  (public_name bob.pack)
  (modules pack)
- (libraries bob.fiber bob.temp bob.stream cstruct unix digestif carton))
+ (libraries
+  bob.fiber
+  bob.temp
+  bob.stream
+  bob.git
+  cstruct
+  unix
+  digestif
+  carton))
 
 (library
  (name bob_unix)
