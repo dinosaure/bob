@@ -1,5 +1,5 @@
 open Stdbob
-open Prgrss
+open Reporters
 
 let choose = function
   | true -> fun _identity -> Fiber.return `Accept
@@ -84,8 +84,7 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   let entries = Source.list (entry :: entries) in
   Pack.collect entries >>= fun (status, oracle) ->
   Logs.debug (fun m -> m "All objects are collected.");
-  with_reporter ~config quiet (make_verify_bar ~total)
-  @@ fun (reporter, finalise) ->
+  with_reporter ~config quiet (verify_bar ~total) @@ fun (reporter, finalise) ->
   Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path status
   >>= fun () ->
   Logs.debug (fun m -> m "All objects are verified.");
@@ -94,7 +93,7 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
 
 let unpack_with_reporter quiet ~config ~total pack destination hash =
   let open Fiber in
-  with_reporter ~config quiet (make_extract_bar ~total)
+  with_reporter ~config quiet (extract_bar ~total)
   @@ fun (reporter, finalise) ->
   reporter 2;
   (* XXX(dinosaure): report the commit and the root directory. *)
@@ -254,14 +253,14 @@ let run_client quiet g (_, he) addr secure_port reproduce password yes
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
   >>| Transfer.open_error
-  >>? fun source -> extract_with_reporter quiet ~config ~g source destination
+  >>? fun source -> extract_with_reporter quiet ~g ~config source destination
 
 let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
-  | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
-  | `No_root -> Fmt.pf ppf "The given PACK file has no root"
+  | `Empty_pack_file -> Fmt.string ppf "Empty PACK file"
+  | `No_root -> Fmt.string ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s" err
 
 let run quiet g () dns_and_he addr secure_port reproduce password yes dst =

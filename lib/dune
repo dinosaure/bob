@@ -29,6 +29,7 @@
   hxd.core
   hxd.string
   logs
+  cstruct
   spoke.core))
 
 (library
@@ -83,6 +84,12 @@
  (public_name bob.carton)
  (modules bob_carton)
  (libraries digestif carton carton.cartonnage bob.stream bob.fiber))
+
+(library
+ (name reporters)
+ (public_name bob.reporters)
+ (modules reporters)
+ (libraries bob.std progress))
 
 (library
  (name pack)

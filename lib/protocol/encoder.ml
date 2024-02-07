@@ -21,7 +21,7 @@ exception Leave of error
 
 let leave (_ : encoder) error = raise (Leave error)
 
-let safe : (encoder -> ([> error ] as 'err) state) -> encoder -> 'err state =
+let _safe : (encoder -> ([> error ] as 'err) state) -> encoder -> 'err state =
  fun k encoder ->
   try k encoder with Leave (#error as err) -> Error (err :> 'err)
 
@@ -51,7 +51,7 @@ let write str encoder =
     let len = min rem l in
     Bytes.unsafe_blit_string str j encoder.payload encoder.pos len;
     encoder.pos <- encoder.pos + len;
-    if len < l then leave_with encoder `Not_enough_space
+    if len < l then leave encoder `Not_enough_space
   in
   go 0 (String.length str) encoder
 

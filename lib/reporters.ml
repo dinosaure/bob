@@ -1,10 +1,10 @@
 open Stdbob
 
-let make_compression_progress ~total =
+let compression_progress ~total =
   let open Progress.Line in
   list [ const ">>>"; spacer 32; count_to total; const "delta-ified object(s)" ]
 
-let make_progress_bar_for_objects ~total =
+let progress_bar_for_objects ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list
@@ -15,7 +15,7 @@ let make_progress_bar_for_objects ~total =
       const "compressed object(s)";
     ]
 
-let make_progress_bar_for_file ~total =
+let progress_bar_for_file ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list
@@ -26,7 +26,7 @@ let make_progress_bar_for_file ~total =
       constf " / %a" (bytes_to_size ~decimals:2) total;
     ]
 
-let make_verify_bar ~total =
+let verify_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list
@@ -37,7 +37,7 @@ let make_verify_bar ~total =
       const "verified object(s)";
     ]
 
-let make_extract_bar ~total =
+let extract_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list
@@ -48,7 +48,7 @@ let make_extract_bar ~total =
       const "extracted object(s)";
     ]
 
-let make_tranfer_bar ~total =
+let transfer_bar ~total =
   let open Progress.Line in
   let style = if Fmt.utf_8 Fmt.stdout then `UTF8 else `ASCII in
   list

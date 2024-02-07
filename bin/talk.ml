@@ -1,6 +1,10 @@
 open Stdbob
 
 (* XXX(dinosaure): copy-pasta with [transfer.ml], TODO! *)
+
+let max_packet =
+  2 + Bob_unix.Crypto.max_packet + 16 (* header + data + tag_size *)
+
 module Crypto = Bob_unix.Crypto.Make (struct
   include Bob_unix.Fiber
 
@@ -15,21 +19,18 @@ module Crypto = Bob_unix.Crypto.Make (struct
     | `Unix errno -> Fmt.string ppf (Unix.error_message errno)
 
   let read fd =
-    Fiber.read ~len:(4 * 0xFFFF) fd >>= function
+    Fiber.read ~len:(max_packet * 2) fd >>= function
     | Error _ as err -> Fiber.return err
     | Ok `End -> Fiber.return (Ok `Eof)
-    | Ok (`Data bstr) -> Fiber.return (Ok (`Data (Cstruct.of_bigarray bstr)))
+    | Ok (`Data str) -> Fiber.return (Ok (`Data str))
 
-  let rec write fd cs =
-    let { Cstruct.buffer; off; len } = cs in
-    go fd buffer off len
+  let rec write fd str = go fd str 0 (String.length str)
 
-  and go fd bstr off len =
-    Fiber.write fd bstr ~off ~len >>= function
+  and go fd str off len =
+    Fiber.write fd str ~off ~len >>= function
     | Error _ as err -> Fiber.return err
-    | Ok len' ->
-        if len' - len <= 0 then Fiber.return (Ok ())
-        else go fd bstr (off + len') (len - len')
+    | Ok len' when len' = len -> Fiber.return (Ok ())
+    | Ok len' -> go fd str (off + len') (len - len')
 end)
 
 module Clear = struct
@@ -63,7 +64,6 @@ let rec run_protocol secure_flow value =
           m "~> @[<hov>%a@]"
             (Hxd_string.pp Hxd.default)
             (String.sub buffer off len));
-      let { Cstruct.buffer; off; len } = Cstruct.of_string buffer ~off ~len in
       Crypto.send secure_flow buffer ~off ~len
       >>| Result.map_error (fun err -> `Read err)
       >>? fun len -> run_protocol secure_flow (continue len)
@@ -71,9 +71,9 @@ let rec run_protocol secure_flow value =
       Crypto.recv secure_flow >>| Result.map_error (fun err -> `Write err)
       >>? function
       | `End -> run_protocol secure_flow (continue `End)
-      | `Data bstr ->
-          let len = Bigarray.Array1.dim bstr in
-          bigstring_blit_to_bytes bstr ~src_off:0 buffer ~dst_off:off ~len;
+      | `Data str ->
+          let len = String.length str in
+          Bytes.blit_string str 0 buffer off len;
           Logs.debug (fun m ->
               m "<~ @[<hov>%a@]"
                 (Hxd_string.pp Hxd.default)
