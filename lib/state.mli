@@ -56,6 +56,7 @@ module Server : sig
     ('a, server) src ->
     ('a, server) packet ->
     [> `Continue
+    | `Identity of string
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     | `Close ]
 
@@ -77,6 +78,7 @@ module Client : sig
     ('a, client) packet ->
     [> `Continue
     | `Agreement of string
+    | `Identity of string
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     | `Close ]
 

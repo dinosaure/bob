@@ -4,10 +4,10 @@ let src = Logs.Src.create "bob.transfer"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let sockaddr_with_secure_port sockaddr secure_port =
-  match sockaddr with
-  | Unix.ADDR_INET (inet_addr, _) -> Unix.ADDR_INET (inet_addr, secure_port)
-  | Unix.ADDR_UNIX _ -> invalid_arg "Invalid sockaddr"
+let addr_with_secure_port addr secure_port =
+  match addr with
+  | `Inet (inet_addr, _) -> `Inet (inet_addr, secure_port)
+  | `Domain (host, _) -> `Domain (host, secure_port)
 
 let max_packet =
   2 + Bob_unix.Crypto.max_packet + 16 (* header + data + tag_size *)
@@ -44,13 +44,16 @@ end)
 
 type error =
   [ Bob_unix.error
-  | `Connect of Unix.error
+  | `Connect of [ `Closed | `Msg of string | `Unix of Unix.error ]
   | `Blocking_connect of Connect.error
   | `Crypto of [ Crypto.write_error | Crypto.error ] ]
 
 let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
-  | `Connect errno -> Fmt.pf ppf "connect(): %s" (Unix.error_message errno)
+  | `Connect `Closed -> Fmt.pf ppf "connect(): Connection reset by peer"
+  | `Connect (`Msg msg) -> Fmt.pf ppf "connect(): %s" msg
+  | `Connect (`Unix errno) ->
+      Fmt.pf ppf "connect(): %s" (Unix.error_message errno)
   | `Crypto (#Crypto.write_error as err) -> Crypto.pp_write_error ppf err
   | `Crypto (#Crypto.error as err) -> Crypto.pp_error ppf err
   | #Bob_unix.error as err -> Bob_unix.pp_error ppf err
@@ -94,17 +97,13 @@ let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
   Stream.Sink { init; push; full; stop }
 
 let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
-    sockaddr stream =
-  let { Unix.p_proto; _ } =
-    try Unix.getprotobyname "tcp"
-    with _ ->
-      (* fail on Windows *) { p_name = "tcp"; p_aliases = [||]; p_proto = 0 }
-  in
-  let domain = Unix.domain_of_sockaddr sockaddr in
-  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
+    ~happy_eyeballs ?through addr stream =
   let open Fiber in
-  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
-  >>? fun () ->
+  (match through with
+  | Some server -> Bob_socks.connect ~happy_eyeballs ~server addr
+  | None -> Bob_happy_eyeballs.connect happy_eyeballs addr)
+  >>| reword_error (fun err -> `Connect err)
+  >>? fun (_sockaddr, socket) ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
@@ -139,17 +138,13 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
   Stream.Source { init; pull; stop }
 
 let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
-    ~shared_keys sockaddr =
-  let { Unix.p_proto; _ } =
-    try Unix.getprotobyname "tcp"
-    with _ ->
-      (* fail on Windows *) { p_name = "tcp"; p_aliases = [||]; p_proto = 0 }
-  in
-  let domain = Unix.domain_of_sockaddr sockaddr in
-  let socket = Unix.socket ~cloexec:true domain Unix.SOCK_STREAM p_proto in
+    ~shared_keys ~happy_eyeballs ?through addr =
   let open Fiber in
-  Fiber.connect socket sockaddr >>| reword_error (fun err -> `Connect err)
-  >>? fun () ->
+  (match through with
+  | Some server -> Bob_socks.connect ~happy_eyeballs ~server addr
+  | None -> Bob_happy_eyeballs.connect happy_eyeballs addr)
+  >>| reword_error (fun err -> `Connect err)
+  >>? fun (_sockaddr, socket) ->
   Bob_unix.init_peer socket ~identity >>= function
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))

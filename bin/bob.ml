@@ -1,13 +1,15 @@
 let () = Printexc.record_backtrace true
 
-let run quiet g temp dns compression addr secure_port yes dst = function
+let run quiet g temp dns compression through addr secure_port yes dst = function
   | Some path when Sys.file_exists path ->
       let password = Args.setup_password quiet g None in
-      Send.run temp dns None compression addr secure_port false password
+      Send.run temp dns through None compression addr secure_port false password
         (Bob_fpath.v path)
   | Some password ->
-      Recv.run quiet g temp dns addr secure_port false (Some password) yes dst
-  | None -> Recv.run quiet g temp dns addr secure_port false None yes dst
+      Recv.run quiet g temp dns through addr secure_port false (Some password)
+        yes dst
+  | None ->
+      Recv.run quiet g temp dns through addr secure_port false None yes dst
 
 open Cmdliner
 open Args
@@ -20,8 +22,8 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ compression $ relay $ secure_port $ yes $ destination
-     $ path_or_password))
+     $ term_setup_dns $ compression $ through $ relay $ secure_port $ yes
+     $ destination $ path_or_password))
 
 let cmd =
   let doc = "An universal & secure peer-to-peer file-transfer program." in

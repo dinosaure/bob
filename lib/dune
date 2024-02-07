@@ -27,7 +27,7 @@
  (name password)
  (public_name bob.password)
  (modules password)
- (libraries bob.dict))
+ (libraries fmt base64 bob.dict))
 
 (library
  (name fiber)
@@ -82,7 +82,7 @@
  (name bob_unix)
  (public_name bob.unix)
  (modules bob_unix)
- (libraries psq hxd.core hxd.string bob bob.fiber))
+ (libraries base64 psq hxd.core hxd.string bob bob.fiber))
 
 (library
  (name bob_dns)
@@ -112,3 +112,9 @@
  (public_name bob.tls)
  (modules bob_tls)
  (libraries tls cstruct bob.fiber))
+
+(library
+ (name bob_socks)
+ (public_name bob.socks)
+ (modules bob_socks)
+ (libraries socks bob.happy-eyeballs))

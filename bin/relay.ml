@@ -1,4 +1,4 @@
-let run timeout inet_addr port secure_port backlog =
+let run g timeout inet_addr port secure_port backlog =
   let sockaddr01 = Unix.ADDR_INET (inet_addr, port) in
   let sockaddr02 = Unix.ADDR_INET (inet_addr, secure_port) in
   let socket01 =
@@ -27,19 +27,19 @@ let run timeout inet_addr port secure_port backlog =
   Fiber.run
     Fiber.(
       fork_and_join
-        (fun () -> Bob_clear.relay ~timeout socket01 secured ~stop)
+        (fun () -> Bob_clear.relay ~g ~timeout socket01 secured ~stop)
         (fun () -> Bob_unix.secure_room ~timeout socket02 secured ~stop)
       >>= fun ((), ()) -> Fiber.return ());
   Unix.close socket01;
   Unix.close socket02;
   `Ok 0
 
-let run _quiet daemonize timeout inet_addr port secure_port backlog () =
+let run _quiet g daemonize timeout inet_addr port secure_port backlog () =
   match daemonize with
   | Some path ->
       Daemon.daemonize ~path (fun () ->
-          run timeout inet_addr port secure_port backlog)
-  | None -> run timeout inet_addr port secure_port backlog
+          run g timeout inet_addr port secure_port backlog)
+  | None -> run g timeout inet_addr port secure_port backlog
 
 open Cmdliner
 open Args
@@ -103,8 +103,8 @@ let cmd =
     (Cmd.info "relay" ~doc ~man)
     Term.(
       ret
-        (const run $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
-       $ secure_port $ backlog $ term_setup_pid))
+        (const run $ term_setup_logs $ term_setup_random $ daemonize $ timeout
+       $ inet_addr $ port $ secure_port $ backlog $ term_setup_pid))
 
 type configuration = {
   quiet : bool;

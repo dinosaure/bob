@@ -21,6 +21,7 @@ module type PEER = sig
     ('a, peer) State.packet ->
     [> `Continue
     | `Agreement of string
+    | `Identity of string
     | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
     | `Close ]
 
@@ -41,62 +42,88 @@ module Make (Peer : PEER) = struct
   let to_whom_I_speak =
     match Peer.peer with `Server -> `Client | `Client -> `Server
 
+  type events = { identities : string list; agreements : string list }
+
+  let discontinue t data = Handshake.income_is_empty t.ctx && data_is_empty data
+
   let receive t data =
-    let rec go data = function
+    let process_packet events uid packet =
+      Log.debug (fun m ->
+          m "Process a new packet from %04x: %a" uid State.pp_raw packet);
+      let src_rel = State.src_and_packet ~peer:to_whom_I_speak uid packet in
+      match Peer.src_and_packet src_rel with
+      | None ->
+          Log.warn (fun m ->
+              m "Discard a packet from %04x: %a" uid State.pp_raw packet);
+          `Events events
+      | Some (Income (src, packet)) -> (
+          match Peer.process_packet t.state src packet with
+          | `Done sk -> `Done sk
+          | `Close -> `Close
+          | `Agreement agreement ->
+              `Events
+                { events with agreements = agreement :: events.agreements }
+          | `Identity identity ->
+              `Events { events with identities = identity :: events.identities }
+          | `Continue -> `Events events)
+    in
+
+    let return = function
+      | { identities = []; agreements = [] } -> `Continue
+      | { identities = [ identity ]; agreements = [] } -> `Identity identity
+      | { identities = []; agreements = [ agreement ] } -> `Agreement agreement
+      | { identities = identity :: _; agreements = [] } ->
+          Log.warn (fun m ->
+              m "We receive multiple identities, we take the last one %S"
+                identity);
+          `Identity identity
+      | { identities = []; agreements = agreement :: _ } ->
+          Log.warn (fun m ->
+              m "We receive multiple agreements, we take the last one %S"
+                agreement);
+          `Agreement agreement
+      | _ ->
+          Log.err (fun m ->
+              m
+                "We got multiples identities and multiple agreements. The \
+                 relay is not trustworthy.");
+          `Error `Unexpected_packet
+    in
+
+    let rec go events data = function
       | Handshake.Done (uid, packet) -> (
-          Log.debug (fun m ->
-              m "Process a new packet from %04x: %a" uid State.pp_raw packet);
-          let src_rel = State.src_and_packet ~peer:to_whom_I_speak uid packet in
-
-          match Peer.src_and_packet src_rel with
-          | Some (Income (src, packet)) -> (
-              match Peer.process_packet t.state src packet with
-              | `Done sk ->
-                  Log.debug (fun m -> m "The peer is done.");
-                  `Done sk
-              | `Close ->
-                  Log.debug (fun m -> m "The relay closed the connection.");
-                  t.closed <- true;
-                  `Close
-              | `Agreement _ as agreement ->
-                  Handshake.save t.ctx data;
-                  t.ic <- Handshake.recv t.ctx;
-                  agreement
-              | `Continue ->
-                  (* NOTE(dinosaure): [Handshake.recv t.ctx] has a side-effet on
-                     [ctx]. We want to check that, before to process anything, we
-                     have something into [ctx] and [data]. In that case and only
-                     then, we process [ctx] and try to parse a packet into it.
-
-                     In other words, **don't** factor [t.ic <- Handshake.recv t.ctx]!
-                  *)
-                  if Handshake.income_is_empty t.ctx && data_is_empty data then (
-                    t.ic <- Handshake.recv t.ctx;
-                    `Continue)
-                  else (
-                    t.ic <- Handshake.recv t.ctx;
-                    go data t.ic))
-          | None ->
-              Log.warn (fun m ->
-                  m "Discard a packet from %04x: %a" uid State.pp_raw packet);
-              `Continue)
+          match process_packet events uid packet with
+          | `Close ->
+              Log.debug (fun m -> m "The relay closed the connection.");
+              t.closed <- true;
+              `Close
+          | `Done sk ->
+              Log.debug (fun m -> m "The peer is done.");
+              `Done sk
+          | `Events events when discontinue t data ->
+              t.ic <- Handshake.recv t.ctx;
+              return events
+          | `Events events ->
+              t.ic <- Handshake.recv t.ctx;
+              go events data t.ic)
       | Handshake.Fail err ->
           Log.err (fun m ->
               m "Got an error while parsing: %a" Handshake.pp_error err);
           `Error err
       | Rd { buf = dst; off = dst_off; len = dst_len; k } as ic -> (
           match data with
-          | `End -> go data (k `End)
+          | `End -> go events data (k `End)
           | `Data (_, _, 0) ->
               t.ic <- ic;
               `Read
           | `Data (str, off, len) ->
               let max = min dst_len len in
               Bytes.blit_string str off dst dst_off max;
-              go (`Data (str, off + max, len - max)) (k (`Len max)))
+              go events (`Data (str, off + max, len - max)) (k (`Len max)))
       | Wr _ -> assert false
     in
-    if t.closed then `Close else go data t.ic
+    if t.closed then `Close
+    else go { identities = []; agreements = [] } data t.ic
 
   let send t =
     let rec go = function

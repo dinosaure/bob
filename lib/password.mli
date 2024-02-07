@@ -13,3 +13,5 @@ val generate : ?g:Random.State.t -> t -> int -> string
 (** [generate ?g t len] generates a {b weak} password with [len] {i syllable}
     from a {{!type:t} dictionary} and a possible {!Random.State.t} (otherwise,
     we generate one with {!val:Random.State.make_self_init}). *)
+
+val identity_of_seed : seed:string -> t -> (string, [> `Msg of string ]) result
