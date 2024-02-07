@@ -98,13 +98,7 @@ val create_directory :
   Digestif.SHA1.t ->
   (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t Fiber.t
 
-val unpack :
+val pack :
   Bob_fpath.t ->
   status array ->
-  ( string
-    * int
-    * Digestif.SHA1.t
-    * (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t,
-    [> `No_root ] )
-  result
-  Fiber.t
+  (Unix.file_descr * Unix.LargeFile.stats, Digestif.SHA1.t) Carton.Dec.t Fiber.t

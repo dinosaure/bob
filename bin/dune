@@ -43,7 +43,7 @@
  (name bob)
  (public_name bob)
  (package bob)
- (modules prgrss transfer daemon bob clear bob_clear recv send relay connect)
+ (modules transfer daemon bob clear bob_clear recv send relay connect)
  (libraries
   ca-certs
   progress
@@ -62,6 +62,8 @@
   bob.pack
   bob.tls
   bob.dns
+  bob.reporters
+  bob.extract
   bob.happy-eyeballs))
 
 (executable

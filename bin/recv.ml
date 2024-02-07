@@ -1,5 +1,5 @@
 open Stdbob
-open Prgrss
+open Reporters
 
 let choose = function
   | true -> fun _identity -> Fiber.return `Accept
@@ -86,8 +86,7 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   let entries = Source.list (entry :: entries) in
   Pack.collect entries >>= fun (status, oracle) ->
   Logs.debug (fun m -> m "All objects are collected.");
-  with_reporter ~config quiet (make_verify_bar ~total)
-  @@ fun (reporter, finalise) ->
+  with_reporter ~config quiet (verify_bar ~total) @@ fun (reporter, finalise) ->
   Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle path status
   >>= fun () ->
   Logs.debug (fun m -> m "All objects are verified.");
@@ -96,7 +95,7 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
 
 let unpack_with_reporter quiet ~config ~total pack destination hash =
   let open Fiber in
-  with_reporter ~config quiet (make_extract_bar ~total)
+  with_reporter ~config quiet (extract_bar ~total)
   @@ fun (reporter, finalise) ->
   reporter 2;
   (* XXX(dinosaure): report the commit and the root directory. *)
@@ -180,49 +179,6 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
   if Digestif.SHA1.equal hash expected then Fiber.return (Ok ())
   else Fiber.return (Error (msgf "Corrupted file (unexpected hash)"))
 
-let extract_with_reporter quiet ~config ?g
-    (from : Stdbob.bigstring Stream.source) destination =
-  let open Fiber in
-  let open Stream in
-  let tmp = Temp.random_temporary_path ?g "pack-%s.pack" in
-  let via = Flow.(save_into tmp << Pack.analyse ignore) in
-  Stream.run ~from ~via ~into:Sink.first >>= function
-  | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
-  | ( Some (`Elt (offset, _status, `Base (`D, _weight)), decoder, src, off),
-      leftover ) ->
-      extract_one quiet ?g tmp ~offset decoder src off ~leftover destination
-  | Some (`Elt entry, decoder, src, off), leftover -> (
-      Logs.debug (fun m -> m "Got a directory.");
-      collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
-        leftover
-      >>= Pack.unpack tmp
-      >>? fun (name, total, hash, pack) ->
-      (match (quiet, destination) with
-      | true, _ -> ()
-      | false, None -> Fmt.pr ">>> Received a folder: %s.\n%!" name
-      | false, Some v ->
-          Fmt.pr ">>> Received a folder: %s (save into %a).\n%!" name
-            Bob_fpath.pp v);
-      match (destination, Bob_fpath.of_string name) with
-      | None, Ok _ when Sys.file_exists name ->
-          let destination = Temp.random_temporary_path ?g "bob-%s" in
-          Logs.err (fun m ->
-              m
-                "We received a name '%s' which already exists, we will save \
-                 received folder into: %a"
-                name Bob_fpath.pp destination);
-          unpack_with_reporter quiet ~config ~total pack destination hash
-      | Some destination, _ | None, Ok destination ->
-          unpack_with_reporter quiet ~config ~total pack destination hash
-      | None, Error _ ->
-          let destination = Temp.random_temporary_path ?g "bob-%s" in
-          Logs.err (fun m ->
-              m
-                "We received an invalid name '%s' (we will save received \
-                 folder into: %a)"
-                name Bob_fpath.pp destination);
-          unpack_with_reporter quiet ~config ~total pack destination hash)
-
 let run_client quiet g (_, he) addr secure_port reproduce password yes
     destination =
   let open Fiber in
@@ -239,14 +195,15 @@ let run_client quiet g (_, he) addr secure_port reproduce password yes
   let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
   source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
   >>| Transfer.open_error
-  >>? fun source -> extract_with_reporter quiet ~config ~g source destination
+  >>? fun src ->
+  Extract.extract ~quiet ~g ~config src destination >>? fun _ ->
+  Fiber.return (Ok ())
 
 let pp_error ppf = function
   | `Blocking_connect err -> Connect.pp_error ppf err
   | #Transfer.error as err -> Transfer.pp_error ppf err
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
-  | `Empty_pack_file -> Fmt.pf ppf "Empty PACK file"
-  | `No_root -> Fmt.pf ppf "The given PACK file has no root"
+  | #Extract.error as err -> Extract.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err
 
 let run quiet g () dns_and_he addr secure_port reproduce password yes dst =

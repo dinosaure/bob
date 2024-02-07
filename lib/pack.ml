@@ -889,51 +889,25 @@ and create_file pack path hash =
         (fun exn -> Fiber.close fd >>= fun () -> raise exn)
       >>= fun () -> Fiber.return pack
 
-let unpack path status =
-  match
-    Array.find_opt (fun status -> Verify.kind_of_status status = `A) status
-  with
-  | None -> Fiber.return (Error `No_root)
-  | Some root ->
-      let fd =
-        Unix.openfile (Bob_fpath.to_string path) Unix.[ O_RDONLY ] 0o644
-      in
-      let st = Unix.LargeFile.stat (Bob_fpath.to_string path) in
-      let id =
-        Array.fold_left
-          (fun tbl status ->
-            Hashtbl.add tbl
-              (Verify.uid_of_status status)
-              (Verify.offset_of_status status);
-            tbl)
-          (Hashtbl.create 0x100) status
-      in
-      let find uid =
-        Logs.debug (fun m -> m "Try to find: %a." SHA1.pp uid);
-        Hashtbl.find id uid
-      in
-      let pack =
-        Carton.Dec.make (fd, st) ~allocate:make_window
-          ~z:(De.bigstring_create De.io_buffer_size)
-          ~uid_ln:SHA1.length ~uid_rw:SHA1.of_raw_string find
-      in
-      let root =
-        Carton.Dec.weight_of_offset ~map pack ~weight:Carton.Dec.null
-          (Verify.offset_of_status root)
-        |> fun weight ->
-        let raw = Carton.Dec.make_raw ~weight in
-        Carton.Dec.of_offset ~map pack raw
-          ~cursor:(Verify.offset_of_status root)
-      in
-      let root =
-        bigstring_to_string
-          (Bigarray.Array1.sub (Carton.Dec.raw root) 0 (Carton.Dec.len root))
-      in
-      let[@warning "-8"] (name :: rest) = String.split_on_char '\000' root in
-      let rest = String.concat "\000" rest in
-      let hash = SHA1.of_raw_string (String.sub rest 0 SHA1.length) in
-      let total =
-        int_of_string
-          (String.sub rest SHA1.length (String.length rest - SHA1.length))
-      in
-      Fiber.return (Ok (name, total, hash, pack))
+let pack path status =
+  let fd = Unix.openfile (Bob_fpath.to_string path) Unix.[ O_RDONLY ] 0o644 in
+  let st = Unix.LargeFile.stat (Bob_fpath.to_string path) in
+  let id =
+    Array.fold_left
+      (fun tbl status ->
+        Hashtbl.add tbl
+          (Verify.uid_of_status status)
+          (Verify.offset_of_status status);
+        tbl)
+      (Hashtbl.create 0x100) status
+  in
+  let find uid =
+    Logs.debug (fun m -> m "Try to find: %a." SHA1.pp uid);
+    Hashtbl.find id uid
+  in
+  let pack =
+    Carton.Dec.make (fd, st) ~allocate:make_window
+      ~z:(De.bigstring_create De.io_buffer_size)
+      ~uid_ln:SHA1.length ~uid_rw:SHA1.of_raw_string find
+  in
+  Fiber.return pack

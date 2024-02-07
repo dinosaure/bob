@@ -79,6 +79,18 @@
  (libraries bob.fiber bob.stream cstruct carton digestif))
 
 (library
+ (name reporters)
+ (public_name bob.reporters)
+ (modules reporters)
+ (libraries bob.std progress))
+
+(library
+ (name extract)
+ (public_name bob.extract)
+ (modules extract)
+ (libraries bob.reporters bob.protocol bob.pack))
+
+(library
  (name pack)
  (public_name bob.pack)
  (modules pack)

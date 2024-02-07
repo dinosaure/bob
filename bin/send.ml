@@ -1,5 +1,5 @@
 open Stdbob
-open Prgrss
+open Reporters
 
 let () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
 (* XXX(dinosaure): if the receiver close abruptely the connection, a SIGPIPE
@@ -7,8 +7,7 @@ let () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
    the EPIPE error on the [write()] syscall. *)
 
 let compress_with_reporter quiet ~compression ~config store hashes =
-  with_reporter ~config quiet
-    (make_compression_progress ~total:(Pack.length store))
+  with_reporter ~config quiet (compression_progress ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
   Logs.debug (fun m -> m "Start deltification.");
@@ -23,7 +22,7 @@ type pack = Stream of Stdbob.bigstring Stream.stream | File of Bob_fpath.t
 let emit_with_reporter quiet ?g ?level ~config store
     (objects : Digestif.SHA1.t Carton.Enc.q Stream.stream) =
   with_reporter ~config quiet
-    (make_progress_bar_for_objects ~total:(Pack.length store))
+    (progress_bar_for_objects ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
   let open Stream in
@@ -40,7 +39,7 @@ let emit_with_reporter quiet ?g ?level ~config store
 
 let emit_one_with_reporter quiet ?level ~config path =
   let total = Unix.(stat (Bob_fpath.to_string path)).Unix.st_size in
-  with_reporter ~config quiet (make_progress_bar_for_file ~total)
+  with_reporter ~config quiet (progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
   Pack.make_one ~len:Bob_unix.Crypto.max_packet ?level
@@ -56,7 +55,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
-      with_reporter ~config quiet (make_tranfer_bar ~total)
+      with_reporter ~config quiet (transfer_bar ~total)
       @@ fun (reporter, finalise) ->
       let open Fiber in
       let open Stream in
