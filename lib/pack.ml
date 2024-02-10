@@ -14,7 +14,7 @@ end
 type store = {
   store : (SHA1.t, Bob_fpath.t) Hashtbl.t;
   rstore : (Bob_fpath.t, SHA1.t * [ `Dir | `Reg | `Root ]) Hashtbl.t;
-  root : (SHA1.t * SHA1.t) option;
+  root : SHA1.t * SHA1.t;
   path : Bob_fpath.t;
 }
 
@@ -66,8 +66,11 @@ let rec full_read fd ba off len =
   if len > 0 then
     match bigstring_read fd ba off len with
     | ret when ret < 0 ->
+        Log.err (fun m -> m "Got an error while reading %d" (Obj.magic fd));
         Fmt.failwith "Got an error while reading %d" (Obj.magic fd)
-    | len' when len - len' > 0 -> full_read fd ba (off + len') (len - len')
+    | len' when len - len' > 0 ->
+        Log.debug (fun m -> m "Load %d byte(s) from %d." len' (Obj.magic fd));
+        full_read fd ba (off + len') (len - len')
     | _ -> ()
 
 (* XXX(dinosaure): [mmap] can be a solution here but it seems that the kernel
@@ -121,7 +124,7 @@ let load : store -> Carton.Uid.t -> Carton.Value.t Fiber.t =
  fun store uid ->
   let hash = SHA1.of_raw_string (uid :> string) in
   match (Hashtbl.find_opt store.store hash, store.root) with
-  | None, Some (hash_of_root, hash_of_tree) when hash_of_root = hash ->
+  | None, (hash_of_root, hash_of_tree) when hash_of_root = hash ->
       Log.debug (fun m -> m "Load root object.");
       let real_length = Hashtbl.length store.rstore in
       load_root ~real_length store.path hash_of_tree
@@ -134,7 +137,7 @@ let load : store -> Carton.Uid.t -> Carton.Value.t Fiber.t =
       | Unix.S_REG -> load_file stat real_path
       | Unix.S_DIR -> load_directory store.rstore real_path
       | _ -> failwith "Invalid kind of object")
-  | None, (Some _ | None) ->
+  | None, _ ->
       Log.err (fun m -> m "The object %a does not exists." SHA1.pp hash);
       raise Not_found
 
@@ -164,7 +167,7 @@ let entry : store -> Carton.Uid.t -> unit Cartonnage.Entry.t Fiber.t =
  fun store uid ->
   let hash = Digestif.SHA1.of_raw_string (uid :> string) in
   match (Hashtbl.find_opt store.store hash, store.root) with
-  | None, Some (hash_of_root, hash_of_tree) when hash_of_root = hash ->
+  | None, (hash_of_root, hash_of_tree) when hash_of_root = hash ->
       let basename = Bob_fpath.basename store.path in
       let root = SHA1.to_raw_string hash_of_tree in
       let real_length = Hashtbl.length store.rstore in
@@ -178,7 +181,7 @@ let entry : store -> Carton.Uid.t -> unit Cartonnage.Entry.t Fiber.t =
       | Unix.S_REG -> entry_of_file stat real_path uid
       | Unix.S_DIR -> entry_of_directory stat store.rstore real_path uid
       | _ -> failwith "Invalid kind of object")
-  | None, (Some _ | None) -> raise Not_found
+  | None, _ -> raise Not_found
 
 let deltify ~reporter ?(compression = true) store hashes =
   let open Fiber in
@@ -229,22 +232,12 @@ let store root =
       let v = Stdlib.Option.get (Bob_fpath.relativize ~root v) in
       Hashtbl.add store k v)
     rstore;
-  let hashes_for_directory =
-    if Sys.is_directory (Bob_fpath.to_string root) then (
-      let hash_of_tree, _ = Hashtbl.find rstore root in
-      let real_length = Hashtbl.length rstore in
-      let hash_of_root = Git.hash_of_root ~real_length ~root hash_of_tree in
-      Log.debug (fun m -> m "Hash of root: %a" SHA1.pp hash_of_root);
-      Log.debug (fun m ->
-          m "Hash of tree: %a (%a)" SHA1.pp hash_of_tree Bob_fpath.pp root);
-      Hashtbl.add rstore (Bob_fpath.v "./") (hash_of_root, `Root);
-      Some (hash_of_root, hash_of_tree))
-    else None
-  in
-  let hashes =
-    match hashes_for_directory with
-    | Some (hash_of_root, _) -> hash_of_root :: hashes
-    | None -> hashes
+  let hash_of_root, hash_of_tree =
+    let hash_of_tree, _ = Hashtbl.find rstore root in
+    let real_length = Hashtbl.length rstore in
+    let hash_of_root = Git.hash_of_root ~real_length ~root hash_of_tree in
+    Hashtbl.add rstore (Bob_fpath.v "./") (hash_of_root, `Root);
+    (hash_of_root, hash_of_tree)
   in
   let module Set = Set.Make (SHA1) in
   let hashes = List.fold_left (rev Set.add) Set.empty hashes in
@@ -253,7 +246,9 @@ let store root =
   let uids = List.map hash_to_uid hashes in
   Log.debug (fun m -> m "Store of %a." Bob_fpath.pp root);
   let stream = Stream.of_list uids in
-  let store = { store; rstore; root = hashes_for_directory; path = root } in
+  let path = Bob_fpath.to_dir_path root in
+  let root = (hash_of_root, hash_of_tree) in
+  let store = { store; rstore; root; path } in
   Fiber.return (stream, store)
 
 let make ?level ~reporter store =
@@ -261,6 +256,8 @@ let make ?level ~reporter store =
   let load uid () = load store uid in
   Bob_carton.pack ~reporter ?level ~length load
 
+let _A = 0b001
+let _B = 0b010
 let _C = 0b011
 let _D = 0b100
 
@@ -336,7 +333,6 @@ let make_one ?(level = 4) ~reporter ~finalise path =
       Fiber.return err
   | Ok file ->
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
-      let hdr = hdr in
       let hdr = Bstr.string hdr ~off:0 ~len:(String.length hdr) in
       let ctx = ref (SHA1.feed_bigstring SHA1.empty hdr) in
       let q = De.Queue.create 0x1000 in
