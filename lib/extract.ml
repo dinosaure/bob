@@ -2,6 +2,10 @@ open Stdbob
 open Reporters
 open Bob_protocol
 
+let src = Logs.Src.create "bob.extract"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 (* NOTE(dinosaure): the format of the incoming PACK file must be:
    +-----------------
    | PACK..........x.
@@ -51,7 +55,14 @@ let kind tmp ~offset =
       in
       Fiber.return (Ok (`Files names))
   | [], [ `Dir name ] -> Fiber.return (Ok (`Directory name))
-  | _ -> Fiber.return (Error `Invalid_first_entry)
+  | _ ->
+      let pp_elt ppf = function
+        | `Reg (name, _) -> Fmt.pf ppf "@[<1>(Reg@ %a)@]" Bob_fpath.pp name
+        | `Dir (name, _) -> Fmt.pf ppf "@[<1>(Dir@ %a)@]" Bob_fpath.pp name
+      in
+      Log.err (fun m ->
+          m "Invalid first entry: @[<hov>%a@]" Fmt.(Dump.list pp_elt) elements);
+      Fiber.return (Error `Invalid_first_entry)
 
 let print_received_file ~quiet src dst =
   if not quiet then
@@ -80,14 +91,15 @@ let extract_file ~quiet ?g tmp decoder src off ~leftover ~name dst =
         else leftover
     | None -> Source.array [| src |]
   in
+  let dst = Stdlib.Option.value ~default:name dst in
   let dst =
-    if Sys.file_exists (Bob_fpath.to_string name) then (
+    if Sys.file_exists (Bob_fpath.to_string dst) then (
       let dst = Temp.random_temporary_path ?g "bob-%s" in
-      Logs.err (fun m ->
+      Log.err (fun m ->
           m "%a already exists (we saved received file into: %a)" Bob_fpath.pp
             name Bob_fpath.pp dst);
       dst)
-    else Stdlib.Option.value ~default:name dst
+    else dst
   in
   print_received_file ~quiet name dst;
   let ctx =
@@ -152,12 +164,12 @@ let collect ~quiet ~config first_entry tmp decoder src off ~leftover =
   in
   let offset = Bigarray.Array1.dim src - off in
   let offset = Int64.neg (Int64.of_int offset) in
-  Logs.debug (fun m -> m "Start to re-analyzed the rest of the PACK file.");
+  Log.debug (fun m -> m "Start to re-analyzed the rest of the PACK file.");
   Stream.run ~from
     ~via:Flow.(save_into ~offset tmp << Pack.analyse ?decoder ignore)
     ~into:Sink.list
   >>= fun (entries, source) ->
-  Logs.debug (fun m -> m "All objects are analyzed.");
+  Log.debug (fun m -> m "All objects are analyzed.");
   Fiber.Option.iter Source.dispose source >>= fun () ->
   let entries, _hash =
     let is_elt = function
@@ -182,24 +194,25 @@ let collect ~quiet ~config first_entry tmp decoder src off ~leftover =
   in
   let entries = Source.list (first_entry :: entries) in
   Pack.collect entries >>= fun (status, oracle) ->
-  Logs.debug (fun m -> m "All objects are collected.");
+  Log.debug (fun m -> m "All objects are collected.");
   Reporters.with_reporter ~config quiet (verify_bar ~total)
   @@ fun (reporter, finalise) ->
   Pack.verify ~reporter:(reporter <.> Stdbob.always 1) ~oracle tmp status
   >>= fun () ->
-  Logs.debug (fun m -> m "All objects are verified.");
+  Log.debug (fun m -> m "All objects are verified.");
   finalise ();
   Fiber.return status
 
 let extract_directory ~quiet ?g ~config ~total pack ~name dst hash =
+  let dst = Stdlib.Option.value ~default:name dst in
   let dst =
-    if Sys.file_exists (Bob_fpath.to_string name) then (
+    if Sys.file_exists (Bob_fpath.to_string dst) then (
       let dst = Temp.random_temporary_path ?g "bob-%s" in
-      Logs.err (fun m ->
+      Log.err (fun m ->
           m "%a already exists (we saved received file into: %a)" Bob_fpath.pp
             name Bob_fpath.pp dst);
       dst)
-    else Stdlib.Option.value ~default:name dst
+    else dst
   in
   let open Fiber in
   print_received_directory ~quiet name dst;
@@ -230,13 +243,17 @@ let extract ~quiet ?g ?metadata ~config from dst =
       kind tmp ~offset >>? fun kind ->
       match (kind, Stdlib.Option.map Metadata.kind_of_document metadata) with
       | `File (name, _hash), (Some `File | None) ->
+          Log.debug (fun m -> m "Start to unpack a file");
           extract_file ~quiet ?g tmp decoder src off ~leftover ~name dst
       | `Files _names, (Some `Files | None) -> assert false
       | `Directory (name, hash), (Some `Directory | None) ->
+          Log.debug (fun m -> m "Start to unpack a directory");
           collect ~quiet ~config entry tmp decoder src off ~leftover
           >>= fun status ->
           Pack.pack tmp status >>= fun pack ->
           let total = Array.length status in
           extract_directory ~quiet ~config ~total pack ~name dst hash
       | _ -> Fiber.return (Error `Unexpected_kind_of_document))
-  | _ -> Fiber.return (Error `Invalid_first_entry)
+  | Some (`Elt (_, status, _), _, _, _), _ ->
+      Log.err (fun m -> m "Got an unexpected object: %a" Pack.pp_status status);
+      Fiber.return (Error `Invalid_first_entry)

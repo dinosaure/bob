@@ -59,6 +59,7 @@ val is_resolved : status -> bool
 val offset_of_status : status -> int64
 val kind_of_status : status -> [ `A | `B | `C | `D ]
 val uid_of_status : status -> Digestif.SHA1.t
+val pp_status : status Fmt.t
 
 val analyse :
   ?decoder:decoder ->
