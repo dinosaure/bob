@@ -91,6 +91,12 @@
  (libraries bob.reporters bob.protocol bob.pack))
 
 (library
+ (name generate)
+ (public_name bob.generate)
+ (modules generate)
+ (libraries bob.reporters bob.protocol bob.pack))
+
+(library
  (name pack)
  (public_name bob.pack)
  (modules pack)

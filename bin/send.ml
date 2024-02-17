@@ -7,11 +7,14 @@ let () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
    the EPIPE error on the [write()] syscall. *)
 
 let compress_with_reporter quiet ~compression ~config store hashes =
-  with_reporter ~config quiet (compression_progress ~total:(Pack.length store))
+  with_reporter ~config quiet
+    (compression_progress ~total:(Generate.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
   Logs.debug (fun m -> m "Start deltification.");
-  Pack.deltify ~reporter:(Fiber.return <.> reporter) ~compression store hashes
+  Generate.deltify
+    ~reporter:(Fiber.return <.> reporter)
+    ~compression store hashes
   >>| fun res ->
   Logs.debug (fun m -> m "Deltification is done.");
   finalise ();
@@ -22,14 +25,14 @@ type pack = Stream of Stdbob.bigstring Stream.stream | File of Bob_fpath.t
 let emit_with_reporter quiet ?g ?level ~config store
     (objects : Digestif.SHA1.t Carton.Enc.q Stream.stream) =
   with_reporter ~config quiet
-    (progress_bar_for_objects ~total:(Pack.length store))
+    (progress_bar_for_objects ~total:(Generate.length store))
   @@ fun (reporter, finalise) ->
   let open Fiber in
   let open Stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
   Logs.debug (fun m -> m "Generate the PACK file: %a" Bob_fpath.pp path);
   let flow =
-    Pack.make ?level
+    Generate.make_from_store ?level
       ~reporter:(Fiber.return <.> reporter <.> Stdbob.always 1)
       store
   in
@@ -42,7 +45,7 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ~len:Bob_unix.Crypto.max_packet ?level
+  Generate.make_from_file ~len:Bob_unix.Crypto.max_packet ?level
     ~reporter:(Fiber.return <.> reporter)
     ~finalise path
   >>= function
@@ -70,10 +73,10 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
 
 let generate_pack_file quiet ~config ~g compression path =
   let open Fiber in
-  Pack.store path >>= fun (hashes, store) ->
-  match Pack.length store with
-  | 0 -> assert false
-  | 1 ->
+  Generate.store path >>= fun (hashes, store) ->
+  match Generate.length store with
+  | 0 | 1 -> assert false
+  | 2 ->
       emit_one_with_reporter quiet
         ~level:(if compression then 4 else 0)
         ~config path

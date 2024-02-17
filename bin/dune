@@ -64,6 +64,7 @@
   bob.dns
   bob.reporters
   bob.extract
+  bob.generate
   bob.happy-eyeballs))
 
 (executable
