@@ -35,6 +35,7 @@ depends: [
   "dns-client"        {>= "6.4.0"}
   "happy-eyeballs"    {>= "0.6.0"}
   "ca-certs"
+  "jsonm"
   "ke"                {>= "0.6"}
   "alcotest"          {with-test}
   "spoke"             {>= "0.0.2"}
