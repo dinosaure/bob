@@ -53,6 +53,7 @@ depends: [
   "happy-eyeballs"         { >= "0.6.0" }
   "ca-certs"
   "eqaf"                   { >= "0.10"}
+  "jsonm"
   "ke"                     { >= "0.6" }
   "alcotest"               { with-test }
   "spoke"                  { > "0.0.3" }
