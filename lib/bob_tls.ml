@@ -24,9 +24,31 @@ exception Tls of error
 
 type t = {
   fd : Unix.file_descr;
-  mutable state : [ `Active of Tls.Engine.state | `End | `Error of error ];
+  mutable state :
+    [ `Active of Tls.Engine.state
+    | `Closed
+    | `Read_closed of Tls.Engine.state
+    | `Write_closed of Tls.Engine.state
+    | `Error of error ];
   mutable linger : Cstruct.t option;
 }
+
+let half_close state mode =
+  match (state, mode) with
+  | `Active tls, `read -> `Read_closed tls
+  | `Active tls, `write -> `Write_closed tls
+  | `Active _, `read_write -> `Closed
+  | `Read_closed tls, `read -> `Read_closed tls
+  | `Read_closed _, (`write | `read_write) -> `Closed
+  | `Write_closed tls, `write -> `Write_closed tls
+  | `Write_closed _, (`read | `read_write) -> `Closed
+  | ((`Closed | `Error _) as e), (`read | `write | `read_write) -> e
+
+let inject_state tls = function
+  | `Active _ -> `Active tls
+  | `Read_closed _ -> `Read_closed tls
+  | `Write_closed _ -> `Write_closed tls
+  | (`Closed | `Error _) as e -> e
 
 let rec read_react t =
   let handle tls buf =
@@ -39,12 +61,12 @@ let rec read_react t =
         | Error err ->
             t.state <- `Error (err :> error);
             Fiber.return (`Error (err :> error)))
-    | Ok (state', `Response resp, `Data data) -> (
+    | Ok (state', eof, `Response resp, `Data data) -> (
+        let state' = inject_state state' t.state in
         let state' =
-          match state' with
-          | `Ok tls -> `Active tls
-          | `Eof -> `End
-          | `Alert alert -> `Error (`Alert alert)
+          Stdlib.Option.(
+            value ~default:state'
+              (map (fun `Eof -> half_close state' `read) eof))
         in
         t.state <- state';
         match resp with
@@ -59,21 +81,21 @@ let rec read_react t =
   in
   match t.state with
   | `Error err -> Fiber.return (`Error err)
-  | `End -> Fiber.return `End
-  | `Active _ -> (
-      Fiber.read t.fd >>= fun data ->
-      match (t.state, data) with
-      | `Active _, Ok `End ->
-          t.state <- `End;
-          Fiber.return `End
-      | `Active tls, Ok (`Data bstr) ->
-          let cs = Cstruct.of_bigarray bstr in
-          handle tls cs
-      | _, Error errno ->
+  | `Read_closed _ | `Closed -> Fiber.return `End
+  | `Active _ | `Write_closed _ -> (
+      Fiber.read t.fd >>= function
+      | Error errno ->
           t.state <- `Error (`Unix errno);
           Fiber.return (`Error (`Unix errno))
-      | `Error err, _ -> Fiber.return (`Error err)
-      | `End, _ -> Fiber.return `End)
+      | Ok `End ->
+          t.state <- half_close t.state `read;
+          Fiber.return `End
+      | Ok (`Data bstr) -> (
+          let cs = Cstruct.of_bigarray bstr in
+          match t.state with
+          | `Active tls | `Write_closed tls -> handle tls cs
+          | `Read_closed _ | `Closed -> Fiber.return `End
+          | `Error _ as e -> Fiber.return e))
 
 let rec read t buf =
   let write_out res =
@@ -96,8 +118,8 @@ let rec read t buf =
 let writev t css =
   match t.state with
   | `Error err -> Fiber.return (Error err)
-  | `End -> Fiber.return (Error `Closed)
-  | `Active tls -> (
+  | `Closed | `Write_closed _ -> Fiber.return (Error `Closed)
+  | `Active tls | `Read_closed tls -> (
       match Tls.Engine.send_application_data tls css with
       | None -> Fmt.invalid_arg "Socket is not ready"
       | Some (tls, data) -> (
@@ -131,9 +153,12 @@ let rec drain_handshake t =
 
 let close t =
   match t.state with
-  | `Active tls -> (
-      let _, { Cstruct.buffer; off; len } = Tls.Engine.send_close_notify tls in
-      t.state <- `End;
+  | `Active tls | `Read_closed tls -> (
+      let tls, { Cstruct.buffer; off; len } =
+        Tls.Engine.send_close_notify tls
+      in
+      t.state <- inject_state tls t.state;
+      t.state <- `Closed;
       full_write t.fd buffer ~off ~len >>= function
       | Ok () -> Fiber.close t.fd
       | Error err ->
@@ -145,9 +170,8 @@ let client_of_file_descr config ?host fd =
   let config =
     match host with None -> config | Some host -> Tls.Config.peer config host
   in
-  let t = { state = `End; fd; linger = None } in
   let tls, { Cstruct.buffer; off; len } = Tls.Engine.client config in
-  let t = { t with state = `Active tls } in
+  let t = { state = `Active tls; fd; linger = None } in
   full_write t.fd buffer ~off ~len >>= function
   | Ok () -> Fiber.catch (fun () -> drain_handshake t) (fun exn -> raise exn)
   | Error err ->
