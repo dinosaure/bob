@@ -28,6 +28,7 @@ let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 let io_buffer_size = 65536 (* 0x10000 & = De.io_buffer_size *)
 let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 let never _ = assert false
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 
 let bigstring_blit src ~src_off dst ~dst_off ~len =
   if
@@ -247,3 +248,26 @@ let bytes_to_size ?(decimals = 2) ppf = function
       let i = Float.floor (Float.log n /. Float.log 1024.) in
       let r = n /. Float.pow 1024. i in
       Fmt.pf ppf "%.*f %s" decimals r sizes.(int_of_float i)
+
+let add str ~start ~stop acc =
+  if start = stop then "" :: acc else String.sub str start (stop - start) :: acc
+
+let cuts ~sep str =
+  let sep_len = String.length sep in
+  if sep_len = 0 then invalid_arg "Stdbob.cuts";
+  let str_len = String.length str in
+  let max_sep_idx = sep_len - 1 in
+  let max_str_idx = str_len - sep_len in
+  let rec check_sep start i k acc =
+    if k > max_sep_idx then
+      let new_start = i + sep_len in
+      scan new_start new_start (add str ~start ~stop:i acc)
+    else if str.[i + k] = sep.[k] then check_sep start i (k + 1) acc
+    else scan start (i + 1) acc
+  and scan start i acc =
+    if i > max_str_idx then
+      if start = 0 then [ str ] else List.rev (add str ~start ~stop:str_len acc)
+    else if str.[i] = sep.[0] then check_sep start i 1 acc
+    else scan start (i + 1) acc
+  in
+  scan 0 0 []

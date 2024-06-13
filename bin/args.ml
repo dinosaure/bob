@@ -336,3 +336,12 @@ let destination =
     Arg.conv (parser, pp)
   in
   Arg.(value & opt (some name) None & info [ "o"; "output" ] ~doc ~docv:"<dst>")
+
+let through =
+  let doc =
+    "The user can communicate with the relay $(b,through) a SOCKSv{4a,5} \
+     server (usually, a Tor server). The format of the argument is: \
+     [socks{4,4a,5}://(username:password@)?hostname(:port)?]"
+  in
+  let server = Arg.conv Bob_socks.(parser, pp) in
+  Arg.(value & opt (some server) None & info [ "through" ] ~doc ~docv:"<socks>")

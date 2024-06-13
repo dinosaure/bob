@@ -111,7 +111,15 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
     [ `Write of string * string | `Close of string | `Continue ]
 
   module Make (Flow : Mirage_flow.S) = struct
-    let relay ?(timeout = 3600_000_000_000L) ~port ~handshake ?stop tcp rooms =
+    let relay ~g ?(timeout = 3600_000_000_000L) ~port ~handshake ?stop tcp rooms
+        =
+      let generate_identity ~g =
+        let res = Bytes.make 16 '\000' in
+        for i = 0 to 15 do
+          Bytes.set res i (Char.unsafe_chr (Random.State.int g 256))
+        done;
+        Base64.encode_exn (Bytes.unsafe_to_string res)
+      in
       let wr_condition = Lwt_condition.create () in
       let rd_condition = Lwt_condition.create () in
       let t = Bob.Relay.make () in
@@ -213,10 +221,18 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
             read ()
       in
       let handler (fd, (ipaddr, port)) =
-        let identity = Fmt.str "%a:%d" Ipaddr.pp ipaddr port in
+        let identity =
+          let rec go () =
+            let str = generate_identity ~g in
+            if Hashtbl.mem fds str then go () else str
+          in
+          go ()
+        in
         Hashtbl.add fds identity (fd, Lwt.return `Continue);
         Bob.Relay.new_peer t ~identity;
-        Logs.debug (fun m -> m "Open a new connection with %S" identity);
+        Logs.debug (fun m ->
+            m "Open a new connection with %S (%a:%d)" identity Ipaddr.pp ipaddr
+              port);
         Lwt_condition.signal rd_condition ();
         Lwt_condition.signal wr_condition ();
         Lwt.async (fun () ->
@@ -446,10 +462,11 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   let start _time stack =
     let rooms = Bob.Secured.make () in
+    let g = Random.State.make_self_init () in
     let handshake socket = Lwt.return (Ok (socket, Stack.TCP.dst socket)) in
     Lwt.join
       [
-        Bob_clear.relay ~port:(Key_gen.port ()) ~handshake (Stack.tcp stack)
+        Bob_clear.relay ~g ~port:(Key_gen.port ()) ~handshake (Stack.tcp stack)
           rooms;
         Secured.secure_room ~port:(Key_gen.secure_port ()) (Stack.tcp stack)
           rooms;

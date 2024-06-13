@@ -354,6 +354,7 @@ module Server = struct
       (a, server) src ->
       (a, server) packet ->
       [> `Continue
+      | `Identity of string
       | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
       | `Close ] =
    fun t source packet ->
@@ -371,7 +372,7 @@ module Server = struct
         `Continue
     | Relay, Server_identity identity ->
         t.identity <- identity;
-        `Continue
+        `Identity identity
     | Peer (Client, uid), X_and_client_identity { _X; identity } -> (
         let identities =
           match t.reproduce with
@@ -479,6 +480,7 @@ module Client = struct
       (a, client) packet ->
       [> `Continue
       | `Agreement of string
+      | `Identity of string
       | `Done of string * (Spoke.cipher * Spoke.cipher) * Spoke.shared_keys
       | `Close ] =
    fun t source packet ->
@@ -496,7 +498,7 @@ module Client = struct
         `Continue
     | Relay, Client_identity identity ->
         t.identity <- identity;
-        `Continue
+        `Identity identity
     | Relay, New_server { uid; public; identity } -> (
         Log.debug (fun m ->
             m "A new server (%04x, %s) is available." uid identity);

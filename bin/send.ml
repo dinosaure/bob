@@ -51,9 +51,10 @@ let emit_one_with_reporter quiet ?level ~config path =
   | Ok stream -> Fiber.return (Stream stream)
 
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
-    sockaddr = function
+    ~happy_eyeballs ?through addr = function
   | Stream stream ->
-      Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
+      Transfer.transfer ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through
+        addr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
       with_reporter ~config quiet (make_tranfer_bar ~total)
@@ -64,7 +65,7 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       >>| Result.get_ok
       >>= Transfer.transfer
             ~reporter:(Fiber.return <.> reporter)
-            ~identity ~ciphers ~shared_keys sockaddr
+            ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through addr
       >>| fun res ->
       finalise ();
       res
@@ -92,8 +93,8 @@ let better_to_compress_for mime_type =
   | "video" :: _ | "audio" :: _ | "image" :: _ -> false
   | _ -> true
 
-let run_server quiet g (_, he) mime_type compression addr secure_port reproduce
-    password path =
+let run_server quiet g (_, he) through mime_type compression addr secure_port
+    reproduce password path =
   let compression =
     match (mime_type, compression) with
     | None, None -> true
@@ -103,13 +104,26 @@ let run_server quiet g (_, he) mime_type compression addr secure_port reproduce
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
   let secret, _ = Spoke.generate ~g ~password ~algorithm:Spoke.Pbkdf2 16 in
   let open Fiber in
-  Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
+  (match through with
+  | Some server -> Bob_socks.connect ~happy_eyeballs:he ~server addr
+  | None -> Bob_happy_eyeballs.connect he addr)
+  >>? fun (_sockaddr, socket) ->
   generate_pack_file quiet ~g ~config compression path >>= fun pack ->
-  Bob_clear.server socket ~reproduce ~g secret
+  let identity =
+    if quiet then Fun.const (Fiber.return ())
+    else fun seed ->
+      let identity =
+        Password.identity_of_seed (Password.compile Dict.En.words) ~seed
+        |> Result.get_ok
+      in
+      Progress.interject_with (fun () -> Fmt.pr "Identity: %s\n%!" identity);
+      Fiber.return ()
+  in
+  Bob_clear.server socket ~reproduce ~g ~identity secret
   >>? fun (identity, ciphers, shared_keys) ->
-  let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
+  let addr = Transfer.addr_with_secure_port addr secure_port in
   transfer_with_reporter quiet ~config ~identity ~ciphers:(flip ciphers)
-    ~shared_keys:(flip shared_keys) sockaddr pack
+    ~shared_keys:(flip shared_keys) ~happy_eyeballs:he ?through addr pack
   >>| Transfer.open_error
 
 let pp_error ppf = function
@@ -117,12 +131,12 @@ let pp_error ppf = function
   | #Bob_clear.error as err -> Bob_clear.pp_error ppf err
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run () dns_and_he mime_type compression addr secure_port reproduce
+let run () dns_and_he through mime_type compression addr secure_port reproduce
     (quiet, g, password) path =
   match
     Fiber.run
-      (run_server quiet g dns_and_he mime_type compression addr secure_port
-         reproduce password path)
+      (run_server quiet g dns_and_he through mime_type compression addr
+         secure_port reproduce password path)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -179,7 +193,7 @@ let cmd =
     (Cmd.info "send" ~doc ~man)
     Term.(
       ret
-        (const run $ term_setup_temp $ term_setup_dns $ mime_type $ compression
-       $ relay $ secure_port $ reproduce
+        (const run $ term_setup_temp $ term_setup_dns $ through $ mime_type
+       $ compression $ relay $ secure_port $ reproduce
         $ term_setup_password password
         $ path))

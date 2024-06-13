@@ -6,6 +6,12 @@ let choose = function
   | false ->
       let open Fiber in
       fun identity ->
+        let human_readable_identity =
+          Password.identity_of_seed
+            (Password.compile Dict.En.words)
+            ~seed:identity
+          |> Result.get_ok
+        in
         let rec asking () =
           Fiber.getline Unix.stdin >>| Stdlib.Option.map String.lowercase_ascii
           >>= function
@@ -15,7 +21,7 @@ let choose = function
               Fmt.pr "Invalid response, accept from %s [Y/n]: %!" identity;
               asking ()
         in
-        Fmt.pr "Accept from %s [Y/n]: %!" identity;
+        Fmt.pr "Accept from %s [Y/n]: %!" human_readable_identity;
         asking ()
 
 let ask_password () =
@@ -30,12 +36,13 @@ let ask_password () =
   Fmt.pr "Your password: %!";
   asking ()
 
-let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
-    : (Stdbob.bigstring Stream.source, _) result Fiber.t =
+let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
+    ~happy_eyeballs ?through addr :
+    (Stdbob.bigstring Stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   Transfer.receive
     ~reporter:(Fiber.return <.> reporter)
-    ~finalise ~identity ~ciphers ~shared_keys sockaddr
+    ~finalise ~identity ~ciphers ~shared_keys ~happy_eyeballs ?through addr
 
 let make_window bits = De.make_window ~bits
 
@@ -223,21 +230,25 @@ let extract_with_reporter quiet ~config ?g
                 name Bob_fpath.pp destination);
           unpack_with_reporter quiet ~config ~total pack destination hash)
 
-let run_client quiet g (_, he) addr secure_port reproduce password yes
+let run_client quiet g (_, he) through addr secure_port reproduce password yes
     destination =
   let open Fiber in
   (match password with
   | Some password -> Fiber.return password
   | None -> ask_password ())
   >>= fun password ->
-  Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
+  (match through with
+  | Some server -> Bob_socks.connect ~happy_eyeballs:he ~server addr
+  | None -> Bob_happy_eyeballs.connect he addr)
+  >>? fun (_sockaddr, socket) ->
   Logs.debug (fun m -> m "The client is connected to the relay.");
   let choose = choose yes in
   Bob_clear.client socket ~reproduce ~choose ~g password
   >>? fun (identity, ciphers, shared_keys) ->
   let config = Progress.Config.v ~ppf:Fmt.stdout () in
-  let sockaddr = Transfer.sockaddr_with_secure_port sockaddr secure_port in
-  source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
+  let addr = Transfer.addr_with_secure_port addr secure_port in
+  source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
+    ~happy_eyeballs:he ?through addr
   >>| Transfer.open_error
   >>? fun source -> extract_with_reporter quiet ~config ~g source destination
 
@@ -249,10 +260,12 @@ let pp_error ppf = function
   | `No_root -> Fmt.pf ppf "The given PACK file has no root"
   | `Msg err -> Fmt.pf ppf "%s" err
 
-let run quiet g () dns_and_he addr secure_port reproduce password yes dst =
+let run quiet g () dns_and_he through addr secure_port reproduce password yes
+    dst =
   match
     Fiber.run
-      (run_client quiet g dns_and_he addr secure_port reproduce password yes dst)
+      (run_client quiet g dns_and_he through addr secure_port reproduce password
+         yes dst)
   with
   | Ok () -> `Ok 0
   | Error err ->
@@ -270,8 +283,8 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ relay $ secure_port $ reproduce $ password $ yes
-     $ destination))
+     $ term_setup_dns $ through $ relay $ secure_port $ reproduce $ password
+     $ yes $ destination))
 
 let cmd =
   let doc = "Receive a file from a peer who share the given password." in
