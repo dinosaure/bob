@@ -1,5 +1,28 @@
 open Lwt.Infix
 
+module K = struct
+  open Cmdliner
+
+  let port =
+    let doc =
+      Arg.info ~doc:"Set the port where the relay will listen." [ "p"; "port" ]
+    in
+    Arg.(value & opt int 9000 doc)
+
+  let secure_port =
+    let doc =
+      Arg.info
+        ~doc:"The port of the relay where the secured rooms are available."
+        [ "secure-port" ]
+    in
+    Arg.(value & opt int 9001 doc)
+
+  type t = { port : int; secure_port : int }
+
+  let v port secure_port = { port; secure_port }
+  let setup = Term.(const v $ port $ secure_port)
+end
+
 module Psq =
   Psq.Make
     (String)
@@ -444,14 +467,12 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
 
   module Bob_clear = Make (Stack.TCP)
 
-  let start _time stack =
+  let start _time stack { K.port; K.secure_port } =
     let rooms = Bob.Secured.make () in
     let handshake socket = Lwt.return (Ok (socket, Stack.TCP.dst socket)) in
     Lwt.join
       [
-        Bob_clear.relay ~port:(Key_gen.port ()) ~handshake (Stack.tcp stack)
-          rooms;
-        Secured.secure_room ~port:(Key_gen.secure_port ()) (Stack.tcp stack)
-          rooms;
+        Bob_clear.relay ~port ~handshake (Stack.tcp stack) rooms;
+        Secured.secure_room ~port:secure_port (Stack.tcp stack) rooms;
       ]
 end
