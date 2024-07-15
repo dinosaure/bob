@@ -25,8 +25,8 @@ depends: [
   "bigstringaf"
   "cmdliner"
   "ipaddr"            {>= "5.3.0"}
-  "mirage-crypto"
-  "mirage-crypto-rng" {>= "0.11.0"}
+  "mirage-crypto"     {< "1.0.0"}
+  "mirage-crypto-rng" {>= "0.11.0" & < "1.0.0"}
   "x509"              {>= "0.16.0"}
   "psq"
   "tls"               {>= "0.17.4"}
