@@ -34,7 +34,7 @@ How to receive a file (with the same password):<br />
 
 You can compile & install bob with [opam][opam]:
 ```sh
-$ opam pin add -y https://github.com/dinosaure/bob
+$ opam pin add -y https://github.com/dinosaure/bob.git
 ```
 
 Bob has 3 sub-programs, the receiver, the sender and the relay. We will
