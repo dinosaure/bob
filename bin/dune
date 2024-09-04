@@ -30,6 +30,7 @@
   ipaddr
   ipaddr.unix
   base64
+  bob.protocol
   bob.password
   bob.temp
   bob.happy-eyeballs

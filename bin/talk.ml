@@ -101,7 +101,7 @@ type error =
   | Bob_protocol.Machine.error
   | Bob_unix.error ]
 
-let run person g he addr secure_port password reproduce =
+let run person g resume he addr secure_port password reproduce =
   let open Fiber in
   Bob_happy_eyeballs.connect he addr >>? fun (sockaddr, socket) ->
   (match person with
@@ -141,15 +141,22 @@ let run person g he addr secure_port password reproduce =
     | `Bob ->
         let metadata = Bob_protocol.Metadata.v1 ~size:1L `File in
         Bob_protocol.Machine.bob ~metadata state
-    | `Alice -> Bob_protocol.Machine.alice state
+    | `Alice -> Bob_protocol.Machine.alice ?resume state
   in
   run_protocol secure_flow monad
   >>| Result.map_error (fun err -> (err :> error))
   >>? function
-  | `Ready_to_send -> Fiber.close socket >>= fun () -> Fiber.return (Ok ())
-  | `Ready_to_resume _resume ->
+  | `Ready_to_send ->
+      Fmt.pr ">>> ready to send\n%!";
       Fiber.close socket >>= fun () -> Fiber.return (Ok ())
-  | `Ready_to_recv _metadata ->
+  | `Ready_to_resume (hash, cursor) ->
+      Fmt.pr ">>> ready to resume (hash:%a, cursor:%Ld)\n%!" Digestif.SHA256.pp
+        hash cursor;
+      Fiber.close socket >>= fun () -> Fiber.return (Ok ())
+  | `Ready_to_recv metadata ->
+      Fmt.pr ">>> ready to recv (%a)\n%!"
+        Fmt.(Dump.option Bob_protocol.Metadata.pp)
+        metadata;
       Fiber.close socket >>= fun () -> Fiber.return (Ok ())
   | `Quit -> Fiber.return (Error (`Read `Closed))
 
@@ -164,8 +171,10 @@ let pp_error ppf = function
   | #Bob_unix.error as err -> Bob_unix.pp_error ppf err
   | #Bob_protocol.Machine.error as err -> Bob_protocol.Machine.pp_error ppf err
 
-let run _quiet g () (_, he) addr secure_port password person reproduce =
-  match Fiber.run (run person g he addr secure_port password reproduce) with
+let run _quiet g () (_, he) resume addr secure_port password person reproduce =
+  match
+    Fiber.run (run person g resume he addr secure_port password reproduce)
+  with
   | Ok () -> `Ok 0
   | Error err ->
       Fmt.epr "%s: %a.\n%!" Sys.argv.(0) pp_error err;
@@ -186,7 +195,8 @@ let term =
   Term.(
     ret
       (const run $ term_setup_logs $ term_setup_random $ term_setup_temp
-     $ term_setup_dns $ relay $ secure_port $ password $ person $ reproduce))
+     $ term_setup_dns $ term_setup_resume $ relay $ secure_port $ password
+     $ person $ reproduce))
 
 let cmd =
   let doc =

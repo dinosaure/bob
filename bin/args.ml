@@ -379,6 +379,41 @@ let setup_dns nameservers happy_eyeballs =
 let term_setup_dns =
   Term.(const setup_dns $ nameservers $ term_setup_happy_eyeballs)
 
+let setup_resume resume =
+  let resume =
+    match resume with
+    | None
+      when Sys.file_exists "resume.json"
+           && Sys.is_directory "resume.json" = false ->
+        Some (Fpath.v "resume.json")
+    | Some resume ->
+        let v = Fpath.to_string resume in
+        if Sys.file_exists v && Sys.is_directory v = false then Some resume
+        else None
+    | None -> None
+  in
+  match resume with
+  | Some resume ->
+      let ic = open_in (Fpath.to_string resume) in
+      let finally () = close_in ic in
+      Fun.protect ~finally (fun () ->
+          match Bob_protocol.Resume.of_json ic with
+          | Ok resume -> Some resume
+          | Error (`Msg err) ->
+              Logs.warn (fun m ->
+                  m "Invalid resume file %a: %s" Fpath.pp resume err);
+              None)
+  | None -> None
+
+let resume =
+  let parser = Fpath.of_string and pp = Fpath.pp in
+  let doc = "The resume.json file to resume a failed transfer." in
+  let env = Cmd.Env.info "BOB_RESUME" in
+  let location = Arg.conv (parser, pp) in
+  Arg.(value & opt (some location) None & info [ "resume" ] ~doc ~env)
+
+let term_setup_resume = Term.(const setup_resume $ resume)
+
 let compression =
   Arg.(
     value
