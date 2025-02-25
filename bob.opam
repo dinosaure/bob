@@ -30,7 +30,7 @@ depends: [
   "x509"              {>= "0.16.0"}
   "psq"
   "tls"               {>= "0.17.4"}
-  "carton"            {>= "0.5.0"}
+  "carton"            {>= "0.5.0" & < "1.0.0"}
   "progress"          {>= "0.2.1"}
   "dns-client"        {>= "6.4.0"}
   "happy-eyeballs"    {>= "0.6.0"}
