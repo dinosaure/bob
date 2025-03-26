@@ -99,8 +99,8 @@ val secure_room :
   Bob.Secured.t ->
   stop:unit Fiber.Ivar.t ->
   unit Fiber.t
-(** [secure_room ?timeout socket room ~stop] handles secured rooms and
-    allocates them for incoming peers. *)
+(** [secure_room ?timeout socket room ~stop] handles secured rooms and allocates
+    them for incoming peers. *)
 
 type error =
   [ `Closed

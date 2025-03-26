@@ -36,8 +36,7 @@ module Psq =
         | `Bound _, `Bound _ | `Ready, `Ready -> 0
     end)
 
-let serve_when_ready :
-    type t socket flow.
+let serve_when_ready : type t socket flow.
     accept:(t -> (socket, 'error) result Lwt.t) ->
     handshake:(socket -> (flow, 'error) result Lwt.t) ->
     close:(t -> unit Lwt.t) ->
@@ -274,12 +273,12 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
       Lwt.pick
         [
           (Lwt_mvar.take state :> income00 Lwt.t);
-          (Stack.TCP.read fd >|= function
-           | Ok `Eof -> (k `End :> income00)
-           | Ok (`Data cs) ->
-               (k (`Data (Cstruct.to_string cs, 0, Cstruct.length cs))
-                 :> income00)
-           | Error err -> `Error err);
+          ( Stack.TCP.read fd >|= function
+            | Ok `Eof -> (k `End :> income00)
+            | Ok (`Data cs) ->
+                (k (`Data (Cstruct.to_string cs, 0, Cstruct.length cs))
+                  :> income00)
+            | Error err -> `Error err );
         ]
       >>= function
       | `Closed | `Bounded _ -> Lwt.return_unit
@@ -341,9 +340,9 @@ module Make (Time : Mirage_time.S) (Stack : Tcpip.Stack.V4V6) = struct
         Lwt.pick
           [
             (Lwt_mvar.take closed :> income01 Lwt.t);
-            (Stack.TCP.read fd0 >|= function
-             | Ok v -> `Read v
-             | Error err -> `Error err);
+            ( Stack.TCP.read fd0 >|= function
+              | Ok v -> `Read v
+              | Error err -> `Error err );
           ]
         >>= function
         | `Closed | `Read `Eof ->

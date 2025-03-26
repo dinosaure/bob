@@ -348,8 +348,7 @@ module Server = struct
     send_to to_relay (Hello_as_a_server { public }) t.queue;
     t
 
-  let process_packet :
-      type a.
+  let process_packet : type a.
       t ->
       (a, server) src ->
       (a, server) packet ->
@@ -472,8 +471,7 @@ module Client = struct
     | Some (uid, _) -> send_to (to_server ~uid) Refused t.queue
     | None -> Fmt.invalid_arg "Impossible to refuse nothing"
 
-  let process_packet :
-      type a.
+  let process_packet : type a.
       t ->
       (a, client) src ->
       (a, client) packet ->
@@ -731,8 +729,8 @@ module Relay = struct
     | `No_handshake_with uid -> Fmt.pf ppf "No handshake with %04x" uid
     | `No_agreement -> Fmt.string ppf "No agreement"
 
-  let remove_candidates :
-      type a b. src:(a, b) src -> dst:(a, b) dst -> t -> unit =
+  let remove_candidates : type a b.
+      src:(a, b) src -> dst:(a, b) dst -> t -> unit =
    fun ~src ~dst t ->
     match (src, dst) with
     | Peer (Server, s), Peer (Client, c) | Peer (Client, c), Peer (Server, s)
@@ -752,8 +750,7 @@ module Relay = struct
     | Peer _, Relay -> .
     | Relay, Relay -> ()
 
-  let process_packet :
-      type a b c.
+  let process_packet : type a b c.
       t ->
       identity:string ->
       (a, b) src ->
@@ -899,8 +896,7 @@ module Relay = struct
     | Exists : ('f, 't) peer * ('f, 't) src -> exists
     | None : exists
 
-  let process_packet :
-      type a b.
+  let process_packet : type a b.
       t ->
       identity:string ->
       (a, b) dst ->

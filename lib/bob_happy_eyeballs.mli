@@ -15,9 +15,9 @@ val create :
   ?getaddrinfo:getaddrinfo ->
   unit ->
   t
-(** [create ~happy_eyeballs ~dns ~timer_interval ()] creates an initial state
-    of happy eyeballs with the specified timeouts in nanoseconds - the default
-    for [timer_interval] is [Duration.of_ms 10]. *)
+(** [create ~happy_eyeballs ~dns ~timer_interval ()] creates an initial state of
+    happy eyeballs with the specified timeouts in nanoseconds - the default for
+    [timer_interval] is [Duration.of_ms 10]. *)
 
 val connect_host :
   t ->
@@ -39,8 +39,7 @@ val connect :
 
 val inject : getaddrinfo -> t -> unit
 (** [inject getaddrinfo t] injects a new DNS resolver into the current
-    happy-eyeballs instance. By default, the happy-eyeballs instance is not
-    able to resolve a domain-name. The user must inject a new implementation
-    which is able to resolve a domain-name (with {!module:Bob_dns} for
-    instance). Then, the user is able to use {!val:connect_host} and
-    {!val:connect}. *)
+    happy-eyeballs instance. By default, the happy-eyeballs instance is not able
+    to resolve a domain-name. The user must inject a new implementation which is
+    able to resolve a domain-name (with {!module:Bob_dns} for instance). Then,
+    the user is able to use {!val:connect_host} and {!val:connect}. *)

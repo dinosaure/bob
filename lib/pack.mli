@@ -14,9 +14,9 @@ val deltify :
   Digestif.SHA1.t Stream.stream ->
   Digestif.SHA1.t Carton.Enc.q Stream.stream Fiber.t
 (** [deltify ~reporter ?compression store hashes] tries to compress with patch
-    objects together. If [compression] is true (default), it calculates
-    the patch between the objects and chooses the best. Otherwise, it
-    generates a stream of objects uncompressed between them. *)
+    objects together. If [compression] is true (default), it calculates the
+    patch between the objects and chooses the best. Otherwise, it generates a
+    stream of objects uncompressed between them. *)
 
 val make :
   ?len:int ->
@@ -24,9 +24,9 @@ val make :
   reporter:(unit -> unit Fiber.t) ->
   store ->
   (Digestif.SHA1.t Carton.Enc.q, Stdbob.bigstring) Stream.flow
-(** [make ?level ~reporter store] returns a {i flow} which transform a list
-   of objects into a series of [string]. [level] lets the user to choose the
-   [zlib] level compression (between [0] and [9]). *)
+(** [make ?level ~reporter store] returns a {i flow} which transform a list of
+    objects into a series of [string]. [level] lets the user to choose the
+    [zlib] level compression (between [0] and [9]). *)
 
 val make_one :
   ?len:int ->
@@ -35,9 +35,9 @@ val make_one :
   finalise:(unit -> unit) ->
   Bob_fpath.t ->
   (Stdbob.bigstring Stream.stream, [> `Msg of string ]) result Fiber.t
-(** [make ?level ~reporter path] returns the path of the generated PACK file
-    of the given file. [level] lets the user to choose the [zlib] level
-    compression (between [0] and [9]). *)
+(** [make ?level ~reporter path] returns the path of the generated PACK file of
+    the given file. [level] lets the user to choose the [zlib] level compression
+    (between [0] and [9]). *)
 
 type status
 type decoder
@@ -74,11 +74,11 @@ val inflate_entry :
   reporter:(int -> unit Fiber.t) ->
   (Stdbob.bigstring, Stdbob.bigstring) Stream.flow
 (** [inflate_entry ~reporter] creates a flow (usable with {!Stream.run} for
-    instance) which deflates an entry (including its header). The given input
-    (a {!Stream.source} or a {!Stream.stream}) must start at the beginning of
-    the entry. It returns the deflated entry. An entry can be a [`Base] (and,
-    in such case, you extract the entry) or a patch (and, in such case, you
-    must reconstruct the entry with its source). *)
+    instance) which deflates an entry (including its header). The given input (a
+    {!Stream.source} or a {!Stream.stream}) must start at the beginning of the
+    entry. It returns the deflated entry. An entry can be a [`Base] (and, in
+    such case, you extract the entry) or a patch (and, in such case, you must
+    reconstruct the entry with its source). *)
 
 val collect :
   entry Stream.source ->

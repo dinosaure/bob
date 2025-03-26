@@ -7,5 +7,5 @@ val get_default_directory : unit -> Bob_fpath.t
 type pattern = (string -> string, Format.formatter, unit, string) format4
 
 val random_temporary_path : ?g:Random.State.t -> pattern -> Bob_fpath.t
-(** [random_temporary_path ?g pattern] generates a new path which does not exists into
-    the global {i temp} directory. *)
+(** [random_temporary_path ?g pattern] generates a new path which does not
+    exists into the global {i temp} directory. *)

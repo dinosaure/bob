@@ -79,8 +79,7 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
     in
     List.fold_left
       (fun count -> function
-        | _, _, (`Ofs _ | `Ref _) -> succ count
-        | _, _, `Base _ -> count)
+        | _, _, (`Ofs _ | `Ref _) -> succ count | _, _, `Base _ -> count)
       acc entries
   in
   let entries = Source.list (entry :: entries) in
@@ -162,8 +161,7 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
      we don't ensure that [tmp] will be a well-formed PACK file. The only
      thing interesting into [tmp] is last bytes which permits to verify
      if we received correctly the file. *)
-  >>=
-  fun ((), source) ->
+  >>= fun ((), source) ->
   let hash = Digestif.SHA1.get !ctx in
   Fiber.Option.iter Source.dispose source >>= fun () ->
   let expected =

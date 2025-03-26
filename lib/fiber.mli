@@ -93,8 +93,8 @@ val return : 'a -> 'a t
     with value [v].
 
     This is needed to satisfy the type system in some cases. For example, in a
-    [match] expression where one case evaluates to a fiber, the other cases
-    have to evaluate to fibers as well:
+    [match] expression where one case evaluates to a fiber, the other cases have
+    to evaluate to fibers as well:
 
     {[
       match need_input with
@@ -106,8 +106,7 @@ val ignore : _ -> unit t
 val always : 'a -> _ -> 'a t
 
 val bind : 'a t -> ('a -> 'b t) -> 'b t
-(** [bind t0 f] makes it so that [f] will run when [t0] is
-    {{!t} {e fulfilled}}.
+(** [bind t0 f] makes it so that [f] will run when [t0] is {{!t} {e fulfilled}}.
 
     When [t0] is fulfilled with value [v], the callback [f] is called with that
     same value [v]. Eventually, after perhaps starting some I/O or other
