@@ -456,8 +456,7 @@ module Flow = struct
     in
     { flow }
 
-  let with_digest :
-      type ctx.
+  let with_digest : type ctx.
       (module Digestif.S with type ctx = ctx) ->
       ctx ref ->
       (Stdbob.bigstring, Stdbob.bigstring) flow =
