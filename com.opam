@@ -39,7 +39,7 @@ depends: [
   "cmdliner"
   "ipaddr"                 { >= "5.3.0" }
   "mirage-crypto"          { < "1.0.0" }
-  "mirage-crypto-rng"      { >= "0.11.0" & < "1.0.0" }
+  "mirage-crypto-rng"      { >= "2.0.0" }
   "x509"                   { >= "0.16.0" }
   "psq"
   "lru"                    { >= "0.3.1" }
@@ -55,14 +55,14 @@ depends: [
   "spoke"                  { >= "0.0.3" }
 ]
 
-# pin-depends: [
-#   [ "mirage-crypto.0.11.0" "git+https://github.com/dinosaure/mirage-crypto.git#83b160823cc601ffb19f8be2e32d643ffcbea60d" ]
-#   [ "mirage-crypto-pk.0.11.0" "git+https://github.com/dinosaure/mirage-crypto.git#83b160823cc601ffb19f8be2e32d643ffcbea60d" ]
-#   [ "mirage-crypto-ec.0.11.0" "git+https://github.com/dinosaure/mirage-crypto.git#83b160823cc601ffb19f8be2e32d643ffcbea60d" ]
-#   [ "mirage-crypto-rng.0.11.0" "git+https://github.com/dinosaure/mirage-crypto.git#83b160823cc601ffb19f8be2e32d643ffcbea60d" ]
-#   [ "mtime.dev" "git+https://github.com/dinosaure/mtime.git#d5d70f38c40da90e3e173eb60346df55b64a4a0a" ]
-#   [ "gmp.dev" "git+https://github.com/mirage/ocaml-gmp.git#90c7941b3b2649c19f2596538417e5ce1df61b9d" ]
-# ]
+pin-depends: [
+  [ "mirage-crypto.2.0.0" "git+https://github.com/dinosaure/mirage-crypto.git#24e20a0681b221954f7bac9dc76559007aaeb09a" ]
+  [ "mirage-crypto-pk.2.0.0" "git+https://github.com/dinosaure/mirage-crypto.git#24e20a0681b221954f7bac9dc76559007aaeb09a" ]
+  [ "mirage-crypto-ec.2.0.0" "git+https://github.com/dinosaure/mirage-crypto.git#24e20a0681b221954f7bac9dc76559007aaeb09a" ]
+  [ "mirage-crypto-rng.2.0.0" "git+https://github.com/dinosaure/mirage-crypto.git#24e20a0681b221954f7bac9dc76559007aaeb09a" ]
+#  [ "mtime.dev" "git+https://github.com/dinosaure/mtime.git#d5d70f38c40da90e3e173eb60346df55b64a4a0a" ]
+#  [ "gmp.dev" "git+https://github.com/mirage/ocaml-gmp.git#90c7941b3b2649c19f2596538417e5ce1df61b9d" ]
+]
 
 x-mirage-opam-lock-location: "com.opam.locked"
 x-mirage-configure: [
