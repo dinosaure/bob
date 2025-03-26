@@ -65,7 +65,7 @@ let append ~window:t source =
       t.arr.(t.wr_pos land msk) <- source;
       t.wr_pos <- t.wr_pos + 1
 
-let delta ~reporter:_ ~load entries =
+let delta ~reporter ~load entries =
   let windows = Array.init 4 (fun _ -> Window.make ()) in
   let fn entry =
     let entry = Cartonnage.Target.make entry in
@@ -88,7 +88,8 @@ let delta ~reporter:_ ~load entries =
            let source = Cartonnage.Target.to_source entry ~target in
            append ~window source);
         Fiber.return ())
-    >>| fun () -> entry
+    >>= fun () ->
+    reporter 1 >>| fun () -> entry
   in
   Stream.Stream.map fn entries
 

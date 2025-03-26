@@ -30,7 +30,7 @@ type t = {
     | `Read_closed of Tls.Engine.state
     | `Write_closed of Tls.Engine.state
     | `Error of error ];
-  mutable linger : Cstruct.t option;
+  mutable linger : string option;
 }
 
 let half_close state mode =
@@ -55,8 +55,7 @@ let rec read_react t =
     match Tls.Engine.handle_tls tls buf with
     | Error (failure, `Response resp) -> (
         t.state <- `Error (`Failure failure);
-        let { Cstruct.buffer; off; len } = resp in
-        full_write t.fd buffer ~off ~len >>= function
+        full_write t.fd resp ~off:0 ~len:(String.length resp) >>= function
         | Ok () -> read_react t
         | Error err ->
             t.state <- `Error (err :> error);
@@ -72,8 +71,7 @@ let rec read_react t =
         match resp with
         | None -> Fiber.return (`Ok data)
         | Some resp -> (
-            let { Cstruct.buffer; off; len } = resp in
-            full_write t.fd buffer ~off ~len >>= function
+            full_write t.fd resp ~off:0 ~len:(String.length resp) >>= function
             | Ok () -> Fiber.return (`Ok data)
             | Error err ->
                 t.state <- `Error (err :> error);
@@ -90,20 +88,19 @@ let rec read_react t =
       | Ok `End ->
           t.state <- half_close t.state `read;
           Fiber.return `End
-      | Ok (`Data bstr) -> (
-          let cs = Cstruct.of_bigarray bstr in
+      | Ok (`Data str) -> (
           match t.state with
-          | `Active tls | `Write_closed tls -> handle tls cs
+          | `Active tls | `Write_closed tls -> handle tls str
           | `Read_closed _ | `Closed -> Fiber.return `End
           | `Error _ as e -> Fiber.return e))
 
 let rec read t buf =
   let write_out res =
-    let len = Cstruct.length res in
-    let max = min (Cstruct.length buf) len in
-    Cstruct.blit res 0 buf 0 max;
+    let len = String.length res in
+    let max = min (Bytes.length buf) len in
+    Bytes.blit_string res 0 buf 0 max;
     t.linger <-
-      (if max < len then Some (Cstruct.sub res max (len - max)) else None);
+      (if max < len then Some (String.sub res max (len - max)) else None);
     Fiber.return max
   in
   match t.linger with
@@ -124,8 +121,7 @@ let writev t css =
       | None -> Fmt.invalid_arg "Socket is not ready"
       | Some (tls, data) -> (
           t.state <- `Active tls;
-          let { Cstruct.buffer; off; len } = data in
-          full_write t.fd buffer ~off ~len >>= function
+          full_write t.fd data ~off:0 ~len:(String.length data) >>= function
           | Ok () -> Fiber.return (Ok ())
           | Error err ->
               t.state <- `Error (err :> error);
@@ -134,11 +130,11 @@ let writev t css =
 let write t cs = writev t [ cs ]
 
 let rec drain_handshake t =
-  let push_linger t mcs =
-    match (mcs, t.linger) with
+  let push_linger t mstr =
+    match (mstr, t.linger) with
     | None, _ -> ()
-    | scs, None -> t.linger <- scs
-    | Some cs, Some linger -> t.linger <- Some (Cstruct.append linger cs)
+    | sstr, None -> t.linger <- sstr
+    | Some str, Some linger -> t.linger <- Some (linger ^ str)
   in
   match t.state with
   | `Active tls when not (Tls.Engine.handshake_in_progress tls) ->
@@ -154,12 +150,10 @@ let rec drain_handshake t =
 let close t =
   match t.state with
   | `Active tls | `Read_closed tls -> (
-      let tls, { Cstruct.buffer; off; len } =
-        Tls.Engine.send_close_notify tls
-      in
+      let tls, str = Tls.Engine.send_close_notify tls in
       t.state <- inject_state tls t.state;
       t.state <- `Closed;
-      full_write t.fd buffer ~off ~len >>= function
+      full_write t.fd str ~off:0 ~len:(String.length str) >>= function
       | Ok () -> Fiber.close t.fd
       | Error err ->
           t.state <- `Error (err :> error);
@@ -170,9 +164,9 @@ let client_of_file_descr config ?host fd =
   let config =
     match host with None -> config | Some host -> Tls.Config.peer config host
   in
-  let tls, { Cstruct.buffer; off; len } = Tls.Engine.client config in
+  let tls, str = Tls.Engine.client config in
   let t = { state = `Active tls; fd; linger = None } in
-  full_write t.fd buffer ~off ~len >>= function
+  full_write t.fd str ~off:0 ~len:(String.length str) >>= function
   | Ok () -> Fiber.catch (fun () -> drain_handshake t) (fun exn -> raise exn)
   | Error err ->
       t.state <- `Error (err :> error);

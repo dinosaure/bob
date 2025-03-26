@@ -23,7 +23,9 @@ type 'a source =
       -> 'a source
 
 module Source : sig
-  val file : ?offset:int64 -> Bob_fpath.t -> Stdbob.bigstring source
+  val file :
+    ?len:int -> ?offset:int -> fn:(string -> 'a) -> Bob_fpath.t -> 'a source
+
   val array : 'a array -> 'a source
   val list : 'a list -> 'a source
   val fold : ('r -> 'a -> 'r Fiber.t) -> 'r -> 'a source -> 'r Fiber.t
@@ -75,8 +77,8 @@ module Sink : sig
 
   (** {3: Input & Output.} *)
 
-  val stdout : (Stdbob.bigstring, unit) sink
-  val file : ?erase:bool -> Bob_fpath.t -> (Stdbob.bigstring, unit) sink
+  val stdout : (string, unit) sink
+  val file : ?erase:bool -> Bob_fpath.t -> (string, unit) sink
 end
 
 type ('a, 'b) flow = { flow : 'r. ('b, 'r) sink -> ('a, 'r) sink } [@@unboxed]
@@ -89,13 +91,14 @@ module Flow : sig
   val ( << ) : ('a, 'b) flow -> ('b, 'c) flow -> ('a, 'c) flow
   val ( >> ) : ('b, 'c) flow -> ('a, 'b) flow -> ('a, 'c) flow
   val tap : ('a -> unit Fiber.t) -> ('a, 'a) flow
+  val bigstring_to_string : (Stdbob.bigstring, string) flow
 
   (** {3: Computation.} *)
 
   val with_digest :
     (module Digestif.S with type ctx = 'ctx) ->
     'ctx ref ->
-    (Stdbob.bigstring, Stdbob.bigstring) flow
+    (string, string) flow
 
   (** {3: Compression.} *)
 
@@ -109,7 +112,7 @@ module Flow : sig
   (** {3: Input & Output.} *)
 
   val save_into :
-    ?offset:int64 -> Bob_fpath.t -> (Stdbob.bigstring, Stdbob.bigstring) flow
+    ?offset:int64 -> Bob_fpath.t -> (string, Stdbob.bigstring) flow
 end
 
 type 'a stream
@@ -151,12 +154,13 @@ module Stream : sig
 
   val of_file :
     ?len:int ->
+    fn:(string -> 'a) ->
     Bob_fpath.t ->
-    (Stdbob.bigstring stream, [> `Msg of string ]) result Fiber.t
+    ('a stream, [> `Msg of string ]) result Fiber.t
 
-  val stdin : Stdbob.bigstring stream
-  val to_file : Bob_fpath.t -> Stdbob.bigstring stream -> unit Fiber.t
-  val stdout : Stdbob.bigstring stream -> unit Fiber.t
+  val stdin : string stream
+  val to_file : Bob_fpath.t -> string stream -> unit Fiber.t
+  val stdout : string stream -> unit Fiber.t
   val ( >>= ) : 'a stream -> ('a -> 'b stream Fiber.t) -> 'b stream
   val ( ++ ) : 'a stream -> 'a stream -> 'a stream
 end

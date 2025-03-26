@@ -31,7 +31,7 @@ let ask_password () =
   asking ()
 
 let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
-    : (Stdbob.bigstring Stream.source, _) result Fiber.t =
+    : (string Stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   Transfer.receive
     ~reporter:(Fiber.return <.> reporter)
@@ -53,18 +53,17 @@ let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
   let open Stream in
   let from =
     match leftover with
-    | Some leftover when Bigarray.Array1.dim src - off > 0 ->
-        Source.prepend Bigarray.Array1.(sub src off (dim src - off)) leftover
+    | Some leftover when String.length src - off > 0 ->
+        Source.prepend String.(sub src off (length src - off)) leftover
     | Some leftover -> leftover
     | None -> Source.array [||]
   in
-  let offset = Bigarray.Array1.dim src - off in
+  let offset = String.length src - off in
   let offset = Int64.neg (Int64.of_int offset) in
   Logs.debug (fun m -> m "Start to re-analyzed the rest of the PACK file.");
-  Stream.run ~from
-    ~via:Flow.(save_into ~offset path << Pack.analyse ?decoder ignore)
-    ~into:Sink.list
-  >>= fun (entries, source) ->
+  let flow = Pack.analyse ?decoder ignore in
+  let via = Flow.compose (Flow.save_into ~offset path) flow in
+  Stream.run ~from ~via ~into:Sink.list >>= fun (entries, source) ->
   Logs.debug (fun m -> m "All objects are analyzed.");
   Fiber.Option.iter Source.dispose source >>= fun () ->
   let[@warning "-8"] entries, _hash =
@@ -107,7 +106,13 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
   let open Fiber in
   let open Stream in
   let ctx =
-    Stdlib.Option.(value ~default:Digestif.SHA1.empty (map Pack.ctx decoder))
+    let fn value =
+      let open Carton.First_pass in
+      let (Digest (_, ctx)) = hash value in
+      Obj.magic ctx (* TODO *)
+    in
+    let default = Digestif.SHA1.empty in
+    Stdlib.Option.(value ~default (map fn decoder))
   in
   let ctx = ref ctx in
   (* XXX(dinosaure): this is fragile but we are sure that we already feed
@@ -115,7 +120,16 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
      below will inflate this entry and we don't need to re-calculate the
      [ctx] again. However, the next entry (the file) must complete the
      [ctx] (see [with_digest]). *)
-  Stream.run ~from:(Source.file ~offset tmp)
+  let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0x7ff in
+  let fn str =
+    let src_off = 0 and dst_off = 0 and len = String.length str in
+    Logs.debug (fun m -> m "PACK file:");
+    Logs.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
+    Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+    bstr
+  in
+  Stream.run
+    ~from:(Source.file ~len:0x7ff ~offset ~fn tmp)
     ~via:(Pack.inflate_entry ~reporter:Fiber.ignore)
     ~into:Sink.to_string
   >>= fun (name, source) ->
@@ -127,8 +141,8 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
       Fmt.pr ">>> Received a file: %s (save into %a).\n%!" name Bob_fpath.pp v);
   let from =
     match leftover with
-    | Some leftover when Bigarray.Array1.dim src - off > 0 ->
-        Source.prepend Bigarray.Array1.(sub src off (dim src - off)) leftover
+    | Some leftover when String.length src - off > 0 ->
+        Source.prepend String.(sub src off (length src - off)) leftover
     | Some leftover -> leftover
     | None -> Source.array [| src |]
   in
@@ -150,13 +164,14 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
               name Bob_fpath.pp destination);
         destination
   in
-  Stream.run ~from
-    ~via:
-      Flow.(
-        with_digest (module Digestif.SHA1) ctx
-        << save_into tmp
-        << Pack.inflate_entry ~reporter:Fiber.ignore)
-    ~into:(Sink.file destination)
+  let via : (string, string) flow =
+    let open Flow in
+    with_digest (module Digestif.SHA1) ctx (* (string, string) *)
+    << save_into tmp (* (string, bstr) *)
+    << Pack.inflate_entry ~reporter:Fiber.ignore (* (bstr, bstr) *)
+    << bigstring_to_string (* (bstr, string) *)
+  in
+  Stream.run ~from ~via ~into:(Sink.file destination)
   (* XXX(dinosaure): note that we save the stream into [tmp] BUT the file
      we don't ensure that [tmp] will be a well-formed PACK file. The only
      thing interesting into [tmp] is last bytes which permits to verify
@@ -178,8 +193,8 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
   if Digestif.SHA1.equal hash expected then Fiber.return (Ok ())
   else Fiber.return (Error (msgf "Corrupted file (unexpected hash)"))
 
-let extract_with_reporter quiet ~config ?g
-    (from : Stdbob.bigstring Stream.source) destination =
+let extract_with_reporter quiet ~config ?g (from : string Stream.source)
+    destination =
   let open Fiber in
   let open Stream in
   let tmp = Temp.random_temporary_path ?g "pack-%s.pack" in
@@ -188,9 +203,11 @@ let extract_with_reporter quiet ~config ?g
   | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
   | ( Some (`Elt (offset, _status, `Base (`D, _weight)), decoder, src, off),
       leftover ) ->
+      let src = Stdbob.bigstring_to_string src in
       extract_one quiet ?g tmp ~offset decoder src off ~leftover destination
   | Some (`Elt entry, decoder, src, off), leftover -> (
       Logs.debug (fun m -> m "Got a directory.");
+      let src = Stdbob.bigstring_to_string src in
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
         leftover
       >>= Pack.unpack tmp

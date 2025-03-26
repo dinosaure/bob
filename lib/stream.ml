@@ -35,7 +35,7 @@ type 'a source =
       -> 'a source
 
 module Source = struct
-  let file ?offset path =
+  let file ?len ?offset ~fn path =
     let init () =
       Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
       | Error errno ->
@@ -45,14 +45,14 @@ module Source = struct
           match offset with
           | None -> Fiber.return fd
           | Some offset ->
-              let _ = Unix.LargeFile.lseek fd offset Unix.SEEK_SET in
+              let _ = Unix.lseek fd offset Unix.SEEK_SET in
               Fiber.return fd)
     in
     let stop fd = Fiber.close fd in
     let pull fd =
-      Fiber.read fd >>= function
+      Fiber.read ?len fd >>= function
       | Ok `End -> Fiber.return None
-      | Ok (`Data str) -> Fiber.return (Some (str, fd))
+      | Ok (`Data str) -> Fiber.return (Some (fn str, fd))
       | Error errno ->
           Fmt.failwith "read(%d|%a): %s" (Obj.magic fd) Bob_fpath.pp path
             (Unix.error_message errno)
@@ -321,15 +321,15 @@ module Sink = struct
             (Unix.error_message errno)
     in
     let stop fd = Fiber.close fd in
-    let push fd bstr = full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) in
+    let push fd str = full_write ~path fd str 0 (String.length str) in
     let full = Fiber.always false in
     Sink { init; stop; full; push }
 
   let stdout =
     let init () = Fiber.return () in
-    let push () bstr =
-      full_write ~path:(Bob_fpath.v "<stdout>") Unix.stdout bstr 0
-        (Bigarray.Array1.dim bstr)
+    let push () str =
+      full_write ~path:(Bob_fpath.v "<stdout>") Unix.stdout str 0
+        (String.length str)
       >>= fun _stdout -> Fiber.return ()
     in
     let full = Fiber.always false in
@@ -374,6 +374,18 @@ module Flow = struct
   let tap f =
     let flow (Sink k) =
       let push r x = f x >>= fun () -> k.push r x in
+      Sink { k with push }
+    in
+    { flow }
+
+  let bigstring_to_string =
+    let flow (Sink k) =
+      let push acc bstr =
+        let buf = Bytes.create (Bigarray.Array1.dim bstr) in
+        let src_off = 0 and dst_off = 0 and len = Bytes.length buf in
+        Stdbob.bigstring_blit_to_bytes bstr ~src_off buf ~dst_off ~len;
+        k.push acc (Bytes.unsafe_to_string buf)
+      in
       Sink { k with push }
     in
     { flow }
@@ -446,8 +458,12 @@ module Flow = struct
                 k.init () >>= fun acc -> Fiber.return (fd, acc)
             | None -> k.init () >>= fun acc -> Fiber.return (fd, acc))
       in
-      let push (fd, acc) bstr =
-        full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= fun fd ->
+      let push (fd, acc) str =
+        let len = String.length str in
+        let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+        let src_off = 0 and dst_off = 0 in
+        Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+        full_write ~path fd str 0 len >>= fun fd ->
         k.push acc bstr >>= fun acc -> Fiber.return (fd, acc)
       in
       let full (_, acc) = k.full acc in
@@ -459,21 +475,18 @@ module Flow = struct
   let with_digest : type ctx.
       (module Digestif.S with type ctx = ctx) ->
       ctx ref ->
-      (Stdbob.bigstring, Stdbob.bigstring) flow =
+      (string, string) flow =
    fun (module Digestif) ctx ->
     let flow (Sink k) =
       let init () = k.init () in
-      let push acc bstr =
-        k.push acc bstr >>= fun acc ->
+      let push acc str =
+        k.push acc str >>= fun acc ->
         k.full acc >>= function
         | true -> Fiber.return acc
         | false ->
             Log.debug (fun m -> m "Digest:");
-            Log.debug (fun m ->
-                m "@[<hov>%a@]"
-                  (Hxd_string.pp Hxd.default)
-                  (Stdbob.bigstring_to_string bstr));
-            ctx := Digestif.feed_bigstring !ctx bstr;
+            Log.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
+            ctx := Digestif.feed_string !ctx str;
             Fiber.return acc
       in
       let full acc = k.full acc in
@@ -663,7 +676,7 @@ module Stream = struct
 
   (* Input & Output *)
 
-  let of_file ?(len = Stdbob.io_buffer_size) path =
+  let of_file ?(len = Stdbob.io_buffer_size) ~fn path =
     Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
     | Error errno ->
         Fiber.return
@@ -685,7 +698,7 @@ module Stream = struct
                     Log.debug (fun m ->
                         m "End of the file: %a" Bob_fpath.pp path);
                     Fiber.return r
-                | Ok (`Data bstr) -> k.push r bstr >>= go
+                | Ok (`Data str) -> k.push r (fn str) >>= go
                 | Error errno ->
                     Fmt.failwith "read(%d:%a): %s" (Obj.magic fd) Bob_fpath.pp
                       path (Unix.error_message errno))

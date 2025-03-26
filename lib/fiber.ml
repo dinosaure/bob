@@ -15,6 +15,10 @@ let ( >>| ) t f k = t (fun x -> k (f x))
 let ( >>? ) x f = x >>= function Ok x -> f x | Error err -> return (Error err)
 let catch f handler k = try f () k with exn -> handler exn k
 
+let protect ~finally fn k =
+  let k res = finally () (fun _ -> k res) in
+  try fn () k with exn -> finally () (fun () -> reraise exn)
+
 module Option = struct
   let iter f = function Some x -> f x | None -> return ()
 end
@@ -147,30 +151,27 @@ let openfile fpath flags mode =
 let prd = Hashtbl.create 0x100
 
 let read ?(len = Stdbob.io_buffer_size) fd :
-    ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t =
+    ([ `Data of string | `End ], Unix.error) result t =
   match Hashtbl.find_opt prd fd with
   | Some (`Read (ivar, _)) -> Ivar.read ivar
   | _ ->
-      let ivar :
-          ([ `Data of Stdbob.bigstring | `End ], Unix.error) result Ivar.t =
+      let ivar : ([ `Data of string | `End ], Unix.error) result Ivar.t =
         Ivar.create ()
       in
       Hashtbl.add prd fd (`Read (ivar, len));
       Ivar.read ivar
 
-let really_read fd len :
-    (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result t =
+let really_read fd len : (string, [ `End | `Unix of Unix.error ]) result t =
   if len = 0 then invalid_arg "Impossible to really read 0 byte.";
   match Hashtbl.find_opt prd fd with
   | Some (`Really_read (ivar, _, _, _)) -> Ivar.read ivar
   | _ ->
       Log.debug (fun m ->
           m "Start to really read something into %d." (Obj.magic fd));
-      let ivar :
-          (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result Ivar.t =
+      let ivar : (string, [ `End | `Unix of Unix.error ]) result Ivar.t =
         Ivar.create ()
       in
-      let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+      let buf = Bytes.create len in
       Hashtbl.add prd fd (`Really_read (ivar, buf, 0, len));
       Ivar.read ivar
 
@@ -193,15 +194,14 @@ let accept fd : (Unix.file_descr * Unix.sockaddr) t =
 
 let pwr = Hashtbl.create 0x100
 
-let write fd bstr ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t
-    =
+let write fd str ~off ~len : (int, [ `Closed | `Unix of Unix.error ]) result t =
   match Hashtbl.find_opt pwr fd with
   | Some (`Write (_, ivar)) -> Ivar.read ivar
   | _ ->
       let ivar : (int, [ `Closed | `Unix of Unix.error ]) result Ivar.t =
         Ivar.create ()
       in
-      Hashtbl.add pwr fd (`Write ((bstr, off, len), ivar));
+      Hashtbl.add pwr fd (`Write ((str, off, len), ivar));
       Ivar.read ivar
 
 let pp_sockaddr ppf = function
@@ -285,32 +285,27 @@ let close fd =
       probably terminates.
 *)
 
-external bigstring_read :
-  Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
-  = "bob_bigstring_read"
-[@@noalloc]
-
 external retrieve_error : unit -> Unix.error = "bob_retrieve_error"
 
 let sigrd fd =
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, len)) -> (
-      let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+      let buf = Bytes.create len in
       Hashtbl.remove prd fd;
-      match bigstring_read fd bstr 0 len with
+      match Unix.read fd buf 0 len with
       | 0 -> Ivar.fill ivar (Ok `End)
       | ret when ret < 0 ->
           let errno = retrieve_error () in
           Log.err (fun m ->
               m "Got an error while reading: %s" (Unix.error_message errno));
           Ivar.fill ivar (Error errno)
-      | len -> Ivar.fill ivar (Ok (`Data (Bigarray.Array1.sub bstr 0 len))))
+      | len -> Ivar.fill ivar (Ok (`Data (Bytes.sub_string buf 0 len))))
   | Some (`Really_read (ivar, buf, off, len)) -> (
       Hashtbl.remove prd fd;
-      match bigstring_read fd buf off len with
+      match Unix.read fd buf off len with
       | 0 -> Ivar.fill ivar (Error `End)
-      | len' when len = len' -> Ivar.fill ivar (Ok buf)
+      | len' when len = len' -> Ivar.fill ivar (Ok (Bytes.to_string buf))
       | len' ->
           Hashtbl.add prd fd (`Really_read (ivar, buf, off + len', len - len'))
       | exception Unix.Unix_error (errno, _, _) ->
@@ -334,11 +329,6 @@ let sigrd fd =
       | _, Some line ->
           Hashtbl.remove prd fd;
           Ivar.fill ivar (Some line))
-
-external bigstring_write :
-  Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
-  = "bob_bigstring_write"
-[@@noalloc]
 
 let sigwr fd =
   match Hashtbl.find_opt pwr fd with
@@ -367,8 +357,8 @@ let sigwr fd =
       Hashtbl.remove pwr fd;
       set_nonblock fd false;
       Ivar.fill ivar (Ok ())
-  | Some (`Write ((bstr, off, len), ivar)) -> (
-      let ret = bigstring_write fd bstr off len in
+  | Some (`Write ((str, off, len), ivar)) -> (
+      let ret = Unix.write_substring fd str off len in
       if ret >= 0 then (
         Hashtbl.remove pwr fd;
         Ivar.fill ivar (Ok ret))
@@ -384,15 +374,13 @@ let sigwr fd =
             Hashtbl.remove pwr fd;
             Ivar.fill ivar (Error (`Unix errno)))
 
-let bstr_empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
-
 let sigexcept fd =
   Log.debug (fun m -> m "Got an exception from %d" (Obj.magic fd));
   match Hashtbl.find_opt prd fd with
   | None -> ()
   | Some (`Read (ivar, _len)) ->
       Hashtbl.remove prd fd;
-      Ivar.fill ivar (Ok (`Data bstr_empty))
+      Ivar.fill ivar (Ok (`Data ""))
   | Some (`Really_read (ivar, _, _, _)) ->
       Hashtbl.remove prd fd;
       Ivar.fill ivar (Error `End)

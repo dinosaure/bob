@@ -24,8 +24,8 @@ module type FLOW = sig
 
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
-  val read : flow -> ([ `Data of Cstruct.t | `Eof ], error) result t
-  val write : flow -> Cstruct.t -> (unit, write_error) result t
+  val read : flow -> ([ `Data of string | `Eof ], error) result t
+  val write : flow -> string -> (unit, write_error) result t
   val close : flow -> unit t
 end
 
@@ -35,13 +35,11 @@ module Make (Flow : FLOW) : sig
 
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
-
-  val recv :
-    Flow.flow t -> ([ `Data of Stdbob.bigstring | `End ], error) result Flow.t
+  val recv : Flow.flow t -> ([ `Data of string | `End ], error) result Flow.t
 
   val send :
     Flow.flow t ->
-    Stdbob.bigstring ->
+    string ->
     off:int ->
     len:int ->
     (int, write_error) result Flow.t

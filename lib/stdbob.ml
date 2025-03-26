@@ -21,6 +21,7 @@ external string_get_uint32 : string -> int -> int32 = "%caml_string_get32"
 external bigstring_blit : bigstring -> bigstring -> unit = "caml_ba_blit"
 
 let flip (a, b) = (b, a)
+let rev f x y = f y x
 let identity x = x
 let always x _ = x
 let ( <.> ) f g x = f (g x)
@@ -28,6 +29,8 @@ let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 let io_buffer_size = 65536 (* 0x10000 & = De.io_buffer_size *)
 let reword_error f = function Ok x -> Ok x | Error err -> Error (f err)
 let never _ = assert false
+
+external reraise : exn -> 'a = "%reraise"
 
 let bigstring_blit src ~src_off dst ~dst_off ~len =
   if

@@ -10,22 +10,23 @@ let compress_with_reporter quiet ~compression ~config store hashes =
   with_reporter ~config quiet
     (make_compression_progress ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
-  let open Fiber in
+  let ( let* ) = Fiber.bind in
   Logs.debug (fun m -> m "Start deltification.");
-  Pack.deltify ~reporter:(Fiber.return <.> reporter) ~compression store hashes
-  >>| fun res ->
+  let reporter = Fiber.return <.> reporter in
+  let stream = Pack.deltify ~reporter ~compression store hashes in
+  let* targets = Stream.Stream.to_list stream in
   Logs.debug (fun m -> m "Deltification is done.");
   finalise ();
-  res
+  Fiber.return (Stream.Stream.of_list targets)
 
 type pack = Stream of Stdbob.bigstring Stream.stream | File of Bob_fpath.t
 
 let emit_with_reporter quiet ?g ?level ~config store
-    (objects : Digestif.SHA1.t Carton.Enc.q Stream.stream) =
+    (objects : _ Cartonnage.Target.t Stream.stream) =
   with_reporter ~config quiet
     (make_progress_bar_for_objects ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
-  let open Fiber in
+  let ( let* ) = Fiber.bind in
   let open Stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
   Logs.debug (fun m -> m "Generate the PACK file: %a" Bob_fpath.pp path);
@@ -34,7 +35,8 @@ let emit_with_reporter quiet ?g ?level ~config store
       ~reporter:(Fiber.return <.> reporter <.> Stdbob.always 1)
       store
   in
-  Stream.(to_file path (via flow objects)) >>= fun () ->
+  let flow = Flow.(flow << bigstring_to_string) in
+  let* () = Stream.(to_file path (via flow objects)) in
   finalise ();
   Fiber.return (File path)
 
@@ -43,9 +45,7 @@ let emit_one_with_reporter quiet ?level ~config path =
   with_reporter ~config quiet (make_progress_bar_for_file ~total)
   @@ fun (reporter, finalise) ->
   let open Fiber in
-  Pack.make_one ~len:Bob_unix.Crypto.max_packet ?level
-    ~reporter:(Fiber.return <.> reporter)
-    ~finalise path
+  Pack.make_one ?level ~reporter:(Fiber.return <.> reporter) ~finalise path
   >>= function
   | Error (`Msg err) -> Fmt.failwith "%s." err
   | Ok stream -> Fiber.return (Stream stream)
@@ -53,6 +53,7 @@ let emit_one_with_reporter quiet ?level ~config path =
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr = function
   | Stream stream ->
+      let stream = Stream.(Stream.via Flow.bigstring_to_string stream) in
       Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
@@ -60,18 +61,28 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       @@ fun (reporter, finalise) ->
       let open Fiber in
       let open Stream in
-      Stream.of_file ~len:Bob_unix.Crypto.max_packet path
-      >>| Result.get_ok
-      >>= Transfer.transfer
-            ~reporter:(Fiber.return <.> reporter)
-            ~identity ~ciphers ~shared_keys sockaddr
+      let bstr =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout
+          Bob_unix.Crypto.max_packet
+      in
+      let fn str =
+        let src_off = 0 and dst_off = 0 and len = String.length str in
+        Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+        bstr
+      in
+      Stream.of_file ~len:Bob_unix.Crypto.max_packet ~fn path >>| Result.get_ok
+      >>= fun stream ->
+      let stream = Stream.via Flow.bigstring_to_string stream in
+      Transfer.transfer
+        ~reporter:(Fiber.return <.> reporter)
+        ~identity ~ciphers ~shared_keys sockaddr stream
       >>| fun res ->
       finalise ();
       res
 
 let generate_pack_file quiet ~config ~g compression path =
   let open Fiber in
-  Pack.store path >>= fun (hashes, store) ->
+  Pack.store path >>= fun (uids, store) ->
   match Pack.length store with
   | 0 -> assert false
   | 1 ->
@@ -80,7 +91,7 @@ let generate_pack_file quiet ~config ~g compression path =
         ~config path
   | n ->
       if not quiet then Fmt.pr ">>> %*s%d objets.\n%!" 33 " " n;
-      compress_with_reporter quiet ~config ~compression store hashes
+      compress_with_reporter quiet ~config ~compression store uids
       >>= fun compressed ->
       emit_with_reporter quiet ~g
         ~level:(if compression then 4 else 0)

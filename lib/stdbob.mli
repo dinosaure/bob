@@ -2,6 +2,7 @@ type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 val flip : 'a * 'b -> 'b * 'a
+val rev : ('a -> 'b -> 'c) -> 'b -> 'a -> 'c
 val identity : 'a -> 'a
 val always : 'a -> 'b -> 'a
 val ( <.> ) : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b
@@ -10,6 +11,7 @@ val reword_error : ('e0 -> 'e1) -> ('a, 'e0) result -> ('a, 'e1) result
 val never : 'a -> 'b
 val io_buffer_size : int
 val bigstring_get_uint8 : bigstring -> int -> int
+val reraise : exn -> 'a
 
 val bigstring_blit :
   bigstring -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit

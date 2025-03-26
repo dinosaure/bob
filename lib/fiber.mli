@@ -120,6 +120,7 @@ val bind : 'a t -> ('a -> 'b t) -> 'b t
 val both : 'a t -> 'b t -> ('a * 'b) t
 val fork_and_join : (unit -> 'a t) -> (unit -> 'b t) -> ('a * 'b) t
 val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
+val protect : finally:(unit -> unit t) -> (unit -> 'a t) -> 'a t
 val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
 val ( >>| ) : 'a t -> ('a -> 'b) -> 'b t
 
@@ -183,19 +184,17 @@ val openfile :
 val read :
   ?len:int ->
   Unix.file_descr ->
-  ([ `Data of Stdbob.bigstring | `End ], Unix.error) result t
+  ([ `Data of string | `End ], Unix.error) result t
 
 val write :
   Unix.file_descr ->
-  Stdbob.bigstring ->
+  string ->
   off:int ->
   len:int ->
   (int, [ `Closed | `Unix of Unix.error ]) result t
 
 val really_read :
-  Unix.file_descr ->
-  int ->
-  (Stdbob.bigstring, [ `End | `Unix of Unix.error ]) result t
+  Unix.file_descr -> int -> (string, [ `End | `Unix of Unix.error ]) result t
 
 val connect : Unix.file_descr -> Unix.sockaddr -> (unit, Unix.error) result t
 val close : Unix.file_descr -> unit t
