@@ -77,3 +77,5 @@ x-mirage-extra-repo: [
 x-opam-monorepo-opam-provided: ["ocaml" "ocamlfind" "opam-monorepo" "esperanto-cosmopolitan" "x86_64-esperanto" "aarch64-esperanto"]
 
 url { src: "git+https://github.com/dinosaure/bob.git" }
+
+available: arch != "x86_32"

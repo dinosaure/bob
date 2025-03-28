@@ -44,3 +44,5 @@ depends: [
 pin-depends: [
   [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#eda61bb0c2671f3eaaac9f0f0ffa8423b3e63c98" ]
 ]
+
+available: arch != "x86_32"
