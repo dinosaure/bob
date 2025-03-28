@@ -10,9 +10,9 @@ val pp_error : error Fmt.t
 
 exception Tls of error
 
-val read : t -> Cstruct.t -> (int, error) result Fiber.t
-val writev : t -> Cstruct.t list -> (unit, error) result Fiber.t
-val write : t -> Cstruct.t -> (unit, error) result Fiber.t
+val read : t -> bytes -> (int, error) result Fiber.t
+val writev : t -> string list -> (unit, error) result Fiber.t
+val write : t -> string -> (unit, error) result Fiber.t
 val close : t -> unit Fiber.t
 
 val client_of_file_descr :

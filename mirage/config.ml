@@ -1,4 +1,4 @@
-(* mirage >= 4.6.0 & < 4.6.1 *)
+(* mirage >= 4.6.1 & < 4.6.2 *)
 
 open Mirage
 

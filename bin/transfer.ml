@@ -29,17 +29,15 @@ module Crypto = Bob_unix.Crypto.Make (struct
     Fiber.read ~len:(max_packet * 2) fd >>= function
     | Error _ as err -> Fiber.return err
     | Ok `End -> Fiber.return (Ok `Eof)
-    | Ok (`Data bstr) -> Fiber.return (Ok (`Data (Cstruct.of_bigarray bstr)))
+    | Ok (`Data str) -> Fiber.return (Ok (`Data str))
 
-  let rec write fd cs =
-    let { Cstruct.buffer; off; len } = cs in
-    go fd buffer off len
+  let rec write fd str = go fd str 0 (String.length str)
 
-  and go fd bstr off len =
-    Fiber.write fd bstr ~off ~len >>= function
+  and go fd str off len =
+    Fiber.write fd str ~off ~len >>= function
     | Error _ as err -> Fiber.return err
     | Ok len' when len' = len -> Fiber.return (Ok ())
-    | Ok len' -> go fd bstr (off + len') (len - len')
+    | Ok len' -> go fd str (off + len') (len - len')
 end)
 
 type error =
@@ -60,36 +58,42 @@ let open_error = function Ok _ as v -> v | Error #error as v -> v
 type crypto_error = [ Crypto.error | Crypto.write_error ]
 
 let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
-  let open Fiber in
+  let ( let* ) = Fiber.bind in
   let init () =
     let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
     Fiber.return (Ok flow)
   in
-  let push state bstr =
+  let push state str =
     match state with
     | Error err -> Fiber.return (Error (err :> crypto_error))
-    | Ok flow -> (
-        Crypto.send flow bstr ~off:0 ~len:(Bigarray.Array1.dim bstr)
-        >>= function
-        | Ok len -> reporter len >>= fun () -> Fiber.return (Ok flow)
-        | Error err ->
-            Crypto.close flow >>= fun () ->
-            Fiber.return (Error (err :> crypto_error)))
+    | Ok flow ->
+        Log.debug (fun m -> m "crypto (send):");
+        Log.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
+        let* res = Crypto.send flow str ~off:0 ~len:(String.length str) in
+        begin
+          match res with
+          | Ok len ->
+              let* () = reporter len in
+              Fiber.return (Ok flow)
+          | Error err ->
+              let* () = Crypto.close flow in
+              Fiber.return (Error (err :> crypto_error))
+        end
   in
   let full = Fiber.always false in
   let stop = function
     | Error err -> Fiber.return (Error (err :> crypto_error))
-    | Ok flow -> (
-        Crypto.recv flow >>= function
-        | Ok `End -> Fiber.return (Ok ())
-        | Ok (`Data bstr) ->
-            Log.err (fun m -> m "Received unexpected payload:");
-            Log.err (fun m ->
-                m "@[<hov>%a@]"
-                  (Hxd_string.pp Hxd.default)
-                  (bigstring_to_string bstr));
-            Fiber.return (Error `Corrupted)
-        | Error err -> Fiber.return (Error (err :> crypto_error)))
+    | Ok flow ->
+        let* res = Crypto.recv flow in
+        begin
+          match res with
+          | Ok `End -> Fiber.return (Ok ())
+          | Ok (`Data str) ->
+              Log.err (fun m -> m "Received unexpected payload:");
+              Log.err (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
+              Fiber.return (Error `Corrupted)
+          | Error err -> Fiber.return (Error (err :> crypto_error))
+        end
   in
   Stream.Sink { init; push; full; stop }
 
@@ -117,19 +121,22 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
 
 let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
   let open Fiber in
+  let ( let* ) = Fiber.bind in
   let init () =
     let flow = Bob_unix.Crypto.make ~ciphers ~shared_keys socket in
     Fiber.return flow
   in
   let pull flow =
     Crypto.recv flow >>= function
-    | Ok (`Data bstr) ->
-        reporter (Bigarray.Array1.dim bstr) >>= fun () ->
-        Fiber.return (Some (bstr, flow))
+    | Ok (`Data str) ->
+        let* () = reporter (String.length str) in
+        Fiber.return (Some (str, flow))
     | Ok `End ->
         finalise ();
         Fiber.return None
-    | Error _ -> Crypto.close flow >>= fun () -> Fiber.return None
+    | Error _ ->
+        let* () = Crypto.close flow in
+        Fiber.return None
   in
   let stop _flow =
     (try finalise () with _ -> ());
@@ -154,5 +161,6 @@ let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () ->
+      Log.debug (fun m -> m "Secure channel initiated");
       Fiber.return
         (Ok (crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket))

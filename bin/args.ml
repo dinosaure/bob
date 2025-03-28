@@ -226,6 +226,7 @@ let nameserver_of_string str =
           in
           let* authenticator = Ca_certs.authenticator () in
           let tls = Tls.Config.client ~authenticator () in
+          let tls = Result.get_ok tls in
           Ok (`Tls (tls, ipaddr, port))
       | nameserver :: authenticator ->
           let* ipaddr, port =
@@ -236,6 +237,7 @@ let nameserver_of_string str =
           let time () = Some (Ptime.v (Ptime_clock.now_d_ps ())) in
           let authenticator = authenticator time in
           let tls = Tls.Config.client ~authenticator () in
+          let tls = Result.get_ok tls in
           Ok (`Tls (tls, ipaddr, port))
       | [] -> assert false)
   | "tcp" :: nameserver | nameserver ->
@@ -265,6 +267,7 @@ let unicast_censurfridns_dk =
     |> Result.get_ok
   in
   let cfg = Tls.Config.client ~authenticator:(authenticator time) () in
+  let cfg = Result.get_ok cfg in
   `Tls (cfg, unicast_censurfridns_dk, 853)
 
 let google_com = `Plaintext (Ipaddr.of_string_exn "8.8.8.8", 53)

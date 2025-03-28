@@ -21,7 +21,15 @@
  (name bob)
  (public_name bob)
  (modules crypto state handshake bob)
- (libraries bob.std bob.qe mirage-crypto hxd.core hxd.string logs spoke.core))
+ (libraries
+  cstruct
+  bob.std
+  bob.qe
+  mirage-crypto
+  hxd.core
+  hxd.string
+  logs
+  spoke.core))
 
 (library
  (name password)
@@ -65,6 +73,12 @@
  (libraries bob.fiber bob.stream cstruct carton digestif))
 
 (library
+ (name bob_carton)
+ (public_name bob.carton)
+ (modules bob_carton)
+ (libraries digestif carton carton.cartonnage bob.stream bob.fiber))
+
+(library
  (name pack)
  (public_name bob.pack)
  (modules pack)
@@ -73,6 +87,7 @@
   bob.temp
   bob.stream
   bob.git
+  bob.carton
   cstruct
   unix
   digestif

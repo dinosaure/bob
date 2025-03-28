@@ -94,6 +94,20 @@ let push t ?(off = 0) ?len bstr =
   else bigstring_blit bstr ~src_off:off t.buffer ~dst_off:wr_cursor ~len;
   t.wr_cursor <- t.wr_cursor + len
 
+let push_string t str =
+  let len = String.length str in
+  if (available [@inlined]) t < len then grow t (len + (size [@inlined]) t);
+  let wr_cursor = (mask [@inlined]) t t.wr_cursor in
+  let len0 = t.capacity - wr_cursor in
+  let len1 = len - len0 in
+  if len1 > 0 then (
+    bigstring_blit_from_string str ~src_off:0 t.buffer ~dst_off:wr_cursor
+      ~len:len0;
+    bigstring_blit_from_string str ~src_off:len0 t.buffer ~dst_off:0 ~len:len1)
+  else
+    bigstring_blit_from_string str ~src_off:0 t.buffer ~dst_off:wr_cursor ~len;
+  t.wr_cursor <- t.wr_cursor + len
+
 let peek t =
   let len = (size [@inlined]) t in
   if len = 0 then []
@@ -121,6 +135,20 @@ let keep t ?(off = 0) ?len bstr =
     bigstring_blit t.buffer ~src_off:rd_cursor bstr ~dst_off:off ~len:len0;
     bigstring_blit t.buffer ~src_off:0 bstr ~dst_off:(off + len0) ~len:len1)
   else bigstring_blit t.buffer ~src_off:rd_cursor bstr ~dst_off:off ~len
+
+let keep_bytes t ?(off = 0) ?len buf =
+  let len = match len with Some len -> len | None -> Bytes.length buf - off in
+  if len > (size [@inlined]) t then
+    Fmt.invalid_arg "Qe.keep: not enough byte(s)";
+  let rd_cursor = (mask [@inlined]) t t.rd_cursor in
+  let len0 = t.capacity - rd_cursor in
+  let len1 = len - len0 in
+  if len1 > 0 then (
+    bigstring_blit_to_bytes t.buffer ~src_off:rd_cursor buf ~dst_off:off
+      ~len:len0;
+    bigstring_blit_to_bytes t.buffer ~src_off:0 buf ~dst_off:(off + len0)
+      ~len:len1)
+  else bigstring_blit_to_bytes t.buffer ~src_off:rd_cursor buf ~dst_off:off ~len
 
 let shift t len =
   if len > (size [@inlined]) t then

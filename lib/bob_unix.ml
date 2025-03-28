@@ -1,5 +1,3 @@
-open Stdbob
-
 let src = Logs.Src.create "bob.unix"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -12,14 +10,10 @@ module type IO = sig
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
   val of_file_descr : Unix.file_descr -> (fd, write_error) result Fiber.t
-  val recv : fd -> ([ `End | `Data of Stdbob.bigstring ], error) result Fiber.t
+  val recv : fd -> ([ `End | `Data of string ], error) result Fiber.t
 
   val send :
-    fd ->
-    Stdbob.bigstring ->
-    off:int ->
-    len:int ->
-    (int, write_error) result Fiber.t
+    fd -> string -> off:int -> len:int -> (int, write_error) result Fiber.t
 
   val close : fd -> unit Fiber.t
 end
@@ -28,9 +22,7 @@ module Fiber = Fiber
 open Fiber
 
 let map_read = function
-  | Ok (`Data bstr) ->
-      let str = bigstring_to_string bstr in
-      `Read (`Data (str, 0, String.length str))
+  | Ok (`Data str) -> `Read (`Data (str, 0, String.length str))
   | Ok `End -> `Read `End
   | Error err -> `Error (`Rd err)
 
@@ -146,8 +138,7 @@ module Make (IO : IO) = struct
       | `Write str -> (
           Log.debug (fun m ->
               m "send -> @[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
-          let bstr = bigstring_of_string str ~off:0 ~len:(String.length str) in
-          full_write socket bstr ~off:0 ~len:(String.length str) >>= function
+          full_write socket str ~off:0 ~len:(String.length str) >>= function
           | Ok () -> Fiber.pause () >>= write
           | Error `Closed ->
               (* XXX(dinosaure): according to our protocol, only the relay is able
@@ -220,10 +211,7 @@ module Make (IO : IO) = struct
                   m "to   [%20s] <- @[<hov>%a@]" identity
                     (Hxd_string.pp Hxd.default)
                     str);
-              let bstr =
-                bigstring_of_string str ~off:0 ~len:(String.length str)
-              in
-              full_write fd bstr ~off:0 ~len:(String.length str) >>= function
+              full_write fd str ~off:0 ~len:(String.length str) >>= function
               | Ok v -> Fiber.return v
               | Error _err ->
                   Hashtbl.remove fds identity;
@@ -339,9 +327,9 @@ module Psq =
         | `Bound _, `Bound _ | `Ready, `Ready -> 0
     end)
 
-let _00 = bigstring_of_string "00" ~off:0 ~len:2
-let _01 = bigstring_of_string "01" ~off:0 ~len:2
-let _02 = bigstring_of_string "02" ~off:0 ~len:2
+let _00 = "00"
+let _01 = "01"
+let _02 = "02"
 
 let rec loop ~timeout t ready queue state fd k =
   Fiber.npick
@@ -400,14 +388,14 @@ let create_secure_room () = Bob.Secured.make ()
 type income =
   [ `Closed
   | `Error of [ `Rd of Unix.error ]
-  | `Read of [ `End | `Data of Stdbob.bigstring * int * int ] ]
+  | `Read of [ `End | `Data of string * int * int ] ]
 
 let map_read = function
-  | Ok (`Data bstr) -> `Read (`Data (bstr, 0, Bigarray.Array1.dim bstr))
+  | Ok (`Data str) -> `Read (`Data (str, 0, String.length str))
   | Ok `End -> `Read `End
   | Error err -> `Error (`Rd err)
 
-let close_packet = bigstring_of_string "\xff\xff\xff\xff" ~off:0 ~len:4
+let close_packet = "\xff\xff\xff\xff"
 
 let pipe fd0 fd1 =
   let closed : [ `Closed ] Fiber.Ivar.t = Fiber.Ivar.create () in
@@ -429,12 +417,12 @@ let pipe fd0 fd1 =
             m "Got an error while reading into %a." pp_sockaddr peer0);
         if Fiber.Ivar.is_empty closed then Fiber.Ivar.fill closed `Closed;
         Fiber.return ()
-    | `Read (`Data (bstr, off, len)) -> (
+    | `Read (`Data (str, off, len)) -> (
         Log.debug (fun m ->
             m "[%a -> %a]: @[<hov>%a@]" pp_sockaddr peer0 pp_sockaddr peer1
               (Hxd_string.pp Hxd.default)
-              (bigstring_to_string (Bigarray.Array1.sub bstr off len)));
-        full_write fd1 bstr ~off ~len >>= function
+              (String.sub str off len));
+        full_write fd1 str ~off ~len >>= function
         | Ok () -> transmit fd0 fd1 ()
         | Error _ ->
             Log.err (fun m ->
@@ -546,12 +534,11 @@ let pp_error ppf = function
 
 let init_peer socket ~identity : (unit, [> error ]) result Fiber.t =
   let packet = Fmt.str "%s\n" identity in
-  let packet = bigstring_of_string packet ~off:0 ~len:(String.length packet) in
-  full_write socket packet ~off:0 ~len:(Bigarray.Array1.dim packet) >>= function
+  full_write socket packet ~off:0 ~len:(String.length packet) >>= function
   | Error err ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () -> (
-      Fiber.really_read socket 2 >>| Result.map bigstring_to_string >>= function
+      Fiber.really_read socket 2 >>= function
       | Error err ->
           Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
       | Ok "01" ->

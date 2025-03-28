@@ -18,14 +18,10 @@ module type IO = sig
   val pp_error : error Fmt.t
   val pp_write_error : write_error Fmt.t
   val of_file_descr : Unix.file_descr -> (fd, write_error) result Fiber.t
-  val recv : fd -> ([ `End | `Data of Stdbob.bigstring ], error) result Fiber.t
+  val recv : fd -> ([ `End | `Data of string ], error) result Fiber.t
 
   val send :
-    fd ->
-    Stdbob.bigstring ->
-    off:int ->
-    len:int ->
-    (int, write_error) result Fiber.t
+    fd -> string -> off:int -> len:int -> (int, write_error) result Fiber.t
 
   val close : fd -> unit Fiber.t
 end

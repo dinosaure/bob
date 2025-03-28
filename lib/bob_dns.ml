@@ -26,7 +26,7 @@ module Transport :
     mutable fd : [ `Plain of Unix.file_descr | `Tls of Bob_tls.t ] option;
     mutable connected_condition : (Fiber.Condition.t * Fiber.Mutex.t) option;
     mutable requests :
-      (Cstruct.t * (Cstruct.t, [ `Msg of string ]) result Fiber.Ivar.t) IM.t;
+      (string * (string, [ `Msg of string ]) result Fiber.Ivar.t) IM.t;
     he : Bob_happy_eyeballs.t;
   }
 
@@ -73,20 +73,19 @@ module Transport :
         | Ok _ as v -> Fiber.return v
         | Error err -> Fiber.return (Error (msgf "%a" pp_error err)))
     | `Plain fd -> (
-        let { Cstruct.buffer; off; len } = tx in
-        Fiber.write fd buffer ~off ~len >>= function
-        | Ok len' when len = len' -> Fiber.return (Ok ())
+        Fiber.write fd tx ~off:0 ~len:(String.length tx) >>= function
+        | Ok len' when String.length tx = len' -> Fiber.return (Ok ())
         | Ok len -> Fiber.return (Error (msgf "Partially send %d byte(s)" len))
         | Error err -> Fiber.return (Error (msgf "%a" pp_error err)))
 
   let send_recv (t : context) tx =
-    if Cstruct.length tx > 4 then (
+    if String.length tx > 4 then (
       match t.fd with
       | None ->
           Fiber.return
             (Error (msgf "No connection to the nameserver established"))
       | Some fd ->
-          let id = Cstruct.BE.get_uint16 tx 2 in
+          let id = String.get_uint16_be tx 2 in
           ( with_timeout t.timeout_ns @@ fun () ->
             send_query fd tx >>? fun () ->
             let ivar = Fiber.Ivar.create () in
@@ -99,21 +98,23 @@ module Transport :
           res)
     else Fiber.return (Error (msgf "Invalid DNS packet (data length <= 4)"))
 
-  let rec read_loop ?(linger = Cstruct.empty) (t : t) fd =
+  let split str off =
+    let len = String.length str in
+    (String.sub str 0 off, String.sub str off (len - off))
+
+  let rec read_loop ?(linger = "") (t : t) fd =
     (match fd with
     | `Plain fd -> (
         Fiber.read fd >>= function
-        | Ok `End | Error _ -> Fiber.return (0, Cstruct.empty)
-        | Ok (`Data data) ->
-            let data = Cstruct.of_bigarray data in
-            Fiber.return (Cstruct.length data, data))
+        | Ok `End | Error _ -> Fiber.return (0, "")
+        | Ok (`Data data) -> Fiber.return (String.length data, data))
     | `Tls fd -> (
-        let buf = Cstruct.create 2048 in
+        let buf = Bytes.create 2048 in
         Bob_tls.read fd buf >>= function
-        | Ok len -> Fiber.return (len, Cstruct.sub buf 0 len)
+        | Ok len -> Fiber.return (len, Bytes.sub_string buf 0 len)
         | Error err ->
             Log.err (fun m -> m "TLS read failed: %a" Bob_tls.pp_error err);
-            Fiber.return (0, Cstruct.empty)))
+            Fiber.return (0, "")))
     >>= function
     | 0, _ ->
         (match fd with
@@ -122,17 +123,16 @@ module Transport :
         >>= fun () ->
         t.fd <- None;
         Fiber.return ()
-    | _, cs ->
+    | _, str ->
         let rec handle_data data =
-          let cs_len = Cstruct.length data in
-          if cs_len > 2 then
-            let len = Cstruct.BE.get_uint16 data 0 in
-            if cs_len - 2 >= len then (
+          let str_len = String.length data in
+          if str_len > 2 then
+            let len = String.get_uint16_be data 0 in
+            if str_len - 2 >= len then (
               let packet, rest =
-                if cs_len - 2 = len then (data, Cstruct.empty)
-                else Cstruct.split data (len + 2)
+                if str_len - 2 = len then (data, "") else split data (len + 2)
               in
-              let id = Cstruct.BE.get_uint16 packet 2 in
+              let id = String.get_uint16_be packet 2 in
               (match IM.find_opt id t.requests with
               | None ->
                   Log.warn (fun m -> m "Received unsolicited data, ignoring")
@@ -141,8 +141,7 @@ module Transport :
             else read_loop ~linger:data t fd
           else read_loop ~linger:data t fd
         in
-        handle_data
-          (if Cstruct.length linger = 0 then cs else Cstruct.append linger cs)
+        handle_data (if String.length linger = 0 then str else linger ^ str)
 
   let req_all fd t =
     IM.fold
@@ -250,4 +249,4 @@ end
 
 include Dns_client.Make (Transport)
 
-let () = Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna)
+let () = Mirage_crypto_rng_unix.use_default ()

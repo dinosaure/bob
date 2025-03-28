@@ -1,6 +1,6 @@
 type store
 
-val store : Bob_fpath.t -> (Digestif.SHA1.t Stream.stream * store) Fiber.t
+val store : Bob_fpath.t -> (Carton.Uid.t Stream.stream * store) Fiber.t
 (** [store path] aggregates all files and directories from the given path. It
     returns a [store] and a stream of hash of these objects. *)
 
@@ -11,25 +11,23 @@ val deltify :
   reporter:(int -> unit Fiber.t) ->
   ?compression:bool ->
   store ->
-  Digestif.SHA1.t Stream.stream ->
-  Digestif.SHA1.t Carton.Enc.q Stream.stream Fiber.t
+  Carton.Uid.t Stream.stream ->
+  unit Cartonnage.Target.t Stream.stream
 (** [deltify ~reporter ?compression store hashes] tries to compress with patch
     objects together. If [compression] is true (default), it calculates the
     patch between the objects and chooses the best. Otherwise, it generates a
     stream of objects uncompressed between them. *)
 
 val make :
-  ?len:int ->
   ?level:int ->
   reporter:(unit -> unit Fiber.t) ->
   store ->
-  (Digestif.SHA1.t Carton.Enc.q, Stdbob.bigstring) Stream.flow
+  (unit Cartonnage.Target.t, Stdbob.bigstring) Stream.flow
 (** [make ?level ~reporter store] returns a {i flow} which transform a list of
     objects into a series of [string]. [level] lets the user to choose the
     [zlib] level compression (between [0] and [9]). *)
 
 val make_one :
-  ?len:int ->
   ?level:int ->
   reporter:(int -> unit Fiber.t) ->
   finalise:(unit -> unit) ->
@@ -39,19 +37,58 @@ val make_one :
     the given file. [level] lets the user to choose the [zlib] level compression
     (between [0] and [9]). *)
 
+val inflate_entry :
+  reporter:(int -> unit Fiber.t) ->
+  (Stdbob.bigstring, Stdbob.bigstring) Stream.flow
+(** [inflate_entry ~reporter] creates a flow (usable with {!Stream.run} for
+    instance) which deflates an entry (including its header). The given input (a
+    {!Stream.source} or a {!Stream.stream}) must start at the beginning of the
+    entry. It returns the deflated entry. An entry can be a [`Base] (and, in
+    such case, you extract the entry) or a patch (and, in such case, you must
+    reconstruct the entry with its source). *)
+
 type status
-type decoder
+type decoder = Carton.First_pass.decoder
 
 type entry =
-  int64
+  int
   * status
-  * [ `Base of [ `A | `B | `C | `D ] * Carton.Dec.weight
-    | `Ofs of int * Carton.Dec.weight * Carton.Dec.weight * Carton.Dec.weight
-    | `Ref of
-      Digestif.SHA1.t
-      * Carton.Dec.weight
-      * Carton.Dec.weight
-      * Carton.Dec.weight ]
+  * [ `Base of Carton.Kind.t * Carton.Size.t
+    | `Ofs of int * Carton.Size.t * Carton.Size.t * Carton.Size.t
+    | `Ref of Carton.Uid.t * Carton.Size.t * Carton.Size.t * Carton.Size.t ]
+
+type elt = [ `End of string | `Elt of entry ]
+
+val analyse :
+  ?decoder:decoder ->
+  (int -> unit Fiber.t) ->
+  (Stdbob.bigstring, elt * decoder option * Stdbob.bigstring * int) Stream.flow
+
+val collect : entry Stream.source -> (status array * Carton.oracle) Fiber.t
+
+val verify :
+  ?reporter:(unit -> unit) ->
+  oracle:Carton.oracle ->
+  Bob_fpath.t ->
+  status array ->
+  unit Fiber.t
+
+type unpacked =
+  string * int * Carton.Uid.t * (Unix.file_descr * Unix.stats) Carton.t
+
+val unpack :
+  Bob_fpath.t -> status array -> (unpacked, [> `No_root ]) result Fiber.t
+
+val create_directory :
+  reporter:(int -> unit) ->
+  'fd Carton.t ->
+  Bob_fpath.t ->
+  Carton.Uid.t ->
+  'fd Carton.t Fiber.t
+
+(*
+type status
+type decoder
 
 val ctx : decoder -> Digestif.SHA1.ctx
 val is_base : status -> bool
@@ -60,6 +97,7 @@ val offset_of_status : status -> int64
 val kind_of_status : status -> [ `A | `B | `C | `D ]
 val uid_of_status : status -> Digestif.SHA1.t
 
+<<<<<<< Updated upstream
 val analyse :
   ?decoder:decoder ->
   (int -> unit Fiber.t) ->
@@ -80,6 +118,8 @@ val inflate_entry :
     such case, you extract the entry) or a patch (and, in such case, you must
     reconstruct the entry with its source). *)
 
+=======
+>>>>>>> Stashed changes
 val collect :
   entry Stream.source ->
   (status array * Digestif.SHA1.t Carton.Dec.oracle) Fiber.t
@@ -108,3 +148,4 @@ val unpack :
     [> `No_root ] )
   result
   Fiber.t
+*)

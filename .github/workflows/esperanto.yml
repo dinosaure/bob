@@ -9,7 +9,7 @@ jobs:
     runs-on: ${{ matrix.operating-system }}
     steps:
     - uses: actions/checkout@v2
-    - uses: ocaml/setup-ocaml@v2
+    - uses: ocaml/setup-ocaml@v3
       with:
         ocaml-compiler: ${{ matrix.ocaml-version }}
         opam-disable-sandboxing: true
@@ -29,8 +29,3 @@ jobs:
         opam exec -- dune build -x x86_64_esperanto -p bob bin/bob.exe
         opam exec -- dune build -x aarch64_esperanto -p bob bin/bob.exe
         ./link.sh
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: bob.com
-        path: bob.com
