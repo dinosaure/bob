@@ -9,7 +9,7 @@ let bob =
     ~packages:
       [
         package "bob" ~pin:"git+https://github.com/dinosaure/bob.git";
-        package "spoke" ~sublibs:[ "core" ];
+        package "spoke" ~sublibs:[ "core" ] ~pin:"git+https://github.com/dinosaure/spoke.git";
         package "psq";
       ]
     (time @-> stackv4v6 @-> job)
