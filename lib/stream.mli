@@ -72,8 +72,8 @@ module Sink : sig
 
   val list : ('a, 'a list) sink
   val string : (string, string) sink
-  val bigstring : (Stdbob.bigstring, Stdbob.bigstring) sink
-  val to_string : (Stdbob.bigstring, string) sink
+  val bstr : (Bstr.t, Bstr.t) sink
+  val to_string : (Bstr.t, string) sink
 
   (** {3: Input & Output.} *)
 
@@ -91,7 +91,7 @@ module Flow : sig
   val ( << ) : ('a, 'b) flow -> ('b, 'c) flow -> ('a, 'c) flow
   val ( >> ) : ('b, 'c) flow -> ('a, 'b) flow -> ('a, 'c) flow
   val tap : ('a -> unit Fiber.t) -> ('a, 'a) flow
-  val bigstring_to_string : (Stdbob.bigstring, string) flow
+  val bstr_to_string : (Bstr.t, string) flow
 
   (** {3: Computation.} *)
 
@@ -103,16 +103,11 @@ module Flow : sig
   (** {3: Compression.} *)
 
   val deflate_zlib :
-    ?len:int ->
-    q:De.Queue.t ->
-    w:De.Lz77.window ->
-    int ->
-    (Stdbob.bigstring, Stdbob.bigstring) flow
+    ?len:int -> q:De.Queue.t -> w:De.Lz77.window -> int -> (Bstr.t, Bstr.t) flow
 
   (** {3: Input & Output.} *)
 
-  val save_into :
-    ?offset:int64 -> Bob_fpath.t -> (string, Stdbob.bigstring) flow
+  val save_into : ?offset:int64 -> Bob_fpath.t -> (string, Bstr.t) flow
 end
 
 type 'a stream
@@ -135,7 +130,7 @@ module Stream : sig
   val to_list : 'a stream -> 'a list Fiber.t
   val of_array : 'a array -> 'a stream
   val to_array : 'a stream -> 'a array Fiber.t
-  val to_bigstring : Stdbob.bigstring stream -> Stdbob.bigstring Fiber.t
+  val to_bstr : Bstr.t stream -> Bstr.t Fiber.t
   val to_string : string stream -> string Fiber.t
 
   (** {3: Composition.} *)

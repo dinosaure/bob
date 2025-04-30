@@ -2,7 +2,7 @@
  (name stdbob)
  (public_name bob.std)
  (modules stdbob)
- (libraries ke))
+ (libraries bstr ke))
 
 (library
  (name qe)

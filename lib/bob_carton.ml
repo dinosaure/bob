@@ -1,7 +1,6 @@
 let src = Logs.Src.create "bob.carton"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-open Stdbob
 open Fiber
 module SHA1 = Digestif.SHA1
 
@@ -105,20 +104,17 @@ let rec go t ~push encoder acc =
   match Cartonnage.Encoder.encode ~o:dst encoder with
   | `Flush (encoder, len) ->
       let ctx = SHA1.feed_bigstring t.ctx dst ~off:0 ~len in
-      let encoder =
-        Cartonnage.Encoder.dst encoder dst 0 (Bigarray.Array1.dim dst)
-      in
+      let encoder = Cartonnage.Encoder.dst encoder dst 0 (Bstr.length dst) in
       let t = { t with ctx; cursor = t.cursor + len } in
-      push acc (Bigarray.Array1.sub dst 0 len) >>= fun acc ->
-      go t ~push encoder acc
+      push acc (Bstr.sub dst ~off:0 ~len) >>= fun acc -> go t ~push encoder acc
   | `End -> Fiber.return (t, acc)
 
 let pack ~reporter:_ ?level ~length load =
   let flow (Stream.Sink k) =
     let init () =
       Log.debug (fun m -> m "Start to encode a PACK file.");
-      let o = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0x1000
-      and i = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0x1000
+      let o = Bstr.create 0x1000
+      and i = Bstr.create 0x1000
       and q = De.Queue.create 0x1000
       and w = De.Lz77.make_window ~bits:15 in
       let buffers = Cartonnage.{ o; i; q; w } in
@@ -130,9 +126,7 @@ let pack ~reporter:_ ?level ~length load =
       Bytes.set_int32_be hdr 4 2l;
       Bytes.set_int32_be hdr 8 (Int32.of_int length);
       let ctx = SHA1.feed_bytes ctx hdr in
-      let hdr =
-        bigstring_of_string (Bytes.unsafe_to_string hdr) ~off:0 ~len:12
-      in
+      let hdr = Bstr.string (Bytes.unsafe_to_string hdr) ~off:0 ~len:12 in
       k.push acc hdr >>= fun acc ->
       Fiber.return ({ ctx; cursor = 12; buffers; where }, acc)
     in
@@ -153,7 +147,7 @@ let pack ~reporter:_ ?level ~length load =
       let hash = SHA1.get t.ctx in
       Log.debug (fun m -> m "Hash of the PACK file: %a" SHA1.pp hash);
       let hash = SHA1.to_raw_string hash in
-      let hash = bigstring_of_string hash ~off:0 ~len:(String.length hash) in
+      let hash = Bstr.string hash ~off:0 ~len:(String.length hash) in
       k.push acc hash >>= k.stop
     in
     Stream.Sink { init; stop; full; push }
@@ -164,7 +158,7 @@ type base = { value : Carton.Value.t; uid : Carton.Uid.t; depth : int }
 
 let identify (Carton.Identify gen) ~kind ~len bstr =
   let ctx = gen.Carton.First_pass.init kind (Carton.Size.of_int_exn len) in
-  let ctx = gen.Carton.First_pass.feed (Bigarray.Array1.sub bstr 0 len) ctx in
+  let ctx = gen.Carton.First_pass.feed (Bstr.sub bstr ~off:0 ~len) ctx in
   gen.Carton.First_pass.serialize ctx
 
 (* NOTE(dinosaure): here we directly Carton functions which don't yield.
@@ -194,7 +188,7 @@ let rec resolve_tree ~on t oracle matrix ~(base : base) = function
   | cursors ->
       let ( let* ) = Fiber.bind in
       let source = Carton.Value.source base.value in
-      let source = bigstring_copy source in
+      let source = Bstr.copy source in
       let rec go idx =
         if idx < Array.length cursors then begin
           let cursor = cursors.(idx) in

@@ -4,7 +4,7 @@ type elt =
 type tree = elt list
 
 val tree_of_string : ?path:Bob_fpath.t -> string -> tree
-val tree_of_bstr : ?path:Bob_fpath.t -> Stdbob.bigstring -> elt Stream.source
+val tree_of_bstr : ?path:Bob_fpath.t -> Bstr.t -> elt Stream.source
 val digest : Carton.First_pass.digest
 val identify : Digestif.SHA1.ctx Carton.First_pass.identify
 val serialize_directory : (Bob_fpath.t * Digestif.SHA1.t) list -> string list

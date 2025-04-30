@@ -277,7 +277,7 @@ module Sink = struct
     in
     Sink { init; push; full; stop }
 
-  let bigstring =
+  let bstr =
     let init () = Fiber.return (Qe.create 128) in
     let push ke bstr =
       Qe.push ke bstr;
@@ -286,7 +286,7 @@ module Sink = struct
     let full = Fiber.always false in
     let stop ke =
       match Qe.peek ke with
-      | [] -> Fiber.return De.bigstring_empty
+      | [] -> Fiber.return Bstr.empty
       | [ x ] -> Fiber.return x
       | _ ->
           Log.err (fun m ->
@@ -298,7 +298,7 @@ module Sink = struct
   let to_string =
     let init () = Fiber.return (Buffer.create 0x100) in
     let push buf bstr =
-      Buffer.add_string buf (bigstring_to_string bstr);
+      Buffer.add_string buf (Bstr.to_string bstr);
       Fiber.return buf
     in
     let full = Fiber.always false in
@@ -378,12 +378,12 @@ module Flow = struct
     in
     { flow }
 
-  let bigstring_to_string =
+  let bstr_to_string =
     let flow (Sink k) =
       let push acc bstr =
-        let buf = Bytes.create (Bigarray.Array1.dim bstr) in
+        let buf = Bytes.create (Bstr.length bstr) in
         let src_off = 0 and dst_off = 0 and len = Bytes.length buf in
-        Stdbob.bigstring_blit_to_bytes bstr ~src_off buf ~dst_off ~len;
+        Bstr.blit_to_bytes bstr ~src_off buf ~dst_off ~len;
         k.push acc (Bytes.unsafe_to_string buf)
       in
       Sink { k with push }
@@ -396,20 +396,20 @@ module Flow = struct
     match Zl.Def.encode encoder with
     | `Await _ -> assert false
     | `Flush encoder ->
-        let len = Bigarray.Array1.dim o - Zl.Def.dst_rem encoder in
-        let encoder = Zl.Def.dst encoder o 0 (Bigarray.Array1.dim o) in
-        push acc (Bigarray.Array1.sub o 0 len) >>= fun acc ->
+        let len = Bstr.length o - Zl.Def.dst_rem encoder in
+        let encoder = Zl.Def.dst encoder o 0 (Bstr.length o) in
+        push acc (Bstr.sub o ~off:0 ~len) >>= fun acc ->
         deflate_zlib_until_end ~push ~acc encoder o
     | `End encoder ->
-        let len = Bigarray.Array1.dim o - Zl.Def.dst_rem encoder in
-        push acc (Bigarray.Array1.sub o 0 len)
+        let len = Bstr.length o - Zl.Def.dst_rem encoder in
+        push acc (Bstr.sub o ~off:0 ~len)
 
   let rec deflate_zlib_until_await ~push ~acc encoder o =
     match Zl.Def.encode encoder with
     | `Await encoder -> Fiber.return (encoder, o, acc)
     | `Flush encoder ->
-        let len = Bigarray.Array1.dim o - Zl.Def.dst_rem encoder in
-        let encoder = Zl.Def.dst encoder o 0 (Bigarray.Array1.dim o) in
+        let len = Bstr.length o - Zl.Def.dst_rem encoder in
+        let encoder = Zl.Def.dst encoder o 0 (Bstr.length o) in
         push acc (Bigarray.Array1.sub o 0 len) >>= fun acc ->
         deflate_zlib_until_await ~push ~acc encoder o
     | `End _ -> assert false
@@ -423,10 +423,10 @@ module Flow = struct
         k.init () >>= fun acc -> Fiber.return (encoder, o, acc)
       in
       let push (encoder, o, acc) i =
-        if Bigarray.Array1.dim i = 0 then Fiber.return (encoder, o, acc)
+        if Bstr.length i = 0 then Fiber.return (encoder, o, acc)
         else
           deflate_zlib_until_await ~push:k.push ~acc
-            (Zl.Def.src encoder i 0 (Bigarray.Array1.dim i))
+            (Zl.Def.src encoder i 0 (Bstr.length i))
             o
       in
       let full (_, _, acc) = k.full acc in
@@ -460,9 +460,9 @@ module Flow = struct
       in
       let push (fd, acc) str =
         let len = String.length str in
-        let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+        let bstr = Bstr.create len in
         let src_off = 0 and dst_off = 0 in
-        Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+        Bstr.blit_from_string str ~src_off bstr ~dst_off ~len;
         full_write ~path fd str 0 len >>= fun fd ->
         k.push acc bstr >>= fun acc -> Fiber.return (fd, acc)
       in
@@ -670,7 +670,7 @@ module Stream = struct
 
   let to_array stream = into Sink.array stream
   let of_array arr = from (Source.array arr)
-  let to_bigstring stream = into Sink.bigstring stream
+  let to_bstr stream = into Sink.bstr stream
   let to_string stream = into Sink.string stream
   let iterate ~f x = from (Source.iterate ~f x)
 

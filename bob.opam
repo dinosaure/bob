@@ -39,6 +39,7 @@ depends: [
   "ke"                {>= "0.6"}
   "alcotest"          {with-test}
   "spoke"             {>= "0.0.3"}
+  "bstr"
 ]
 
 pin-depends: [

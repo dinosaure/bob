@@ -9,7 +9,7 @@ val pack :
   ?level:int ->
   length:int ->
   (Carton.Uid.t -> 'meta -> Carton.Value.t Fiber.t) ->
-  ('meta Cartonnage.Target.t, Stdbob.bigstring) Stream.flow
+  ('meta Cartonnage.Target.t, Bstr.t) Stream.flow
 
 val verify :
   on:(Carton.Value.t -> Carton.Uid.t -> unit) ->

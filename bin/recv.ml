@@ -125,7 +125,7 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
     let src_off = 0 and dst_off = 0 and len = String.length str in
     Logs.debug (fun m -> m "PACK file:");
     Logs.debug (fun m -> m "@[<hov>%a@]" (Hxd_string.pp Hxd.default) str);
-    Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+    Bstr.blit_from_string str ~src_off bstr ~dst_off ~len;
     bstr
   in
   Stream.run
@@ -169,7 +169,7 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
     with_digest (module Digestif.SHA1) ctx (* (string, string) *)
     << save_into tmp (* (string, bstr) *)
     << Pack.inflate_entry ~reporter:Fiber.ignore (* (bstr, bstr) *)
-    << bigstring_to_string (* (bstr, string) *)
+    << bstr_to_string (* (bstr, string) *)
   in
   Stream.run ~from ~via ~into:(Sink.file destination)
   (* XXX(dinosaure): note that we save the stream into [tmp] BUT the file
@@ -203,11 +203,11 @@ let extract_with_reporter quiet ~config ?g (from : string Stream.source)
   | Some (`End _, _, _, _), _ | None, _ -> Fiber.return (Error `Empty_pack_file)
   | ( Some (`Elt (offset, _status, `Base (`D, _weight)), decoder, src, off),
       leftover ) ->
-      let src = Stdbob.bigstring_to_string src in
+      let src = Bstr.to_string src in
       extract_one quiet ?g tmp ~offset decoder src off ~leftover destination
   | Some (`Elt entry, decoder, src, off), leftover -> (
       Logs.debug (fun m -> m "Got a directory.");
-      let src = Stdbob.bigstring_to_string src in
+      let src = Bstr.to_string src in
       collect_and_verify_with_reporter quiet ~config entry tmp decoder ~src ~off
         leftover
       >>= Pack.unpack tmp

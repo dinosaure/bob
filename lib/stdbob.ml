@@ -1,25 +1,3 @@
-type bigstring =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
-
-external bigstring_get_uint8 : bigstring -> int -> int = "%caml_ba_ref_1"
-
-external bigstring_set_uint8 : bigstring -> int -> int -> unit
-  = "%caml_ba_set_1"
-
-external bigstring_get_uint32 : bigstring -> int -> int32
-  = "%caml_bigstring_get32"
-
-external bigstring_set_uint32 : bigstring -> int -> int32 -> unit
-  = "%caml_bigstring_set32"
-
-external bytes_set_uint8 : bytes -> int -> int -> unit = "%bytes_safe_set"
-external bytes_get_uint8 : bytes -> int -> int = "%bytes_safe_get"
-external bytes_set_uint32 : bytes -> int -> int32 -> unit = "%caml_bytes_set32"
-external bytes_get_uint32 : bytes -> int -> int32 = "%caml_bytes_get32"
-external string_get_uint8 : string -> int -> int = "%string_safe_get"
-external string_get_uint32 : string -> int -> int32 = "%caml_string_get32"
-external bigstring_blit : bigstring -> bigstring -> unit = "caml_ba_blit"
-
 let flip (a, b) = (b, a)
 let rev f x y = f y x
 let identity x = x
@@ -32,106 +10,9 @@ let never _ = assert false
 
 external reraise : exn -> 'a = "%reraise"
 
-let bigstring_blit src ~src_off dst ~dst_off ~len =
-  if
-    len < 0 || src_off < 0
-    || src_off > Bigarray.Array1.dim src - len
-    || dst_off < 0
-    || dst_off > Bigarray.Array1.dim dst - len
-  then
-    Fmt.invalid_arg
-      "Stdbob.bigstring_blit %d ~src_off:%d %d ~dst_off:%d ~len:%d"
-      (Bigarray.Array1.dim src) src_off (Bigarray.Array1.dim dst) dst_off len;
-  bigstring_blit
-    (Bigarray.Array1.sub src src_off len)
-    (Bigarray.Array1.sub dst dst_off len)
-
-let bigstring_copy ?(off = 0) ?len bstr =
-  let len =
-    match len with Some len -> len | None -> Bigarray.Array1.dim bstr - off
-  in
-  let result = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-  bigstring_blit bstr ~src_off:off result ~dst_off:0 ~len;
-  result
-
-let bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len =
-  if
-    len < 0 || src_off < 0
-    || src_off > Bigarray.Array1.dim src - len
-    || dst_off < 0
-    || dst_off > Bytes.length dst - len
-  then
-    Fmt.invalid_arg
-      "Stdbob.bigstring_blit_to_bytes %d ~src_off:%d %d ~dst_off:%d ~len:%d"
-      (Bigarray.Array1.dim src) src_off (Bytes.length dst) dst_off len;
-  let len0 = len land 3 in
-  let len1 = len asr 2 in
-
-  for i = 0 to len1 - 1 do
-    let i = i * 4 in
-    let v = bigstring_get_uint32 src (src_off + i) in
-    bytes_set_uint32 dst (dst_off + i) v
-  done;
-
-  for i = 0 to len0 - 1 do
-    let i = (len1 * 4) + i in
-    let v = bigstring_get_uint8 src (src_off + i) in
-    bytes_set_uint8 dst (dst_off + i) v
-  done
-
-let bigstring_blit_from_string src ~src_off dst ~dst_off ~len =
-  if
-    len < 0 || src_off < 0
-    || src_off > String.length src - len
-    || dst_off < 0
-    || dst_off > Bigarray.Array1.dim dst - len
-  then
-    Fmt.invalid_arg
-      "Stdbob.bigstring_blit_from_string %d ~src_off:%d %d ~dst_off:%d ~len:%d"
-      (String.length src) src_off (Bigarray.Array1.dim dst) dst_off len;
-  let len0 = len land 3 in
-  let len1 = len asr 2 in
-
-  for i = 0 to len1 - 1 do
-    let i = i * 4 in
-    let v = string_get_uint32 src (src_off + i) in
-    bigstring_set_uint32 dst (dst_off + i) v
-  done;
-
-  for i = 0 to len0 - 1 do
-    let i = (len1 * 4) + i in
-    let v = string_get_uint8 src (src_off + i) in
-    bigstring_set_uint8 dst (dst_off + i) v
-  done
-
-let bigstring_blit_from_bytes src ~src_off dst ~dst_off ~len =
-  if
-    len < 0 || src_off < 0
-    || src_off > Bytes.length src - len
-    || dst_off < 0
-    || dst_off > Bigarray.Array1.dim dst - len
-  then
-    Fmt.invalid_arg
-      "Stdbob.bigstring_blit_from_bytes %d ~src_off:%d %d ~dst_off:%d ~len:%d"
-      (Bytes.length src) src_off (Bigarray.Array1.dim dst) dst_off len;
-  let len0 = len land 3 in
-  let len1 = len asr 2 in
-
-  for i = 0 to len1 - 1 do
-    let i = i * 4 in
-    let v = bytes_get_uint32 src (src_off + i) in
-    bigstring_set_uint32 dst (dst_off + i) v
-  done;
-
-  for i = 0 to len0 - 1 do
-    let i = (len1 * 4) + i in
-    let v = bytes_get_uint8 src (src_off + i) in
-    bigstring_set_uint8 dst (dst_off + i) v
-  done
-
 let line_of_queue queue =
   let blit src src_off dst dst_off len =
-    bigstring_blit_to_bytes src ~src_off dst ~dst_off ~len
+    Bstr.blit_to_bytes src ~src_off dst ~dst_off ~len
   in
   let exists ~p queue =
     let pos = ref 0 and res = ref (-1) in
@@ -154,25 +35,6 @@ let line_of_queue queue =
       match Bytes.get tmp (pos - 1) with
       | '\r' -> Some (Bytes.sub_string tmp 0 (pos - 1))
       | _ -> Some (Bytes.unsafe_to_string tmp))
-
-let bigstring_of_string str ~off ~len =
-  let res = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-  bigstring_blit_from_string str ~src_off:off res ~dst_off:0 ~len;
-  res
-
-let bigstring_substring t ~off ~len =
-  let res = Bytes.create len in
-  bigstring_blit_to_bytes t ~src_off:off res ~dst_off:0 ~len;
-  Bytes.unsafe_to_string res
-
-let bigstring_to_string t =
-  bigstring_substring t ~off:0 ~len:(Bigarray.Array1.dim t)
-
-let bigstring_input ic buf off len =
-  let tmp = Bytes.create len in
-  let res = input ic tmp 0 len in
-  bigstring_blit_from_bytes tmp ~src_off:0 buf ~dst_off:off ~len:res;
-  res
 
 module LList = struct
   (* Copyright (c) 1999-2020, the Authors of Lwt (docs/AUTHORS)

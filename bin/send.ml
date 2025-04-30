@@ -19,7 +19,7 @@ let compress_with_reporter quiet ~compression ~config store hashes =
   finalise ();
   Fiber.return (Stream.Stream.of_list targets)
 
-type pack = Stream of Stdbob.bigstring Stream.stream | File of Bob_fpath.t
+type pack = Stream of Bstr.t Stream.stream | File of Bob_fpath.t
 
 let emit_with_reporter quiet ?g ?level ~config store
     (objects : _ Cartonnage.Target.t Stream.stream) =
@@ -35,7 +35,7 @@ let emit_with_reporter quiet ?g ?level ~config store
       ~reporter:(Fiber.return <.> reporter <.> Stdbob.always 1)
       store
   in
-  let flow = Flow.(flow << bigstring_to_string) in
+  let flow = Flow.(flow << bstr_to_string) in
   let* () = Stream.(to_file path (via flow objects)) in
   finalise ();
   Fiber.return (File path)
@@ -53,7 +53,7 @@ let emit_one_with_reporter quiet ?level ~config path =
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr = function
   | Stream stream ->
-      let stream = Stream.(Stream.via Flow.bigstring_to_string stream) in
+      let stream = Stream.(Stream.via Flow.bstr_to_string stream) in
       Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
@@ -67,12 +67,12 @@ let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
       in
       let fn str =
         let src_off = 0 and dst_off = 0 and len = String.length str in
-        Stdbob.bigstring_blit_from_string str ~src_off bstr ~dst_off ~len;
+        Bstr.blit_from_string str ~src_off bstr ~dst_off ~len;
         bstr
       in
       Stream.of_file ~len:Bob_unix.Crypto.max_packet ~fn path >>| Result.get_ok
       >>= fun stream ->
-      let stream = Stream.via Flow.bigstring_to_string stream in
+      let stream = Stream.via Flow.bstr_to_string stream in
       Transfer.transfer
         ~reporter:(Fiber.return <.> reporter)
         ~identity ~ciphers ~shared_keys sockaddr stream

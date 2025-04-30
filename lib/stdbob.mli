@@ -1,6 +1,3 @@
-type bigstring =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
-
 val flip : 'a * 'b -> 'b * 'a
 val rev : ('a -> 'b -> 'c) -> 'b -> 'a -> 'c
 val identity : 'a -> 'a
@@ -10,27 +7,8 @@ val msgf : ('a, Format.formatter, unit, [> `Msg of string ]) format4 -> 'a
 val reword_error : ('e0 -> 'e1) -> ('a, 'e0) result -> ('a, 'e1) result
 val never : 'a -> 'b
 val io_buffer_size : int
-val bigstring_get_uint8 : bigstring -> int -> int
 val reraise : exn -> 'a
-
-val bigstring_blit :
-  bigstring -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit
-
-val bigstring_blit_to_bytes :
-  bigstring -> src_off:int -> bytes -> dst_off:int -> len:int -> unit
-
-val bigstring_blit_from_string :
-  string -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit
-
-val bigstring_blit_from_bytes :
-  bytes -> src_off:int -> bigstring -> dst_off:int -> len:int -> unit
-
-val bigstring_copy : ?off:int -> ?len:int -> bigstring -> bigstring
-val bigstring_of_string : string -> off:int -> len:int -> bigstring
-val bigstring_substring : bigstring -> off:int -> len:int -> string
-val bigstring_to_string : bigstring -> string
 val line_of_queue : (char, Bigarray.int8_unsigned_elt) Ke.Rke.t -> string option
-val bigstring_input : in_channel -> bigstring -> int -> int -> int
 
 module LList : sig
   type 'a seq

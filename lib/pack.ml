@@ -58,8 +58,7 @@ module Filesystem = struct
   let fold ?dotfiles ~f acc d = fold ?dotfiles ~f acc [ d ]
 end
 
-external bigstring_read :
-  Unix.file_descr -> Stdbob.bigstring -> int -> int -> int
+external bigstring_read : Unix.file_descr -> Bstr.t -> int -> int -> int
   = "bob_bigstring_read"
 [@@noalloc]
 
@@ -81,7 +80,7 @@ let load_file stat path =
   let len = stat.Unix.st_size in
   Fiber.openfile path Unix.[ O_RDONLY ] 0o644 >>= function
   | Ok fd ->
-      let res = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+      let res = Bstr.create len in
       let finally () = Fiber.close fd in
       Fiber.protect ~finally @@ fun () ->
       full_read fd res 0 len;
@@ -189,120 +188,10 @@ let deltify ~reporter ?(compression = true) store hashes =
       let entries = Stream.Stream.map fn hashes in
       let load uid () = load store uid in
       Bob_carton.delta ~reporter ~load entries
-      (*
-      (* XXX(dinosaure): do the delta compression. *)
-      let module Verbose = struct
-        type +'a fiber = 'a Fiber.t
-
-        let counter = ref 0
-
-        let succ () =
-          incr counter;
-          Fiber.return ()
-
-        let print () =
-          let open Fiber in
-          reporter !counter >>| fun () -> counter := 0
-      end in
-      let module Delta = Carton.Enc.Delta (Scheduler) (Fiber) (SHA1) (Verbose)
-      in
-      let open Fiber in
-      let f hash =
-        load store hash |> Scheduler.prj >>= fun v ->
-        let kind = Carton.Dec.kind v in
-        let length = Carton.Dec.len v in
-        let entry = Carton.Enc.make_entry ~kind ~length hash in
-        Fiber.return entry
-      in
-      let entries = Stream.Stream.map f hashes in
-      Stream.Stream.to_array entries >>= fun entries ->
-      Delta.delta
-        ~threads:(List.init 4 (fun _ -> load store))
-        ~weight:10 ~uid_ln:SHA1.length entries
-      >>| Stream.Stream.of_array
-      *)
   | false ->
       (* XXX(dinosaure): just generate targets without patch compression. *)
       let fn uid = entry store uid >>| Cartonnage.Target.make in
       Stream.Stream.map fn hashes
-
-(*
-      let uid =
-        {
-          Carton.Enc.uid_ln = SHA1.digest_size;
-          Carton.Enc.uid_rw = SHA1.to_raw_string;
-        }
-      in
-      let b =
-        {
-          Carton.Enc.o =
-            Bigarray.Array1.create Bigarray.char Bigarray.c_layout len;
-          Carton.Enc.i =
-            Bigarray.Array1.create Bigarray.char Bigarray.c_layout
-              io_buffer_size;
-          Carton.Enc.q = De.Queue.create 0x1000;
-          Carton.Enc.w = De.Lz77.make_window ~bits:15;
-        }
-      in
-
-      let open Fiber in
-      k.init () >>= fun acc ->
-      let hdr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 12 in
-      let ctx = SHA1.empty in
-      Carton.Enc.header_of_pack ~length hdr 0 12;
-      let ctx = SHA1.feed_bigstring ctx hdr ~off:0 ~len:12 in
-      k.push acc hdr >>= fun acc ->
-      Fiber.return
-        ({ ctx; cursor = 12L; b; uid; offsets = Hashtbl.create length }, acc)
-    in
-    let push (t, acc) target =
-      let open Fiber in
-      reporter () >>= fun () ->
-      let anchor = t.cursor in
-      Hashtbl.add t.offsets (Carton.Enc.target_uid target) t.cursor;
-      let find hash =
-        match Hashtbl.find_opt t.offsets hash with
-        | Some v ->
-            Log.debug (fun m ->
-                m "Ask where is %a: %08Lx (anchor: %08Lx)." SHA1.pp hash v
-                  anchor);
-            Fiber.return (Some (Int64.to_int v))
-        | None ->
-            Log.err (fun m -> m "%a not found." SHA1.pp hash);
-            Fiber.return None
-      in
-
-      Log.debug (fun m ->
-          m "Start to encode %a at %08Lx" SHA1.pp
-            (Carton.Enc.target_uid target)
-            t.cursor);
-      Carton.Enc.encode_target ?level scheduler ~b:t.b
-        ~find:(Scheduler.inj <.> find) ~load:(load store) ~uid:t.uid target
-        ~cursor:(Int64.to_int t.cursor)
-      |> Scheduler.prj
-      >>= fun (len, encoder) ->
-      k.push acc (Bigarray.Array1.sub t.b.o 0 len) >>= fun acc ->
-      t.ctx <- SHA1.feed_bigstring t.ctx t.b.o ~off:0 ~len;
-      t.cursor <- Int64.add t.cursor (Int64.of_int len);
-      let encoder =
-        Carton.Enc.N.dst encoder t.b.o 0 (Bigarray.Array1.dim t.b.o)
-      in
-      encode_target t ~push:k.push ~acc encoder >>= fun acc ->
-      Fiber.return (t, acc)
-    in
-    let full (_, acc) = k.full acc in
-    let stop (t, acc) =
-      let open Fiber in
-      let hash = SHA1.get t.ctx in
-      Log.debug (fun m -> m "Hash of the PACK file: %a" SHA1.pp hash);
-      let hash = SHA1.to_raw_string hash in
-      let hash = bigstring_of_string hash ~off:0 ~len:(String.length hash) in
-      k.push acc hash >>= k.stop
-    in
-    Stream.Sink { init; stop; full; push }
-  in
-  { Stream.flow }
-*)
 
 let store root =
   let open Fiber in
@@ -393,12 +282,12 @@ let entry_with_filename ?level path =
     | `Await zl -> deflate (Zl.Def.src zl De.bigstring_empty 0 0) buf output
     | `Flush zl ->
         let len = De.bigstring_length output - Zl.Def.dst_rem zl in
-        let str = Stdbob.bigstring_substring ~off:0 ~len output in
+        let str = Bstr.sub_string ~off:0 ~len output in
         Buffer.add_string buf str;
         deflate (Zl.Def.dst zl output 0 (De.bigstring_length output)) buf output
     | `End zl ->
         let len = De.bigstring_length output - Zl.Def.dst_rem zl in
-        let str = Stdbob.bigstring_substring ~off:0 ~len output in
+        let str = Bstr.sub_string ~off:0 ~len output in
         Buffer.add_string buf str;
         Buffer.contents buf
   in
@@ -411,7 +300,7 @@ let entry_with_filename ?level path =
     let z = Zl.Def.encoder ~q ~w ~level `Manual `Manual in
     let i =
       let len = String.length entry in
-      Stdbob.bigstring_of_string entry ~off:0 ~len
+      Bstr.string entry ~off:0 ~len
     in
     let z = Zl.Def.src z i 0 (String.length entry) in
     let z = Zl.Def.dst z o 0 (De.bigstring_length o) in
@@ -419,7 +308,7 @@ let entry_with_filename ?level path =
   in
   let deflated =
     let len = String.length deflated in
-    Stdbob.bigstring_of_string deflated ~off:0 ~len
+    Bstr.string deflated ~off:0 ~len
   in
   let hdr_entry =
     let length = String.length entry in
@@ -427,18 +316,18 @@ let entry_with_filename ?level path =
   in
   let hdr_entry =
     let len = String.length hdr_entry in
-    bigstring_of_string hdr_entry ~off:0 ~len
+    Bstr.string hdr_entry ~off:0 ~len
   in
   (hdr_entry, deflated)
 
 let make_one ?(level = 4) ~reporter ~finalise path =
   let open Fiber in
   let len = 0x7ff in
-  let bstr = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+  let bstr = Bstr.create len in
   let fn str =
     let len = String.length str in
-    bigstring_blit_from_string str ~src_off:0 bstr ~dst_off:0 ~len;
-    Bigarray.Array1.sub bstr 0 len
+    Bstr.blit_from_string str ~src_off:0 bstr ~dst_off:0 ~len;
+    Bstr.sub bstr ~off:0 ~len
   in
   Stream.Stream.of_file ~len ~fn path >>= function
   | Error (`Msg msg) as err ->
@@ -448,7 +337,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
   | Ok file ->
       let hdr = Fmt.str "PACK\000\000\000\002\000\000\000\002" in
       let hdr = hdr in
-      let hdr = bigstring_of_string hdr ~off:0 ~len:(String.length hdr) in
+      let hdr = Bstr.string hdr ~off:0 ~len:(String.length hdr) in
       let ctx = ref (SHA1.feed_bigstring SHA1.empty hdr) in
       let q = De.Queue.create 0x1000 in
       let w = De.Lz77.make_window ~bits:15 in
@@ -457,10 +346,10 @@ let make_one ?(level = 4) ~reporter ~finalise path =
       let hdr_file =
         encode_header_of_entry ~kind:_C
           ~length:(Unix.stat (Bob_fpath.to_string path)).Unix.st_size
-        |> fun str -> bigstring_of_string str ~off:0 ~len:(String.length str)
+        |> fun str -> Bstr.string str ~off:0 ~len:(String.length str)
       in
       let zlib = Flow.deflate_zlib ~len ~q ~w level in
-      let file = Stream.tap (reporter <.> Bigarray.Array1.dim) file in
+      let file = Stream.tap (reporter <.> Bstr.length) file in
       let file = Stream.via zlib file in
       let name =
         Stream.tap
@@ -469,7 +358,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
             Log.debug (fun m ->
                 m "@[<hov>%a@]"
                   (Hxd_string.pp Hxd.default)
-                  (bigstring_to_string bstr));
+                  (Bstr.to_string bstr));
             ctx := SHA1.feed_bigstring !ctx bstr;
             Fiber.return ())
           (Stream.double hdr_name name)
@@ -481,7 +370,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
             Log.debug (fun m ->
                 m "@[<hov>%a@]"
                   (Hxd_string.pp Hxd.default)
-                  (bigstring_to_string bstr));
+                  (Bstr.to_string bstr));
             ctx := SHA1.feed_bigstring !ctx bstr;
             Fiber.return ())
           Stream.(singleton hdr_file ++ file)
@@ -492,7 +381,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
         let hash = SHA1.get !ctx in
         Log.debug (fun m -> m "Hash of the PACK file: %a." SHA1.pp hash);
         let len = SHA1.length and off = 0 in
-        let res = (bigstring_of_string ~off ~len <.> SHA1.to_raw_string) hash in
+        let res = (Bstr.string ~off ~len <.> SHA1.to_raw_string) hash in
         Fiber.return res
       in
       singleton hdr ++ name ++ file ++ of_fiber fn |> fun stream ->
@@ -509,43 +398,41 @@ let inflate_entry ~reporter =
       | `Header ->
           Log.debug (fun m -> m "Consume the header entry into the PACK file.");
           let pos = ref 0 in
-          let chr = ref (bigstring_get_uint8 next !pos) in
+          let chr = ref (Bstr.get_uint8 next !pos) in
           while
             incr pos;
-            !chr land 0x80 != 0 && !pos < Bigarray.Array1.dim next
+            !chr land 0x80 != 0 && !pos < Bstr.length next
           do
-            chr := bigstring_get_uint8 next !pos
+            chr := Bstr.get_uint8 next !pos
           done;
           if !chr land 0x80 == 0 then
             let allocate bits = De.make_window ~bits in
             let o = De.bigstring_create De.io_buffer_size in
             let decoder = Zl.Inf.decoder `Manual ~o ~allocate in
-            if Bigarray.Array1.dim next - !pos = 0 then
+            if Bstr.length next - !pos = 0 then
               Fiber.return (`Inflate (o, Zl.Inf.decode decoder), acc)
             else
               push
                 (`Inflate (o, Zl.Inf.decode decoder), acc)
-                Bigarray.Array1.(sub next !pos (dim next - !pos))
+                Bstr.(sub next ~off:!pos ~len:(length next - !pos))
           else Fiber.return (`Header, acc)
       | `Inflate (output, state) -> (
           match state with
           | `Flush decoder ->
-              let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+              let len = Bstr.length output - Zl.Inf.dst_rem decoder in
               reporter len >>= fun () ->
-              k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+              k.push acc (Bstr.sub output ~off:0 ~len) >>= fun acc ->
               push
                 (`Inflate (output, Zl.Inf.(decode <.> flush) decoder), acc)
                 next
           | `End decoder ->
-              let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+              let len = Bstr.length output - Zl.Inf.dst_rem decoder in
               reporter len >>= fun () ->
-              k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+              k.push acc (Bstr.sub output ~off:0 ~len) >>= fun acc ->
               Fiber.return (`Ignore, acc)
           | `Malformed err -> failwith err
           | `Await decoder ->
-              let decoder =
-                Zl.Inf.src decoder next 0 (Bigarray.Array1.dim next)
-              in
+              let decoder = Zl.Inf.src decoder next 0 (Bstr.length next) in
               Fiber.return (`Inflate (output, Zl.Inf.decode decoder), acc))
     in
     let full = function
@@ -563,14 +450,14 @@ let inflate_entry ~reporter =
                    for the [`Await] case to ensure that we close the decoder but
                    it seems to work. *)
             | `Flush decoder ->
-                let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+                let len = Bstr.length output - Zl.Inf.dst_rem decoder in
                 reporter len >>= fun () ->
-                k.push acc (Bigarray.Array1.sub output 0 len) >>= fun acc ->
+                k.push acc (Bstr.sub output ~off:0 ~len) >>= fun acc ->
                 go acc (Zl.Inf.(decode <.> flush) decoder)
             | `End decoder ->
-                let len = Bigarray.Array1.dim output - Zl.Inf.dst_rem decoder in
+                let len = Bstr.length output - Zl.Inf.dst_rem decoder in
                 reporter len >>= fun () ->
-                k.push acc (Bigarray.Array1.sub output 0 len) >>= k.stop
+                k.push acc (Bstr.sub output ~off:0 ~len) >>= k.stop
           in
           go acc state
     in
@@ -583,10 +470,9 @@ let rec until_await_or_peek :
     full:('acc -> bool Fiber.t) ->
     push:('acc -> 'a -> 'acc Fiber.t) ->
     acc:'acc ->
-    Stdbob.bigstring ->
+    Bstr.t ->
     Carton.First_pass.decoder ->
-    (Carton.First_pass.decoder option * (Stdbob.bigstring * int) option * 'acc)
-    Fiber.t =
+    (Carton.First_pass.decoder option * (Bstr.t * int) option * 'acc) Fiber.t =
  fun ~reporter ~full ~push ~acc src decoder ->
   let open Carton in
   let open Fiber in
@@ -612,7 +498,7 @@ let rec until_await_or_peek :
           let status = Carton.Unresolved_base { cursor = offset } in
           let elt = `Elt (offset, status, `Base (kind, size)) in
           let off =
-            let max = Bigarray.Array1.dim src in
+            let max = Bstr.length src in
             let len = First_pass.src_rem decoder in
             max - len
           in
@@ -626,7 +512,7 @@ let rec until_await_or_peek :
           let status = Carton.Unresolved_node in
           let elt = `Elt (offset, status, `Ofs (sub, s, target, size)) in
           let off =
-            let max = Bigarray.Array1.dim src in
+            let max = Bstr.length src in
             let len = First_pass.src_rem decoder in
             max - len
           in
@@ -640,7 +526,7 @@ let rec until_await_or_peek :
           let status = Carton.Unresolved_node in
           let elt = `Elt (offset, status, `Ref (ptr, s, target, size)) in
           let off =
-            let max = Bigarray.Array1.dim src in
+            let max = Bstr.length src in
             let len = First_pass.src_rem decoder in
             max - len
           in
@@ -694,39 +580,31 @@ let analyse ?decoder reporter =
         match (decoder, previous) with
         | None, _ -> Fiber.return (None, None, acc)
         | Some decoder, None ->
-            let len = Bigarray.Array1.dim next in
+            let len = Bstr.length next in
             Log.debug (fun m -> m "Analyze PACK file:");
             Log.debug (fun m ->
                 m "@[<hov>%a@]"
                   (Hxd_string.pp Hxd.default)
-                  (Stdbob.bigstring_to_string next));
+                  (Bstr.to_string next));
             let decoder = First_pass.src decoder next 0 len in
             until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc next
               decoder
         | Some decoder, Some (current, len) ->
-            let max =
-              Int.min
-                (Bigarray.Array1.dim current - len)
-                (Bigarray.Array1.dim next)
-            in
+            let max = Int.min (Bstr.length current - len) (Bstr.length next) in
             if max > 0 then begin
-              bigstring_blit next ~src_off:0 current ~dst_off:len ~len:max;
+              Bstr.blit next ~src_off:0 current ~dst_off:len ~len:max;
               let decoder = First_pass.src decoder current 0 (len + max) in
               until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc
                 current decoder
               >>= fun ret ->
-              push ret Bigarray.Array1.(sub next max (dim next - max))
+              push ret Bstr.(sub next ~off:max ~len:(length next - max))
             end
             else begin
-              let tmp =
-                Bigarray.Array1.create Bigarray.char Bigarray.c_layout
-                  (len + Bigarray.Array1.dim next)
-              in
-              bigstring_blit current ~src_off:0 tmp ~dst_off:0 ~len;
-              bigstring_blit next ~src_off:0 tmp ~dst_off:len
-                ~len:(Bigarray.Array1.dim next);
+              let tmp = Bstr.create (len + Bstr.length next) in
+              Bstr.blit current ~src_off:0 tmp ~dst_off:0 ~len;
+              Bstr.blit next ~src_off:0 tmp ~dst_off:len ~len:(Bstr.length next);
               let decoder =
-                First_pass.src decoder tmp 0 (len + Bigarray.Array1.dim next)
+                First_pass.src decoder tmp 0 (len + Bstr.length next)
               in
               until_await_or_peek ~reporter ~full:k.full ~push:k.push ~acc tmp
                 decoder
@@ -748,7 +626,7 @@ let full_write ~path fd bstr off len =
     if len = 0 then Fiber.return fd
     else begin
       let len = Int.min (Bytes.length buf) rem in
-      bigstring_blit_to_bytes bstr ~src_off buf ~dst_off:0 ~len;
+      Bstr.blit_to_bytes bstr ~src_off buf ~dst_off:0 ~len;
       let* did = Fiber.write fd (Bytes.unsafe_to_string buf) ~off:0 ~len in
       match did with
       | Ok len' -> go (src_off + len', rem - len')
@@ -787,7 +665,7 @@ and create_directory ~reporter pack path uid =
   let open Fiber in
   let off = 0 and len = Carton.Value.length contents in
   let contents = Carton.Value.bigstring contents in
-  let contents = Bigarray.Array1.sub contents off len in
+  let contents = Bstr.sub contents ~off ~len in
   Stream.Stream.run
     ~from:(Git.tree_of_bstr ~path contents)
     ~via:Stream.Flow.identity
@@ -805,7 +683,7 @@ and create_file pack path uid =
   let open Fiber in
   let off = 0 and len = Carton.Value.length contents in
   let bstr = Carton.Value.bigstring contents in
-  let bstr = Bigarray.Array1.sub bstr off len in
+  let bstr = Bstr.sub bstr ~off ~len in
   Fiber.openfile path Unix.[ O_CREAT; O_TRUNC; O_WRONLY; O_APPEND ] 0o644
   >>= function
   | Error errno ->
@@ -817,7 +695,7 @@ and create_file pack path uid =
       let open Fiber in
       Fiber.catch
         (fun () ->
-          full_write ~path fd bstr 0 (Bigarray.Array1.dim bstr) >>= Fiber.close)
+          full_write ~path fd bstr 0 (Bstr.length bstr) >>= Fiber.close)
         (fun exn -> Fiber.close fd >>= fun () -> raise exn)
       >>= fun () -> Fiber.return pack
 
@@ -966,7 +844,7 @@ let unpack path status =
         let off = 0
         and len = Carton.Value.length root
         and bstr = Carton.Value.bigstring root in
-        bigstring_to_string (Bigarray.Array1.sub bstr off len)
+        Bstr.to_string (Bstr.sub bstr ~off ~len)
       in
       let[@warning "-8"] (name :: rest) = String.split_on_char '\000' root in
       let rest = String.concat "\000" rest in

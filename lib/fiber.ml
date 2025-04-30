@@ -318,7 +318,7 @@ let sigrd fd =
       let buf = Bytes.create 0x100 in
       let len = Unix.read fd buf 0 0x100 in
       let blit src src_off dst dst_off len =
-        Stdbob.bigstring_blit_from_bytes src ~src_off dst ~dst_off ~len
+        Bstr.blit_from_bytes src ~src_off dst ~dst_off ~len
       in
       Ke.Rke.N.push queue ~blit ~length:Bytes.length ~off:0 ~len buf;
       match (len, line_of_queue queue) with
