@@ -68,14 +68,14 @@ module Sink : sig
 
   val race : ('a, 'r1) sink -> ('a, 'r2) sink -> ('a, ('r1, 'r2) race) sink
 
-  (** {3: Basics.} *)
+  (** {3 Basics.} *)
 
   val list : ('a, 'a list) sink
   val string : (string, string) sink
   val bstr : (Bstr.t, Bstr.t) sink
   val to_string : (Bstr.t, string) sink
 
-  (** {3: Input & Output.} *)
+  (** {3 Input & Output.} *)
 
   val stdout : (string, unit) sink
   val file : ?erase:bool -> Bob_fpath.t -> (string, unit) sink
@@ -93,19 +93,19 @@ module Flow : sig
   val tap : ('a -> unit Fiber.t) -> ('a, 'a) flow
   val bstr_to_string : (Bstr.t, string) flow
 
-  (** {3: Computation.} *)
+  (** {3 Computation.} *)
 
   val with_digest :
     (module Digestif.S with type ctx = 'ctx) ->
     'ctx ref ->
     (string, string) flow
 
-  (** {3: Compression.} *)
+  (** {3 Compression.} *)
 
   val deflate_zlib :
     ?len:int -> q:De.Queue.t -> w:De.Lz77.window -> int -> (Bstr.t, Bstr.t) flow
 
-  (** {3: Input & Output.} *)
+  (** {3 Input & Output.} *)
 
   val save_into : ?offset:int64 -> Bob_fpath.t -> (string, Bstr.t) flow
 end
@@ -123,7 +123,7 @@ module Stream : sig
   val iterate : f:('a -> 'a Fiber.t) -> 'a -> 'a stream
   val tap : ('a -> unit Fiber.t) -> 'a stream -> 'a stream
 
-  (** {3: Basics.} *)
+  (** {3 Basics.} *)
 
   val of_fiber : (unit -> 'a Fiber.t) -> 'a stream
   val of_list : 'a list -> 'a stream
@@ -133,7 +133,7 @@ module Stream : sig
   val to_bstr : Bstr.t stream -> Bstr.t Fiber.t
   val to_string : string stream -> string Fiber.t
 
-  (** {3: Composition.} *)
+  (** {3 Composition.} *)
 
   val run :
     from:'a source ->
@@ -145,7 +145,7 @@ module Stream : sig
   val via : ('a, 'b) flow -> 'a stream -> 'b stream
   val from : 'a source -> 'a stream
 
-  (** {3: Input & Output.} *)
+  (** {3 Input & Output.} *)
 
   val of_file :
     ?len:int ->

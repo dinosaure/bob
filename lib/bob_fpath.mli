@@ -435,29 +435,33 @@ module Set : sig
   (** Exception safe {!Set.S.min_elt}. *)
 
   val get_min_elt : set -> path
-  (** [get_min_let] is like {!min_elt} but @raise Invalid_argument
-        on the empty set. *)
+  (** [get_min_let] is like {!min_elt}.
+
+      @raise Invalid_argument on the empty set. *)
 
   val max_elt : set -> path option
   (** Exception safe {!Set.S.max_elt}. *)
 
   val get_max_elt : set -> path
-  (** [get_max_elt] is like {!max_elt} but @raise Invalid_argument
-        on the empty set. *)
+  (** [get_max_elt] is like {!max_elt}.
+
+      @raise Invalid_argument on the empty set. *)
 
   val choose : set -> path option
   (** Exception safe {!Set.S.choose}. *)
 
   val get_any_elt : set -> path
-  (** [get_any_elt] is like {!choose} but @raise Invalid_argument on the
-        empty set. *)
+  (** [get_any_elt] is like {!choose}.
+
+      @raise Invalid_argument on the empty set. *)
 
   val find : path -> set -> path option
   (** Exception safe {!Set.S.find}. *)
 
   val get : path -> set -> path
-  (** [get] is like {!Set.S.find} but @raise Invalid_argument if
-        [elt] is not in [s]. *)
+  (** [get] is like {!Set.S.find}.
+
+      @raise Invalid_argument if [elt] is not in [s]. *)
 
   val of_list : path list -> set
   (** [of_list ps] is a set from the list [ps]. *)
@@ -487,22 +491,25 @@ module Map : sig
   (** Exception safe {!Map.S.min_binding}. *)
 
   val get_min_binding : 'a t -> path * 'a
-  (** [get_min_binding] is like {!min_binding} but @raise Invalid_argument
-      on the empty map. *)
+  (** [get_min_binding] is like {!min_binding}.
+
+      @raise Invalid_argument on the empty map. *)
 
   val max_binding : 'a t -> (path * 'a) option
   (** Exception safe {!Map.S.max_binding}. *)
 
   val get_max_binding : 'a t -> string * 'a
-  (** [get_min_binding] is like {!max_binding} but @raise Invalid_argument
-      on the empty map. *)
+  (** [get_min_binding] is like {!max_binding}.
+
+      @raise Invalid_argument on the empty map. *)
 
   val choose : 'a t -> (path * 'a) option
   (** Exception safe {!Map.S.choose}. *)
 
   val get_any_binding : 'a t -> path * 'a
-  (** [get_any_binding] is like {!choose} but @raise Invalid_argument
-      on the empty map. *)
+  (** [get_any_binding] is like {!choose}.
+
+      @raise Invalid_argument on the empty map. *)
 
   val find : path -> 'a t -> 'a option
   (** Exception safe {!Map.S.find}. *)

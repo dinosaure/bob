@@ -1,15 +1,15 @@
 (** {1:Fiber implementation.}
 
     [Fiber] is a little module to be able to do some asynchronous computation
-    with one core. The interface is pretty close to [lwt] and/or [async] but
-    the semantic differs a bit.
+    with one core. The interface is pretty close to [lwt] and/or [async] but the
+    semantic differs a bit.
 
     {b NOTE}: the usage of exception with this module is {b broken}. Indeed,
-    [Fiber] never tries to catch any exception. So if a fiber raise one, it
-    can be lost and catched by the next {i exception catcher}. That mostly
-    means that for a fiber 0 which raises an exception and a fiber 1 which
-    catch an exception, fiber 1 will retrieve the exception of fiber 0 (even
-    if the exception is completely unrelated to what fiber 1 does).
+    [Fiber] never tries to catch any exception. So if a fiber raise one, it can
+    be lost and catched by the next {i exception catcher}. That mostly means
+    that for a fiber 0 which raises an exception and a fiber 1 which catch an
+    exception, fiber 1 will retrieve the exception of fiber 0 (even if the
+    exception is completely unrelated to what fiber 1 does).
 
     {[
       [fiber 0] [fiber 1]
@@ -20,33 +20,32 @@
                  Exception A appear at line: try do something
     ]}
 
-    The best advise is to limit as possible as we can leak of exception. You
-    can use {!val:catch} for that when we try to catch an exception from
-    an {b effect-full} fiber.
+    The best advise is to limit as possible as we can leak of exception. You can
+    use {!val:catch} for that when we try to catch an exception from an
+    {b effect-full} fiber.
 
-    {2: Introduction.}
+    {2 Introduction.}
 
-    A {b fiber} is a placeholder for a single value which might take a long
-    time to compute. Speaking roughly, a fiber is a [ref] that can be filled
-    in later. To make that precise, here is how fibers differ from [ref]s:
+    A {b fiber} is a placeholder for a single value which might take a long time
+    to compute. Speaking roughly, a fiber is a [ref] that can be filled in
+    later. To make that precise, here is how fibers differ from [ref]s:
     - A fiber might not have a value yet. A fiber in this state is called a
       {e pending} fiber.
     - Writing a value into a fiber is called {e resolving} it. A fiber with a
       value is called a {e resolved} fiber.
-    - Each fiber can be resolved only once. After a fiber has a value, the
-      fiber is immutable.
+    - Each fiber can be resolved only once. After a fiber has a value, the fiber
+      is immutable.
     - It's possible to attach a {b callback} to a fiber. They will run when the
-      fiber has a value, i.e. is resolved. If the fiber is already resolved
-      when a callback is attached, the callback is run (almost) right away. If
-      the promise is pending, the callback is put into a list and waits.
+      fiber has a value, i.e. is resolved. If the fiber is already resolved when
+      a callback is attached, the callback is run (almost) right away. If the
+      promise is pending, the callback is put into a list and waits.
 
-    So, fibers are optional, write-once references, and when they don't yet
-    have a value, they store a list of callbacks that are waiting for the
-    value.
+    So, fibers are optional, write-once references, and when they don't yet have
+    a value, they store a list of callbacks that are waiting for the value.
 
     The waiting callbacks make fibers a natural data type for asynchronous
-    programming. For example, you can ask [Fiber] to {!val:read} a file.
-    [Fiber] immediately returns you a {e fiber} for the data.
+    programming. For example, you can ask [Fiber] to {!val:read} a file. [Fiber]
+    immediately returns you a {e fiber} for the data.
 
     You can neglect this fiber for a while. You can do some other computation,
     request more I/O, etc. At some point, you might decide to attach a callback
@@ -60,17 +59,17 @@
     [<stdout>]. [Fiber] gives you a fiber for that, too, and the process
     repeats.
 
-    {2: Difference with [Lwt]/[Async].}
+    {2 Difference with [Lwt]/[Async].}
 
     [Fiber] wants to be portable for Unix and Windows. Thanks to the
     [Cosmopolitan] project which provides {i syscalls} for any targets. [Lwt]
-    and [Async] are more complete than [Fiber] but several works are needed
-    to be compatible with [Cosmopolitan].
+    and [Async] are more complete than [Fiber] but several works are needed to
+    be compatible with [Cosmopolitan].
 
     For instance, the cancellation does not exist in [Fiber], you can not
     {i cancel} a fiber which is not yet resolved.
 
-    {2: Internal engine.}
+    {2 Internal engine.}
 
     [Fiber] directly provides {!val:run} unlike [Lwt] which proposes multiple
     engines ([libev], [pthread] or [Unix.select]). We only use

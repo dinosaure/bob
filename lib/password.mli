@@ -1,4 +1,4 @@
-(** {1: Human-readable password generator.}
+(** {1 Human-readable password generator.}
 
     This module implements a password generator which is human readable: it
     mixes {b syllable} from a dictionary {!type:t}. *)
