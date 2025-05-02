@@ -6,12 +6,12 @@
 (executable
  (name sched)
  (modules sched)
- (libraries fmt fpath unix))
+ (libraries logs.fmt fmt fpath unix))
 
 (executable
  (name free)
  (modules free)
- (libraries unix))
+ (libraries logs.fmt unix))
 
 (executable
  (name handshake)
