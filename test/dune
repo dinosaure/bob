@@ -13,22 +13,18 @@
  (modules free)
  (libraries logs.fmt unix))
 
-(executable
- (name handshake)
- (modules handshake)
+(test
+ (name test_handshake)
+ (modules test_handshake)
  (libraries logs.fmt fmt.tty bob alcotest))
 
-(rule
- (alias runtest)
- (action
-  (run ./handshake.exe --color=always)))
-
 (executable
- (name test)
+ (name test_pack)
+ (modules test_pack)
  (libraries alcotest bob.stream bob.pack))
 
 (rule
  (alias runtest)
- (deps (:test test.exe) (glob_files files/*))
+ (deps (:test test_pack.exe) (glob_files files/*))
  (action
   (run %{test} --color=always)))
