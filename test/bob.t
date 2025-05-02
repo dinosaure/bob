@@ -30,5 +30,6 @@ Tests about the bob binary
   bob recv -r 127.0.0.1 -y toto --quiet -o out 1>stdout.recv -> EXITED(0)
   $ cat stdout.send
   $ cat stdout.recv
+  $ diff out example
   $ rm out
   $ kill -INT $(cat pid)

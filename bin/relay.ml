@@ -99,12 +99,12 @@ let cmd =
          killed by a $(b,SIGINT) (^C) signal.";
     ]
   in
-  Cmd.v
-    (Cmd.info "relay" ~doc ~man)
-    Term.(
-      ret
-        (const run $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
-       $ secure_port $ backlog $ term_setup_pid))
+  let term =
+    let open Term in
+    const run $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
+    $ secure_port $ backlog $ term_setup_pid |> ret
+  in
+  Cmd.v (Cmd.info "relay" ~doc ~man) term
 
 type configuration = {
   quiet : bool;
@@ -119,20 +119,17 @@ type configuration = {
 let setup_relay quiet daemonize timeout inet_addr port secure_port backlog () =
   { quiet; daemonize; timeout; inet_addr; port; secure_port; backlog }
 
-open Args
-
 let inet_addr =
   let doc = "Set the source address where the relay will be bound." in
-  Arg.(
-    value
-    & pos 1 inet_addr Unix.inet_addr_any
-    & info [] ~doc ~docv:"<inet-addr>")
+  let open Arg in
+  let open Args in
+  value & pos 1 inet_addr Unix.inet_addr_any & info [] ~doc ~docv:"<inet-addr>"
 
 let port =
   let doc = "Set the port where the relay will listen." in
   Arg.(value & pos 2 int 9000 & info [] ~doc ~docv:"<port>")
 
 let term_setup_relay =
-  Term.(
-    const setup_relay $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
-    $ secure_port $ backlog $ term_setup_pid)
+  let open Term in
+  const setup_relay $ term_setup_logs $ daemonize $ timeout $ inet_addr $ port
+  $ secure_port $ backlog $ term_setup_pid

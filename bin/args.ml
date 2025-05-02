@@ -1,6 +1,7 @@
 open Cmdliner
 
 let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 let ( <.> ) f g x = f (g x)
 let common_options = "COMMON OPTIONS"
 
@@ -205,14 +206,96 @@ let temp =
     in
     Arg.conv (parser, Bob_fpath.pp)
   in
-  Arg.(
-    value
-    & opt (some directory) None
-    & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env)
+  let open Arg in
+  value
+  & opt (some directory) None
+  & info [ "temp" ] ~docs:common_options ~doc ~docv:"<directory>" ~env
+
+type happy_eyeballs = {
+  aaaa_timeout : int64 option;
+  connect_delay : int64 option;
+  connect_timeout : int64 option;
+  resolve_timeout : int64 option;
+  resolve_retries : int64 option;
+}
+
+let timeout =
+  let is_digit = function '0' .. '9' -> true | _ -> false in
+  let parser str =
+    let len =
+      let len = ref 0 in
+      while !len < String.length str && is_digit str.[!len] do
+        incr len
+      done;
+      !len
+    in
+    let meter = String.sub str len (String.length str - len) in
+    let value = String.sub str 0 len in
+    match meter with
+    | "ns" -> Ok (Int64.of_string value)
+    | "us" -> Ok (Duration.of_us (int_of_string value))
+    | "ms" -> Ok (Duration.of_ms (int_of_string value))
+    | "sec" | "s" -> Ok (Duration.of_sec (int_of_string value))
+    | "min" | "m" -> Ok (Duration.of_min (int_of_string value))
+    | "hour" | "h" -> Ok (Duration.of_hour (int_of_string value))
+    | _ -> error_msgf "Invalid time: %S" str
+  in
+  Arg.conv ~docv:"<time>" (parser, Duration.pp)
+
+let docs_dns = "DOMAIN NAME RESOLUTION SERVICE"
+
+let aaaa_timeout =
+  let doc = "The timeout applied to the IPv6 resolution." in
+  let open Arg in
+  value
+  & opt (some timeout) None
+  & info [ "aaaa-timeout" ] ~doc ~docv:"<time>" ~docs:docs_dns
+
+let connect_delay =
+  let doc =
+    "Time to repeat another connection attempt if the others don't respond."
+  in
+  let open Arg in
+  value
+  & opt (some timeout) None
+  & info [ "connect-delay" ] ~doc ~docv:"<time>" ~docs:docs_dns
+
+let connect_timeout =
+  let doc = "The timeout applied to $(b,connect())." in
+  let open Arg in
+  value
+  & opt (some timeout) None
+  & info [ "connect-timeout" ] ~doc ~docv:"<time>" ~docs:docs_dns
+
+let resolve_timeout =
+  let doc = "The timeout applied to the domain-name resolution." in
+  let open Arg in
+  value
+  & opt (some timeout) None
+  & info [ "resolve-timeout" ] ~doc ~docv:"<time>" ~docs:docs_dns
+
+let resolve_retries =
+  let doc = "The number $(i,N) of attempts to make a connection." in
+  let open Arg in
+  value
+  & opt (some int) None
+  & info [ "resolve-retries" ] ~doc ~docv:"<time>" ~docs:docs_dns
 
 let term_setup_temp = Term.(const setup_temp $ temp)
-let setup_happy_eyeballs () = Bob_happy_eyeballs.create ()
-let term_setup_happy_eyeballs = Term.(const setup_happy_eyeballs $ const ())
+
+let setup_happy_eyeballs aaaa_timeout connect_delay connect_timeout
+    resolve_timeout resolve_retries =
+  let happy_eyeballs =
+    Happy_eyeballs.create ?aaaa_timeout ?connect_delay ?connect_timeout
+      ?resolve_timeout ?resolve_retries
+      (Mtime_clock.elapsed_ns ())
+  in
+  Bob_happy_eyeballs.create ~happy_eyeballs ()
+
+let term_setup_happy_eyeballs =
+  let open Term in
+  const setup_happy_eyeballs $ aaaa_timeout $ connect_delay $ connect_timeout
+  $ resolve_timeout $ resolve_retries
 
 let nameserver_of_string str =
   let ( let* ) = Result.bind in

@@ -6,19 +6,27 @@
 (executable
  (name sched)
  (modules sched)
- (libraries fmt fpath unix))
+ (libraries logs.fmt fmt fpath unix))
 
 (executable
  (name free)
  (modules free)
- (libraries unix))
+ (libraries logs.fmt unix))
+
+(test
+ (name test_handshake)
+ (modules test_handshake)
+ (libraries logs.fmt fmt.tty bob alcotest))
 
 (executable
- (name handshake)
- (modules handshake)
- (libraries logs.fmt fmt.tty bob alcotest))
+ (name test_pack)
+ (modules test_pack)
+ (libraries alcotest bob.stream bob.pack))
 
 (rule
  (alias runtest)
+ (deps
+  (:test test_pack.exe)
+  (glob_files files/*))
  (action
-  (run ./handshake.exe --color=always)))
+  (run %{test} --color=always)))
