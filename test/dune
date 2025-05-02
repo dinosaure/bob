@@ -25,6 +25,8 @@
 
 (rule
  (alias runtest)
- (deps (:test test_pack.exe) (glob_files files/*))
+ (deps
+  (:test test_pack.exe)
+  (glob_files files/*))
  (action
   (run %{test} --color=always)))
