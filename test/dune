@@ -22,3 +22,13 @@
  (alias runtest)
  (action
   (run ./handshake.exe --color=always)))
+
+(executable
+ (name test)
+ (libraries alcotest bob.stream bob.pack))
+
+(rule
+ (alias runtest)
+ (deps (:test test.exe) (glob_files files/*))
+ (action
+  (run %{test} --color=always)))
