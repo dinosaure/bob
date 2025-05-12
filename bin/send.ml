@@ -14,20 +14,20 @@ let compress_with_reporter quiet ~compression ~config store hashes =
   Logs.debug (fun m -> m "Start deltification.");
   let reporter = Fiber.return <.> reporter in
   let stream = Pack.deltify ~reporter ~compression store hashes in
-  let* targets = Stream.Stream.to_list stream in
+  let* targets = Bob_stream.Stream.to_list stream in
   Logs.debug (fun m -> m "Deltification is done.");
   finalise ();
-  Fiber.return (Stream.Stream.of_list targets)
+  Fiber.return (Bob_stream.Stream.of_list targets)
 
-type pack = Stream of Bstr.t Stream.stream | File of Bob_fpath.t
+type pack = Stream of Bstr.t Bob_stream.stream | File of Bob_fpath.t
 
 let emit_with_reporter quiet ?g ?level ~config store
-    (objects : _ Cartonnage.Target.t Stream.stream) =
+    (objects : _ Cartonnage.Target.t Bob_stream.stream) =
   with_reporter ~config quiet
     (make_progress_bar_for_objects ~total:(Pack.length store))
   @@ fun (reporter, finalise) ->
   let ( let* ) = Fiber.bind in
-  let open Stream in
+  let open Bob_stream in
   let path = Temp.random_temporary_path ?g "pack-%s.pack" in
   Logs.debug (fun m -> m "Generate the PACK file: %a" Bob_fpath.pp path);
   let flow =
@@ -53,14 +53,14 @@ let emit_one_with_reporter quiet ?level ~config path =
 let transfer_with_reporter quiet ~config ~identity ~ciphers ~shared_keys
     sockaddr = function
   | Stream stream ->
-      let stream = Stream.(Stream.via Flow.bstr_to_string stream) in
+      let stream = Bob_stream.(Stream.via Flow.bstr_to_string stream) in
       Transfer.transfer ~identity ~ciphers ~shared_keys sockaddr stream
   | File path ->
       let total = (Unix.stat (Bob_fpath.to_string path)).Unix.st_size in
       with_reporter ~config quiet (make_tranfer_bar ~total)
       @@ fun (reporter, finalise) ->
       let open Fiber in
-      let open Stream in
+      let open Bob_stream in
       let bstr =
         Bigarray.Array1.create Bigarray.char Bigarray.c_layout
           Bob_unix.Crypto.max_packet

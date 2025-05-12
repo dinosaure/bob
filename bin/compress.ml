@@ -1,5 +1,5 @@
 open Fiber
-open Stream
+open Bob_stream
 
 let ic_of_file = function
   | None -> assert false (* TODO *)

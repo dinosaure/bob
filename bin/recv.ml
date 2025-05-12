@@ -31,7 +31,7 @@ let ask_password () =
   asking ()
 
 let source_with_reporter quiet ~config ~identity ~ciphers ~shared_keys sockaddr
-    : (string Stream.source, _) result Fiber.t =
+    : (string Bob_stream.source, _) result Fiber.t =
   with_reporter ~config quiet incoming_data @@ fun (reporter, finalise) ->
   Transfer.receive
     ~reporter:(Fiber.return <.> reporter)
@@ -50,7 +50,7 @@ let map (fd, st) ~pos len =
 let collect_and_verify_with_reporter quiet ~config entry path decoder ~src ~off
     leftover =
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let from =
     match leftover with
     | Some leftover when String.length src - off > 0 ->
@@ -104,7 +104,7 @@ let unpack_with_reporter quiet ~config ~total pack destination hash =
 
 let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let ctx =
     let fn value =
       let open Carton.First_pass in
@@ -193,10 +193,10 @@ let extract_one quiet ?g tmp ~offset decoder src off ~leftover destination =
   if Digestif.SHA1.equal hash expected then Fiber.return (Ok ())
   else Fiber.return (Error (msgf "Corrupted file (unexpected hash)"))
 
-let extract_with_reporter quiet ~config ?g (from : string Stream.source)
+let extract_with_reporter quiet ~config ?g (from : string Bob_stream.source)
     destination =
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let tmp = Temp.random_temporary_path ?g "pack-%s.pack" in
   let via = Flow.(save_into tmp << Pack.analyse ignore) in
   Stream.run ~from ~via ~into:Sink.first >>= function

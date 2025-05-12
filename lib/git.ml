@@ -10,12 +10,12 @@ module SHA1 = struct
   let length = digest_size
 
   let _sink_bigstring ?(ctx = empty) () =
-    Stream.Sink.make ~init:(Fiber.always ctx)
+    Bob_stream.Sink.make ~init:(Fiber.always ctx)
       ~push:(fun ctx bstr -> Fiber.return (feed_bigstring ctx bstr))
       ~stop:(Fiber.return <.> get) ()
 
   let sink_string ?(ctx = empty) () =
-    Stream.Sink.make ~init:(Fiber.always ctx)
+    Bob_stream.Sink.make ~init:(Fiber.always ctx)
       ~push:(fun ctx str -> Fiber.return (feed_string ctx str))
       ~stop:(Fiber.return <.> get) ()
 end
@@ -111,7 +111,7 @@ let tree_of_bstr ?path contents =
   in
   let pull = Fiber.return <.> pull in
   let stop = Fiber.ignore in
-  Stream.Source { init; pull; stop }
+  Bob_stream.Source { init; pull; stop }
 
 let hash_of_root ~real_length ~root hash =
   let str =
@@ -160,7 +160,7 @@ let hash_of_directory ~root:_ rstore path =
       entries
   in
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let lst = serialize_directory entries in
   let stream = Stream.of_list lst in
   Stream.to_string stream >>= fun str ->
@@ -171,7 +171,7 @@ let hash_of_directory ~root:_ rstore path =
 
 let hash_of_filename path =
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let len = Unix.(stat (Bob_fpath.to_string path)).Unix.st_size in
   let hdr = Fmt.str "blob %d\000" len in
   let ctx = SHA1.feed_string SHA1.empty hdr in

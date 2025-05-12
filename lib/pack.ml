@@ -70,6 +70,10 @@ let rec full_read fd ba off len =
     | len' when len - len' > 0 -> full_read fd ba (off + len') (len - len')
     | _ -> ()
 
+(* [`C] -> is a file
+   [`B] -> is a directory
+   [`A] -> is a root *)
+
 (* XXX(dinosaure): [mmap] can be a solution here but it seems that the kernel
    does many page-faults if the usage is load many files. [mmap] becomes
    interesting when we load several times the same file at different offsets
@@ -106,7 +110,7 @@ let load_directory rstore path =
       entries
   in
   let open Fiber in
-  let open Stream in
+  let open Bob_stream in
   let lst = Git.serialize_directory entries in
   let stream = Stream.of_list lst in
   Stream.to_string stream >>| fun str -> Carton.Value.of_string ~kind:`B str
@@ -139,7 +143,7 @@ let load : store -> Carton.Uid.t -> Carton.Value.t Fiber.t =
       raise Not_found
 
 let entry_of_file stat _real_path uid =
-  Cartonnage.Entry.make ~kind:`B ~length:stat.Unix.st_size uid ()
+  Cartonnage.Entry.make ~kind:`C ~length:stat.Unix.st_size uid ()
   |> Fiber.return
 
 let entry_of_directory _stat rstore path uid =
@@ -158,7 +162,7 @@ let entry_of_directory _stat rstore path uid =
   let lst = Git.serialize_directory entries in
   let sum acc str = acc + String.length str in
   let length = List.fold_left sum 0 lst in
-  Fiber.return (Cartonnage.Entry.make ~kind:`C ~length uid ())
+  Fiber.return (Cartonnage.Entry.make ~kind:`B ~length uid ())
 
 let entry : store -> Carton.Uid.t -> unit Cartonnage.Entry.t Fiber.t =
  fun store uid ->
@@ -185,13 +189,13 @@ let deltify ~reporter ?(compression = true) store hashes =
   match compression with
   | true ->
       let fn = entry store in
-      let entries = Stream.Stream.map fn hashes in
+      let entries = Bob_stream.Stream.map fn hashes in
       let load uid () = load store uid in
       Bob_carton.delta ~reporter ~load entries
   | false ->
       (* XXX(dinosaure): just generate targets without patch compression. *)
       let fn uid = entry store uid >>| Cartonnage.Target.make in
-      Stream.Stream.map fn hashes
+      Bob_stream.Stream.map fn hashes
 
 let store root =
   let open Fiber in
@@ -215,7 +219,7 @@ let store root =
         Fiber.return (Some hash)
     | _ -> Fiber.return None
   in
-  let open Stream in
+  let open Bob_stream in
   let paths =
     Stream.of_iter @@ fun f ->
     Filesystem.fold ~dotfiles:false ~f:(fun path () -> f path) () root
@@ -329,7 +333,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
     Bstr.blit_from_string str ~src_off:0 bstr ~dst_off:0 ~len;
     Bstr.sub bstr ~off:0 ~len
   in
-  Stream.Stream.of_file ~len ~fn path >>= function
+  Bob_stream.Stream.of_file ~len ~fn path >>= function
   | Error (`Msg msg) as err ->
       Log.err (fun m ->
           m "The file %a does not exists: %s" Bob_fpath.pp path msg);
@@ -341,7 +345,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
       let ctx = ref (SHA1.feed_bigstring SHA1.empty hdr) in
       let q = De.Queue.create 0x1000 in
       let w = De.Lz77.make_window ~bits:15 in
-      let open Stream in
+      let open Bob_stream in
       let hdr_name, name = entry_with_filename ~level path in
       let hdr_file =
         encode_header_of_entry ~kind:_C
@@ -390,7 +394,7 @@ let make_one ?(level = 4) ~reporter ~finalise path =
 
 let inflate_entry ~reporter =
   let open Fiber in
-  let flow (Stream.Sink k) =
+  let flow (Bob_stream.Sink k) =
     let init () = k.init () >>= fun acc -> Fiber.return (`Header, acc) in
     let rec push (state, acc) next =
       match state with
@@ -461,9 +465,9 @@ let inflate_entry ~reporter =
           in
           go acc state
     in
-    Stream.Sink { init; stop; full; push }
+    Bob_stream.Sink { init; stop; full; push }
   in
-  { Stream.flow }
+  { Bob_stream.flow }
 
 let rec until_await_or_peek :
     reporter:(int -> unit Fiber.t) ->
@@ -488,15 +492,25 @@ let rec until_await_or_peek :
       push acc (`End hash, None, De.bigstring_empty, 0) >>= fun acc ->
       Fiber.return (None, None, acc)
   | `Malformed err -> failwith err
+  | `Inflate (_, decoder) ->
+      let off =
+        let max = Bstr.length src in
+        let len = First_pass.src_rem decoder in
+        max - len
+      in
+      let* is_full = full acc in
+      if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
+      else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
+      else until_await_or_peek ~reporter ~full ~push ~acc src decoder
   | `Entry (entry, decoder) -> (
       match entry with
-      | { First_pass.kind = Base (kind, _); offset; size; _ } ->
+      | { First_pass.kind = Base k; offset; size; _ } ->
           Log.debug (fun m ->
               m "[%08x] Got a new entry (base, kind:%a, size:%d byte(s))."
-                offset Carton.Kind.pp kind
+                offset Carton.Kind.pp k
                 (size :> int));
           let status = Carton.Unresolved_base { cursor = offset } in
-          let elt = `Elt (offset, status, `Base (kind, size)) in
+          let elt = `Elt (offset, status, `Base (k, size)) in
           let off =
             let max = Bstr.length src in
             let len = First_pass.src_rem decoder in
@@ -508,7 +522,7 @@ let rec until_await_or_peek :
           if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
           else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
           else until_await_or_peek ~reporter ~full ~push ~acc src decoder
-      | { kind = Ofs { sub; source = s; target }; size; offset; _ } ->
+      | { kind = Ofs { sub; source = s; target; _ }; size; offset; _ } ->
           let status = Carton.Unresolved_node in
           let elt = `Elt (offset, status, `Ofs (sub, s, target, size)) in
           let off =
@@ -522,7 +536,7 @@ let rec until_await_or_peek :
           if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
           else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
           else until_await_or_peek ~reporter ~full ~push ~acc src decoder
-      | { kind = Ref { ptr; source = s; target }; size; offset; _ } ->
+      | { kind = Ref { ptr; source = s; target; _ }; size; offset; _ } ->
           let status = Carton.Unresolved_node in
           let elt = `Elt (offset, status, `Ref (ptr, s, target, size)) in
           let off =
@@ -553,7 +567,7 @@ let analyse ?decoder reporter =
   let open Fiber in
   let open Carton in
   let ( let* ) = Fiber.bind in
-  let flow (Stream.Sink k) =
+  let flow (Bob_stream.Sink k) =
     let init () =
       match decoder with
       | Some decoder ->
@@ -565,10 +579,8 @@ let analyse ?decoder reporter =
           let allocate _ = zw in
           let ref_length = SHA1.length in
           let digest = Git.digest in
-          let identify = Git.identify in
           let decoder =
-            First_pass.decoder ~output ~allocate ~ref_length ~digest ~identify
-              `Manual
+            First_pass.decoder ~output ~allocate ~ref_length ~digest `Manual
           in
           let* acc = k.init () in
           Fiber.return (Some decoder, None, acc)
@@ -615,9 +627,9 @@ let analyse ?decoder reporter =
       | _, _, acc -> k.full acc
     in
     let stop (_, _, acc) = k.stop acc in
-    Stream.Sink { init; stop; full; push }
+    Bob_stream.Sink { init; stop; full; push }
   in
-  { Stream.flow }
+  { Bob_stream.flow }
 
 let full_write ~path fd bstr off len =
   let buf = Bytes.create 0x7ff in
@@ -652,7 +664,7 @@ let rec create_filesystem ~reporter pack =
   in
   let full _ = Fiber.return false in
   let stop _ = Fiber.return () in
-  Stream.Sink { init; push; full; stop }
+  Bob_stream.Sink { init; push; full; stop }
 
 and create_directory ~reporter pack path uid =
   if not (Sys.file_exists (Bob_fpath.to_string path)) then
@@ -666,9 +678,9 @@ and create_directory ~reporter pack path uid =
   let off = 0 and len = Carton.Value.length contents in
   let contents = Carton.Value.bigstring contents in
   let contents = Bstr.sub contents ~off ~len in
-  Stream.Stream.run
+  Bob_stream.Stream.run
     ~from:(Git.tree_of_bstr ~path contents)
-    ~via:Stream.Flow.identity
+    ~via:Bob_stream.Flow.identity
     ~into:(create_filesystem ~reporter pack)
   >>= function
   | (), None -> Fiber.return pack
@@ -744,7 +756,7 @@ let collect s =
         Fiber.return (succ idx, status :: acc)
   in
   let ( let* ) = Fiber.bind in
-  let* number_of_objects, entries = Stream.Source.fold register (0, []) s in
+  let* number_of_objects, entries = Bob_stream.Source.fold register (0, []) s in
   let matrix = Array.of_list (List.rev entries) in
   let where ~cursor = Hashtbl.find where cursor in
   let size ~cursor = !(Hashtbl.find sized cursor) in

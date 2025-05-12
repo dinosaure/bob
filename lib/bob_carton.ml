@@ -90,7 +90,7 @@ let delta ~reporter ~load entries =
     >>= fun () ->
     reporter 1 >>| fun () -> entry
   in
-  Stream.Stream.map fn entries
+  Bob_stream.Stream.map fn entries
 
 type cartonnage = {
   ctx : SHA1.ctx;
@@ -110,7 +110,7 @@ let rec go t ~push encoder acc =
   | `End -> Fiber.return (t, acc)
 
 let pack ~reporter:_ ?level ~length load =
-  let flow (Stream.Sink k) =
+  let flow (Bob_stream.Sink k) =
     let init () =
       Log.debug (fun m -> m "Start to encode a PACK file.");
       let o = Bstr.create 0x1000
@@ -150,9 +150,9 @@ let pack ~reporter:_ ?level ~length load =
       let hash = Bstr.string hash ~off:0 ~len:(String.length hash) in
       k.push acc hash >>= k.stop
     in
-    Stream.Sink { init; stop; full; push }
+    Bob_stream.Sink { init; stop; full; push }
   in
-  { Stream.flow }
+  { Bob_stream.flow }
 
 type base = { value : Carton.Value.t; uid : Carton.Uid.t; depth : int }
 
@@ -258,3 +258,122 @@ let verify ~on t oracle matrix =
   in
   let init _thread = Carton.copy t in
   Fiber.parallel_iter ~f (List.init 4 init) >>= fun _units -> Fiber.return ()
+
+type entry = Base of Carton.Kind.t | Ofs of int | Ref of SHA1.t
+type elt = { offset : int; entry : entry; queue : string Queue.t }
+
+let rec until_await_or_peek :
+    full:('acc -> bool Fiber.t) ->
+    push:('acc -> 'a -> 'acc Fiber.t) ->
+    acc:'acc ->
+    ?queue:string Queue.t ->
+    Bstr.t ->
+    Carton.First_pass.decoder ->
+    (Carton.First_pass.decoder option * (Bstr.t * int) option * 'acc) Fiber.t =
+ fun ~full ~push ~acc ?queue src decoder ->
+  let open Carton in
+  let open Fiber in
+  let ( let* ) = Fiber.bind in
+  let off =
+    let max = Bstr.length src in
+    let len = First_pass.src_rem decoder in
+    max - len
+  in
+  let* is_full = full acc in
+  match First_pass.decode decoder with
+  | `Await decoder -> Fiber.return (Some decoder, None, acc)
+  | `Inflate (str, decoder) ->
+      Stdlib.Option.iter (Queue.push str) queue;
+      let* is_full = full acc in
+      if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
+      else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
+      else until_await_or_peek ~full ~push ~acc ?queue src decoder
+  | `Peek decoder ->
+      let src_len = Carton.First_pass.src_rem decoder in
+      if src_len > 0 then Fiber.return (Some decoder, Some (src, src_len), acc)
+      else Fiber.return (Some decoder, None, acc)
+  | `End hash ->
+      Log.debug (fun m -> m "Hash of the PACK file: %s" (Ohex.encode hash));
+      let hash = SHA1.of_raw_string hash in
+      push acc (`End hash) >>= fun acc -> Fiber.return (None, None, acc)
+  | `Malformed err -> failwith err
+  | `Entry (entry, decoder) -> begin
+      let queue = Queue.create () in
+      match entry with
+      | { First_pass.kind = Base kind; offset; _ } ->
+          let elt = { offset; entry = Base kind; queue } in
+          let* acc = push acc (`Elt elt) in
+          if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
+          else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
+          else until_await_or_peek ~full ~push ~acc ~queue src decoder
+      | { kind = Ofs { sub; _ }; offset; _ } ->
+          let entry = Ofs sub in
+          let elt = `Elt { offset; entry; queue } in
+          let* acc = push acc elt in
+          if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
+          else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
+          else until_await_or_peek ~full ~push ~acc ~queue src decoder
+      | { kind = Ref { ptr; _ }; offset; _ } ->
+          let ptr = SHA1.of_raw_string (ptr :> string) in
+          let entry = Ref ptr in
+          let elt = `Elt { offset; entry; queue } in
+          let* acc = push acc elt in
+          if is_full && off = 0 then Fiber.return (Some decoder, None, acc)
+          else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
+          else until_await_or_peek ~full ~push ~acc ~queue src decoder
+    end
+
+let unpack () =
+  let open Fiber in
+  let open Carton in
+  let ( let* ) = Fiber.bind in
+  let flow (Bob_stream.Sink k) =
+    let init () =
+      let output = De.bigstring_create De.io_buffer_size in
+      let zw = De.make_window ~bits:15 in
+      let allocate _ = zw in
+      let ref_length = SHA1.digest_size in
+      let digest = Git.digest in
+      let decoder =
+        First_pass.decoder ~output ~allocate ~ref_length ~digest `Manual
+      in
+      let* acc = k.init () in
+      Fiber.return (Some decoder, None, acc)
+    in
+    let rec push (decoder, previous, acc) next =
+      let* is_full = k.full acc in
+      if is_full then Fiber.return (decoder, previous, acc)
+      else
+        match (decoder, previous) with
+        | None, _ -> Fiber.return (None, None, acc)
+        | Some decoder, None ->
+            let len = Bstr.length next in
+            let decoder = First_pass.src decoder next 0 len in
+            until_await_or_peek ~full:k.full ~push:k.push ~acc next decoder
+        | Some decoder, Some (current, len) ->
+            let max = Int.min (Bstr.length current - len) (Bstr.length next) in
+            if max > 0 then begin
+              Bstr.blit next ~src_off:0 current ~dst_off:len ~len:max;
+              let decoder = First_pass.src decoder current 0 (len + max) in
+              until_await_or_peek ~full:k.full ~push:k.push ~acc current decoder
+              >>= fun ret ->
+              push ret Bstr.(sub next ~off:max ~len:(length next - max))
+            end
+            else begin
+              let tmp = Bstr.create (len + Bstr.length next) in
+              Bstr.blit current ~src_off:0 tmp ~dst_off:0 ~len;
+              Bstr.blit next ~src_off:0 tmp ~dst_off:len ~len:(Bstr.length next);
+              let decoder =
+                First_pass.src decoder tmp 0 (len + Bstr.length next)
+              in
+              until_await_or_peek ~full:k.full ~push:k.push ~acc tmp decoder
+            end
+    in
+    let full = function
+      | None, _, _ -> Fiber.return true
+      | _, _, acc -> k.full acc
+    in
+    let stop (_, _, acc) = k.stop acc in
+    Bob_stream.Sink { init; stop; full; push }
+  in
+  { Bob_stream.flow }

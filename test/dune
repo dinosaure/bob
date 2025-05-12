@@ -21,12 +21,12 @@
 (executable
  (name test_pack)
  (modules test_pack)
- (libraries alcotest bob.stream bob.pack))
+ (libraries logs.fmt alcotest bob.stream bob.pack))
 
 (rule
  (alias runtest)
  (deps
   (:test test_pack.exe)
-  (glob_files files/*))
+  (source_tree files/))
  (action
   (run %{test} --color=always)))

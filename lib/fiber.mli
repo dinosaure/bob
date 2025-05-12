@@ -160,6 +160,14 @@ module Condition : sig
   val wait : t -> mutex -> unit fiber
 end
 
+module Stream : sig
+  type +'a fiber = 'a t
+  type 'a t
+
+  val get : 'a t -> 'a option fiber
+  val from_queue : 'a Queue.t -> 'a t
+end
+
 val fork : (unit -> 'a t) -> 'a Ivar.t t
 val pure : (unit -> 'a) -> 'a t
 val wait : 'a Ivar.t -> 'a t

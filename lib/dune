@@ -47,9 +47,9 @@
  (libraries bob.std bob.fpath ke bheap logs unix))
 
 (library
- (name stream)
+ (name bob_stream)
  (public_name bob.stream)
- (modules stream)
+ (modules bob_stream)
  (libraries
   bob.qe
   hxd.core
@@ -67,6 +67,12 @@
  (libraries fmt bob.fpath))
 
 (library
+ (name tree)
+ (public_name bob.tree)
+ (modules bob_tree)
+ (libraries unix fmt bob.std bob.fpath))
+
+(library
  (name git)
  (public_name bob.git)
  (modules git)
@@ -76,7 +82,7 @@
  (name bob_carton)
  (public_name bob.carton)
  (modules bob_carton)
- (libraries digestif carton carton.cartonnage bob.stream bob.fiber))
+ (libraries digestif carton carton.cartonnage bob.git bob.stream bob.fiber))
 
 (library
  (name pack)

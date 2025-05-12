@@ -95,7 +95,7 @@ let crypto_of_flow ~reporter ~ciphers ~shared_keys socket =
           | Error err -> Fiber.return (Error (err :> crypto_error))
         end
   in
-  Stream.Sink { init; push; full; stop }
+  Bob_stream.Sink { init; push; full; stop }
 
 let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
     sockaddr stream =
@@ -113,7 +113,7 @@ let transfer ?chunk:_ ?(reporter = Fiber.ignore) ~identity ~ciphers ~shared_keys
   | Error (#Bob_unix.error as err) ->
       Fiber.close socket >>= fun () -> Fiber.return (Error (err :> error))
   | Ok () ->
-      let open Stream in
+      let open Bob_stream in
       let crypto = crypto_of_flow ~reporter ~ciphers ~shared_keys socket in
       Stream.into crypto stream
       >>| reword_error (fun err ->
@@ -143,7 +143,7 @@ let crypto_of_flow ~reporter ~finalise ~ciphers ~shared_keys socket =
     (* TODO(dinosaure): should we close? *)
     Fiber.return ()
   in
-  Stream.Source { init; pull; stop }
+  Bob_stream.Source { init; pull; stop }
 
 let receive ?(reporter = Fiber.ignore) ?(finalise = ignore) ~identity ~ciphers
     ~shared_keys sockaddr =

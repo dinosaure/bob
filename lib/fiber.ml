@@ -83,6 +83,53 @@ module Condition = struct
   let wait q _mutex k = Queue.push k q
 end
 
+module Stream = struct
+  type +'a fiber = 'a t
+  type 'a node = { mutable next : 'a node; mutable data : 'a option }
+
+  type 'a t = {
+    source : unit -> 'a option;
+    close : unit Ivar.t;
+    mutable node : 'a node;
+    last : 'a node ref;
+  }
+
+  let new_node () =
+    let rec node = { next = node; data = None } in
+    node
+
+  let enqueue e last =
+    let node = !last and new_last = new_node () in
+    node.data <- e;
+    node.next <- new_last;
+    last := new_last
+
+  let enqueue e t = enqueue e t.last
+
+  let feed t =
+    let x = t.source () in
+    enqueue x t;
+    if x = None then Ivar.fill t.close ();
+    return ()
+
+  let consume t node = if node == t.node then t.node <- node.next
+
+  let rec get_rec t node =
+    if node == !(t.last) then feed t >>= fun () -> get_rec t node
+    else begin
+      if node.data <> None then consume t node;
+      return node.data
+    end
+
+  let get t = get_rec t t.node
+
+  let from_queue q =
+    let node = new_node () in
+    let close = Ivar.create () in
+    let source () = Queue.take_opt q in
+    { source; close; node; last = ref node }
+end
+
 let never _k = ()
 let wait = Ivar.read
 

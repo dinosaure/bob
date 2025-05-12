@@ -1,6 +1,6 @@
 type store
 
-val store : Bob_fpath.t -> (Carton.Uid.t Stream.stream * store) Fiber.t
+val store : Bob_fpath.t -> (Carton.Uid.t Bob_stream.stream * store) Fiber.t
 (** [store path] aggregates all files and directories from the given path. It
     returns a [store] and a stream of hash of these objects. *)
 
@@ -11,8 +11,8 @@ val deltify :
   reporter:(int -> unit Fiber.t) ->
   ?compression:bool ->
   store ->
-  Carton.Uid.t Stream.stream ->
-  unit Cartonnage.Target.t Stream.stream
+  Carton.Uid.t Bob_stream.stream ->
+  unit Cartonnage.Target.t Bob_stream.stream
 (** [deltify ~reporter ?compression store hashes] tries to compress with patch
     objects together. If [compression] is true (default), it calculates the
     patch between the objects and chooses the best. Otherwise, it generates a
@@ -22,7 +22,7 @@ val make :
   ?level:int ->
   reporter:(unit -> unit Fiber.t) ->
   store ->
-  (unit Cartonnage.Target.t, Bstr.t) Stream.flow
+  (unit Cartonnage.Target.t, Bstr.t) Bob_stream.flow
 (** [make ?level ~reporter store] returns a {i flow} which transform a list of
     objects into a series of [string]. [level] lets the user to choose the
     [zlib] level compression (between [0] and [9]). *)
@@ -32,13 +32,13 @@ val make_one :
   reporter:(int -> unit Fiber.t) ->
   finalise:(unit -> unit) ->
   Bob_fpath.t ->
-  (Bstr.t Stream.stream, [> `Msg of string ]) result Fiber.t
+  (Bstr.t Bob_stream.stream, [> `Msg of string ]) result Fiber.t
 (** [make ?level ~reporter path] returns the path of the generated PACK file of
     the given file. [level] lets the user to choose the [zlib] level compression
     (between [0] and [9]). *)
 
 val inflate_entry :
-  reporter:(int -> unit Fiber.t) -> (Bstr.t, Bstr.t) Stream.flow
+  reporter:(int -> unit Fiber.t) -> (Bstr.t, Bstr.t) Bob_stream.flow
 (** [inflate_entry ~reporter] creates a flow (usable with {!Stream.run} for
     instance) which deflates an entry (including its header). The given input (a
     {!Stream.source} or a {!Stream.stream}) must start at the beginning of the
@@ -61,9 +61,9 @@ type elt = [ `End of string | `Elt of entry ]
 val analyse :
   ?decoder:decoder ->
   (int -> unit Fiber.t) ->
-  (Bstr.t, elt * decoder option * Bstr.t * int) Stream.flow
+  (Bstr.t, elt * decoder option * Bstr.t * int) Bob_stream.flow
 
-val collect : entry Stream.source -> (status array * Carton.oracle) Fiber.t
+val collect : entry Bob_stream.source -> (status array * Carton.oracle) Fiber.t
 
 val verify :
   ?reporter:(unit -> unit) ->

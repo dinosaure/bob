@@ -20,7 +20,7 @@ val transfer :
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
   Unix.sockaddr ->
-  string Stream.stream ->
+  string Bob_stream.stream ->
   (unit, error) result Fiber.t
 
 val receive :
@@ -30,4 +30,4 @@ val receive :
   ciphers:Spoke.cipher * Spoke.cipher ->
   shared_keys:string * string ->
   Unix.sockaddr ->
-  (string Stream.source, error) result Fiber.t
+  (string Bob_stream.source, error) result Fiber.t
