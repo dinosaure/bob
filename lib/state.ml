@@ -109,9 +109,9 @@ let src = Logs.Src.create "state"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-type relay = |
-and client = |
-and server = |
+type relay = private [`relay]
+and client = private [`client]
+and server = private [`server]
 
 type ('a, 'b) peer =
   | Server : (server, client) peer
