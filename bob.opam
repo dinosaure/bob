@@ -1,5 +1,4 @@
 opam-version: "2.0"
-name:         "bob"
 maintainer:   "Romain Calascibetta <romain.calascibetta@gmail.com>"
 authors:      "Romain Calascibetta <romain.calascibetta@gmail.com>"
 homepage:     "https://github.com/dinosaure/bob"
@@ -30,7 +29,7 @@ depends: [
   "x509"              {>= "0.16.0"}
   "psq"
   "tls"               {>= "0.17.4"}
-  "carton"            {>= "1.0.0"}
+  "carton"            {>= "1.1.0"}
   "progress"          {>= "0.2.1"}
   "dns-client"        {>= "6.4.0"}
   "happy-eyeballs"    {>= "0.6.0"}
@@ -38,12 +37,8 @@ depends: [
   "eqaf"              {>= "0.10"}
   "ke"                {>= "0.6"}
   "alcotest"          {with-test}
-  "spoke"             {>= "0.0.3"}
+  "spoke"             {>= "0.0.4"}
   "bstr"
-]
-
-pin-depends: [
-  [ "spoke.dev" "git+https://github.com/dinosaure/spoke.git#eda61bb0c2671f3eaaac9f0f0ffa8423b3e63c98" ]
 ]
 
 available: arch != "x86_32"

@@ -478,6 +478,7 @@ let rec until_await_or_peek :
   let open Fiber in
   let ( let* ) = Fiber.bind in
   match First_pass.decode decoder with
+  | `Inflate _ -> assert false (* TODO *)
   | `Await decoder -> Fiber.return (Some decoder, None, acc)
   | `Peek decoder ->
       let src_len = Carton.First_pass.src_rem decoder in
@@ -490,7 +491,7 @@ let rec until_await_or_peek :
   | `Malformed err -> failwith err
   | `Entry (entry, decoder) -> (
       match entry with
-      | { First_pass.kind = Base (kind, _); offset; size; _ } ->
+      | { First_pass.kind = Base kind; offset; size; _ } ->
           Log.debug (fun m ->
               m "[%08x] Got a new entry (base, kind:%a, size:%d byte(s))."
                 offset Carton.Kind.pp kind
@@ -509,7 +510,7 @@ let rec until_await_or_peek :
           else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
           else until_await_or_peek ~reporter ~full ~push ~acc src decoder
       | { kind = Ofs { sub; source = s; target }; size; offset; _ } ->
-          let status = Carton.Unresolved_node in
+          let status = Carton.Unresolved_node {cursor = 0} in
           let elt = `Elt (offset, status, `Ofs (sub, s, target, size)) in
           let off =
             let max = Bstr.length src in
@@ -523,7 +524,7 @@ let rec until_await_or_peek :
           else if is_full then Fiber.return (Some decoder, Some (src, off), acc)
           else until_await_or_peek ~reporter ~full ~push ~acc src decoder
       | { kind = Ref { ptr; source = s; target }; size; offset; _ } ->
-          let status = Carton.Unresolved_node in
+          let status = Carton.Unresolved_node {cursor = 0} in
           let elt = `Elt (offset, status, `Ref (ptr, s, target, size)) in
           let off =
             let max = Bstr.length src in
@@ -565,9 +566,8 @@ let analyse ?decoder reporter =
           let allocate _ = zw in
           let ref_length = SHA1.length in
           let digest = Git.digest in
-          let identify = Git.identify in
           let decoder =
-            First_pass.decoder ~output ~allocate ~ref_length ~digest ~identify
+            First_pass.decoder ~output ~allocate ~ref_length ~digest
               `Manual
           in
           let* acc = k.init () in
@@ -769,6 +769,7 @@ let collect s =
       is_base;
       number_of_objects;
       hash = String.empty;
+      cursor = (fun ~pos -> pos);
     }
   in
   Fiber.return (matrix, oracle)
@@ -822,7 +823,7 @@ let unpack path status =
         in
         Array.fold_left record (Hashtbl.create 0x100) status
       in
-      let index uid = Hashtbl.find id uid in
+      let index uid = Carton.Local (Hashtbl.find id uid) in
       let cache = Cachet.make ~map (fd, st) in
       let z = De.bigstring_create 0x7ff in
       let allocate bits = De.make_window ~bits in
